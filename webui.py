@@ -132,9 +132,12 @@ def api_chat():
 
     def gen():
         yield "retry: 1500\n\n"
+        # overall stream cap; individual tools are capped at 120s each
+        # (TOOL_TIMEOUT in ai_agent/tools/base.py) so this only fires
+        # when something is truly stuck — and the frontend releases busy.
         while True:
             try:
-                event = q.get(timeout=300)
+                event = q.get(timeout=360)
             except queue.Empty:
                 yield "data: {\"type\": \"error\", \"content\": \"[timed out]\"}\n\n"
                 break

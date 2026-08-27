@@ -159,6 +159,18 @@ function sendMessage(text) {
   let finalAdded = false;
   let preview = null; // last "llm" bubble — upgraded to final instead of duplicating
 
+  // clean end of stream: clear "working…", reset busy so the next
+  // message can be sent (manual es.close() does NOT fire onerror)
+  function finish() {
+    es.close();
+    typing.remove();
+    busy = false;
+    $("#send").disabled = false;
+    $("#chat-hint").textContent = "";
+    scrollDown();
+    refreshStatus();
+  }
+
   es.onmessage = (ev) => {
     let e;
     try { e = JSON.parse(ev.data); } catch { return; }
@@ -197,29 +209,24 @@ function sendMessage(text) {
       }
       finalAdded = true;
       preview = null;
-      es.close(); // stream done — no EventSource auto-reconnect / re-run of the same prompt
+      finish(); // stream done — clear working…, reset busy, no auto-reconnect
     } else if (e.type === "error") {
       typing.remove();
       if (!finalAdded) {
         addAssistantBubble("⚠️ " + (e.content || "error"));
         finalAdded = true;
       }
-      es.close();
+      finish(); // e.g. server [timed out] — must also release busy
     }
     scrollDown();
   };
 
   es.onerror = () => {
-    es.close();
-    typing.remove();
-    busy = false;
-    $("#send").disabled = false;
-    $("#chat-hint").textContent = "";
     if (!finalAdded) {
       addAssistantBubble("⚠️ connection closed");
+      finalAdded = true;
     }
-    scrollDown();
-    refreshStatus();
+    finish(); // network drop — release busy so the user can retry
   };
 }
 

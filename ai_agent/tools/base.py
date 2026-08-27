@@ -1,6 +1,7 @@
 """Tool base class and shared helpers."""
 
 import json
+import threading
 
 
 class Tool:
@@ -29,8 +30,17 @@ def truncate(text, limit=6000):
     return text[:limit] + "\n...[truncated, %d more chars]" % (len(text) - limit)
 
 
-def execute_tool(tool_by_name, tool_call):
-    """Run one tool call; returns the string result."""
+TOOL_TIMEOUT = 120  # hard cap per tool call (seconds)
+
+
+def execute_tool(tool_by_name, tool_call, timeout=TOOL_TIMEOUT):
+    """Run one tool call; returns the string result.
+
+    The tool runs in a daemon thread so a hung tool can never block the
+    agent (and the UI's "working…" state) forever: after `timeout`
+    seconds it reports a timeout and the agent loop moves on to the
+    next step. The thread keeps running in the background if needed.
+    """
     try:
         fn_name = tool_call["function"]["name"]
         raw_args = tool_call["function"].get("arguments") or "{}"
@@ -45,9 +55,21 @@ def execute_tool(tool_by_name, tool_call):
     tool = tool_by_name.get(fn_name)
     if tool is None:
         return "Unknown tool: %s" % fn_name
-    try:
-        return truncate(tool.func(**args))
-    except TypeError as exc:
-        return "Bad arguments for %s: %s" % (fn_name, exc)
-    except Exception as exc:
-        return "%s error: %s" % (fn_name, exc)
+
+    box = {}
+
+    def _run():
+        try:
+            box["out"] = truncate(tool.func(**args))
+        except TypeError as exc:
+            box["out"] = "Bad arguments for %s: %s" % (fn_name, exc)
+        except Exception as exc:
+            box["out"] = "%s error: %s" % (fn_name, exc)
+
+    worker = threading.Thread(target=_run, daemon=True)
+    worker.start()
+    worker.join(timeout=timeout)
+    if worker.is_alive():
+        return ("[%s timed out after %ds — it may still be running "
+                "in the background]" % (fn_name, timeout))
+    return box.get("out", "(no output)")
