@@ -150,13 +150,14 @@ function sendMessage(text) {
   inputBox.value = "";
   autosize();
   addUserMsg(message);
-  const typing = addTyping();
+  let typing = addTyping();
   busy = true;
   $("#send").disabled = true;
   $("#chat-hint").textContent = "working…";
 
   const es = new EventSource("/api/chat?message=" + encodeURIComponent(message));
   let finalAdded = false;
+  let preview = null; // last "llm" bubble — upgraded to final instead of duplicating
 
   es.onmessage = (ev) => {
     let e;
@@ -167,6 +168,7 @@ function sendMessage(text) {
       typing.remove();
       const b = addAssistantBubble(e.content || "");
       b.classList.add("thinking");
+      preview = { bubble: b, text: e.content || "" };
     } else if (e.type === "tool_call") {
       typing.remove();
       addToolCard(e.name, typeof e.arguments === "string" ? e.arguments : JSON.stringify(e.arguments || ""));
@@ -181,15 +183,28 @@ function sendMessage(text) {
       }
       typing = addTyping();
     } else if (e.type === "final") {
+      // one prompt -> exactly one response bubble
       typing.remove();
-      if (!finalAdded) {
-        addAssistantBubble(e.content || "");
-        finalAdded = true;
+      const content = e.content || "";
+      if (preview && preview.text.trim() === content.trim() && preview.bubble.isConnected) {
+        // "thinking" bubble already shows the final answer -> upgrade it, no duplicate
+        const bubble = preview.bubble.querySelector(".bubble");
+        bubble.innerHTML = "";
+        mdToDom(content, bubble);
+        preview.bubble.classList.remove("thinking");
+      } else if (!finalAdded) {
+        addAssistantBubble(content);
       }
+      finalAdded = true;
+      preview = null;
+      es.close(); // stream done — no EventSource auto-reconnect / re-run of the same prompt
     } else if (e.type === "error") {
       typing.remove();
-      addAssistantBubble("⚠️ " + (e.content || "error"));
-      finalAdded = true;
+      if (!finalAdded) {
+        addAssistantBubble("⚠️ " + (e.content || "error"));
+        finalAdded = true;
+      }
+      es.close();
     }
     scrollDown();
   };
