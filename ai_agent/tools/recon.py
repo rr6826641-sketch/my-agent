@@ -25,29 +25,59 @@ DEFAULT_WORDLIST = [
 
 
 def tool_subdomain_enum(domain, max_results=80):
-    """Enumerate subdomains via Certificate Transparency (crt.sh)."""
+    """Enumerate subdomains via Certificate Transparency (crt.sh) with a
+    HackerTarget hostsearch fallback if crt.sh is down or rate-limited."""
     domain = domain.strip().lower()
+    subs = set()
+    errors = []
+
+    # Primary: crt.sh (JSON)
     try:
         resp = requests.get(
-            "https://crt.sh/?q=%25.%s&output=json" % domain,
+            f"https://crt.sh/?q=%25.{domain}&output=json",
             headers={"User-Agent": USER_AGENT}, timeout=40)
         if resp.status_code != 200:
-            return "subdomain_enum: crt.sh returned status %d" % resp.status_code
-        data = resp.json()
+            errors.append("crt.sh status %d" % resp.status_code)
+        else:
+            try:
+                data = resp.json()
+            except ValueError:
+                data = None
+                errors.append("crt.sh returned invalid JSON")
+            if data is not None:
+                for entry in data:
+                    names = entry.get("name_value", "")
+                    for n in names.split("\n"):
+                        n = n.strip().strip("*").strip().lower()
+                        if n and n.endswith("." + domain):
+                            subs.add(n)
     except requests.exceptions.RequestException as exc:
-        return "subdomain_enum error: %s" % exc
-    except ValueError:
-        return "subdomain_enum: crt.sh returned invalid JSON"
-    subs = set()
-    for entry in data:
-        names = entry.get("name_value", "")
-        for n in names.split("\n"):
-            n = n.strip().strip("*").strip().lower()
-            if n and n.endswith("." + domain):
-                subs.add(n)
-    subs = sorted(subs)
+        errors.append("crt.sh request failed: %s" % exc)
+
+    # Fallback: HackerTarget hostsearch
     if not subs:
+        try:
+            resp = requests.get(
+                "https://api.hackertarget.com/hostsearch/?q=%s" % domain,
+                headers={"User-Agent": USER_AGENT}, timeout=30)
+            if resp.status_code != 200:
+                errors.append("hackertarget status %d" % resp.status_code)
+            elif not resp.text.strip() or "error" in resp.text.lower():
+                errors.append("hackertarget: %s" % resp.text.strip()[:100])
+            else:
+                for line in resp.text.splitlines():
+                    host = line.split(",")[0].strip().lower()
+                    if host and host.endswith("." + domain):
+                        subs.add(host)
+        except requests.exceptions.RequestException as exc:
+            errors.append("hackertarget request failed: %s" % exc)
+
+    if not subs:
+        if errors:
+            return "subdomain_enum: could not enumerate %s (%s)" \
+                % (domain, "; ".join(errors[:2]))
         return "(no subdomains found for %s)" % domain
+    subs = sorted(subs)
     out = ["%d unique subdomains found for %s:" % (len(subs), domain)]
     out += ["  " + s for s in subs[:max_results]]
     if len(subs) > max_results:
@@ -55,12 +85,19 @@ def tool_subdomain_enum(domain, max_results=80):
     return "\n".join(out)
 
 
-def tool_dir_fuzz(base_url, wordlist=None, max_results=40, timeout=8,
-                  threads=12, method="GET"):
+def tool_dir_fuzz(base_url, wordlist=None, wordlist_path=None, max_results=40,
+                  timeout=8, threads=12, method="GET"):
     """Brute-force common paths on a web server. Provide your own comma-separated
-    wordlist to override the default one."""
+    wordlist (wordlist) or a wordlist file path (wordlist_path) to override the
+    default one."""
     base = base_url.rstrip("/")
     words = wordlist or DEFAULT_WORDLIST
+    if wordlist_path:
+        try:
+            with open(wordlist_path, "r", encoding="utf-8", errors="replace") as f:
+                words = [ln.strip() for ln in f if ln.strip()]
+        except Exception as exc:
+            return "dir_fuzz: cannot read wordlist file %s: %s" % (wordlist_path, exc)
     if isinstance(words, str):
         words = [w.strip() for w in words.split(",") if w.strip()]
     if not words:

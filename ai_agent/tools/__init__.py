@@ -324,14 +324,16 @@ def create_tools(memory, confirm_terminal=True, spawn_fn=None, allow_spawn=True)
               "required": ["domain"]},
              lambda domain="": tool_subdomain_enum(domain)),
         Tool("dir_fuzz", "Brute-force common paths on a web server. Optionally "
-             "pass your own comma-separated wordlist.",
+             "pass your own comma-separated wordlist or a wordlist file path.",
              {"type": "object",
               "properties": {"base_url": _str_prop("e.g. https://example.com"),
                              "wordlist": _str_prop("comma-separated paths (optional)"),
+                             "wordlist_path": _str_prop("path to a wordlist file (optional)"),
                              "max_results": {"type": "integer", "default": 40}},
               "required": ["base_url"]},
-             lambda base_url="", wordlist="", max_results=40:
-                 tool_dir_fuzz(base_url, wordlist or None, int(max_results or 40))),
+             lambda base_url="", wordlist="", wordlist_path="", max_results=40:
+                 tool_dir_fuzz(base_url, wordlist or None, wordlist_path or None,
+                               int(max_results or 40))),
         Tool("cve_lookup", "Search known CVEs by product/keyword/version.",
              {"type": "object",
               "properties": {"query": _str_prop("e.g. 'nginx 1.18' or 'wordpress'")},
