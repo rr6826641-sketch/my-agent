@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Agent — Web UI</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- ======================= SIDEBAR ======================= -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">⚡</div>
+      <div class="brand-text">
+        <h1>AI AGENT</h1>
+        <span id="brand-sub">local · private</span>
+      </div>
+    </div>
+
+    <button class="btn-new" id="btn-new">+ New Chat</button>
+
+    <nav class="nav">
+      <button class="nav-item active" data-view="chat">💬 Chat</button>
+      <button class="nav-item" data-view="tools">🛠️ Tools <span class="badge" id="badge-tools">0</span></button>
+      <button class="nav-item" data-view="memory">🧠 Memory <span class="badge" id="badge-memory">0</span></button>
+      <button class="nav-item" data-view="settings">⚙️ Settings</button>
+      <button class="nav-item" data-view="system">🖥️ System</button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="status-line">
+        <span class="dot" id="dot-mode"></span>
+        <span id="status-mode">loading…</span>
+      </div>
+      <div class="status-sub" id="status-model"></div>
+    </div>
+  </aside>
+
+  <!-- ======================= MAIN ======================= -->
+  <main class="main">
+
+    <!-- ---------- CHAT VIEW ---------- -->
+    <section class="view active" id="view-chat">
+      <div class="chat-header">
+        <div>
+          <h2>Chat</h2>
+          <p id="chat-hint">Ask anything — the agent uses 59 tools to get things done.</p>
+        </div>
+        <div class="header-actions">
+          <span class="pill" id="pill-mode">—</span>
+        </div>
+      </div>
+
+      <div class="chat-log" id="chat-log">
+        <div class="welcome">
+          <div class="welcome-icon">🤖</div>
+          <h3>AI Agent ready</h3>
+          <p>I can run terminal commands, scan networks, fuzz web apps, search the web, manage files and remember things across sessions.</p>
+          <div class="chips" id="chips">
+            <button class="chip" data-msg="list files in current folder">📁 list files</button>
+            <button class="chip" data-msg="port scan 127.0.0.1">🔎 port scan 127.0.0.1</button>
+            <button class="chip" data-msg="system info">🖥️ system info</button>
+            <button class="chip" data-msg="subdomain_enum example.com">🌐 subdomains of example.com</button>
+            <button class="chip" data-msg="what tools do you have?">🛠️ what tools do you have?</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="composer">
+        <textarea id="input" rows="1" placeholder="Message the agent… (Enter to send, Shift+Enter for newline)"></textarea>
+        <button class="btn-send" id="send" title="Send">➤</button>
+      </div>
+    </section>
+
+    <!-- ---------- TOOLS VIEW ---------- -->
+    <section class="view" id="view-tools">
+      <div class="chat-header">
+        <div>
+          <h2>Tool Catalog</h2>
+          <p id="tools-count">—</p>
+        </div>
+      </div>
+      <div class="tool-search"><input type="text" id="tool-search" placeholder="Search tools…"></div>
+      <div class="tool-grid" id="tool-grid"></div>
+    </section>
+
+    <!-- ---------- MEMORY VIEW ---------- -->
+    <section class="view" id="view-memory">
+      <div class="chat-header">
+        <div>
+          <h2>Persistent Memory</h2>
+          <p>Facts stored in memory.json — available in every session.</p>
+        </div>
+      </div>
+      <div class="memory-add">
+        <input type="text" id="mem-key" placeholder="key, e.g. target-scope">
+        <input type="text" id="mem-text" placeholder="value, e.g. 10.10.10.5 is in scope">
+        <button class="btn-send" id="mem-add" title="Save">＋</button>
+      </div>
+      <div class="memory-list" id="memory-list"></div>
+    </section>
+
+    <!-- ---------- SETTINGS VIEW ---------- -->
+    <section class="view" id="view-settings">
+      <div class="chat-header">
+        <div>
+          <h2>Settings</h2>
+          <p>Connect any OpenAI-compatible model. Saved to config.json.</p>
+        </div>
+      </div>
+      <div class="settings-card">
+        <label>API Key
+          <input type="password" id="set-key" placeholder="sk-…">
+        </label>
+        <label>Base URL
+          <input type="text" id="set-url" placeholder="https://api.openai.com/v1">
+          <small>OpenAI / OpenRouter / Groq / Ollama (http://localhost:11434/v1) / LM Studio</small>
+        </label>
+        <label>Model
+          <input type="text" id="set-model" placeholder="gpt-4o-mini">
+        </label>
+        <label class="check">
+          <input type="checkbox" id="set-mock"> Mock mode (built-in test LLM, no key needed)
+        </label>
+        <label>Max iterations
+          <input type="number" id="set-iter" min="1" max="100" value="12">
+        </label>
+        <div class="row">
+          <button class="btn-primary" id="set-save">Save &amp; Reload Agent</button>
+          <span class="save-msg" id="set-msg"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- SYSTEM VIEW ---------- -->
+    <section class="view" id="view-system">
+      <div class="chat-header">
+        <div>
+          <h2>System Info</h2>
+          <p>Host information as seen by the agent.</p>
+        </div>
+        <button class="btn-primary" id="sys-refresh">⟳ Refresh</button>
+      </div>
+      <pre class="sys-box" id="sys-box">loading…</pre>
+    </section>
+
+  </main>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

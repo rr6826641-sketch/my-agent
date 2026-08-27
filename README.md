@@ -1,0 +1,337 @@
+# 🤖 AI Agent — Aapka Apna "Perfect" AI Agent Framework
+
+Ye ek complete AI agent hai jo **sochta hai, tools use karta hai, aur kaam karta hai** — bilkul HackerAI jaise. Aap ise apni machine par chala sakte ho, kisi bhi OpenAI-compatible LLM ke saath jod sakte ho, aur apne khud ke tools add kar sakte ho.
+
+**Total 59 built-in tools** — terminal, files, web, network, recon, code, memory, sub-agents, aur complete pentest arsenal wrappers (nmap, sqlmap, nikto, nuclei, ffuf, gobuster, subfinder, httpx, curl, JWT).
+
+**Web UI included** — dark hacker-theme dashboard (chat + streaming tool calls, tools catalog, memory manager, settings, system info). Chalao: double-click `start_ui.bat` → browser mein http://127.0.0.1:8080
+
+---
+
+## ✨ Features
+
+| Capability | Kaise |
+|---|---|
+| 🧠 LLM Reasoning | Kisi bhi OpenAI-compatible model ke saath kaam karta hai (OpenAI, OpenRouter, Groq, Ollama, LM Studio, vLLM...) |
+| 🔁 Agent Loop | Think → Act → Observe — tool call karta hai, result dekhta hai, phir aage badhta hai |
+| 💻 Terminal Access | Commands chala sakta hai, output parh kar jawab deta hai |
+| 📁 File Tools | Files padhna, likhna, search, grep, hash, archive, diff, PDF/image info |
+| 🌐 Web Tools | Web search (bina API key), page fetch, headers audit, tech detect, link extract |
+| 🧠 Persistent Memory | Facts yaad rakhta hai `memory.json` mein — naye session mein bhi |
+| 👥 Sub-Agents | Kaam ke liye child agents spawn karta hai (depth limit ke saath) |
+| 🌍 Network Tools | DNS, port scan, whois, geoip, SSL certs, ping — sab pure Python (nmap/dig ki zaroorat nahi) |
+| 🎯 Recon Tools | Subdomain enum, dir fuzz, CVE lookup, wordlist gen |
+| 🛡️ Security | Interactive mode mein terminal commands se pehle confirmation maangta hai |
+| 🗣️ Language-Aware | Jis language mein user likhe, usi mein jawab deta hai |
+| 🖥️ Web UI | Chat dashboard — streaming tool calls live dekho, tools/memory/settings manage karo |
+| 🛠️ Pentest Arsenal | nmap, sqlmap, nikto, nuclei, ffuf, gobuster, subfinder, httpx, curl, JWT decode — install hain toh use karta hai, nahi toh install hint deta hai |
+
+---
+
+## 🚀 Quick Start (Windows)
+
+```bash
+# 1. Project folder mein jao
+cd E:\HackerAI\my-agent
+
+# 2. Dependency install karo (sirf requests)
+py -3 -m pip install -r requirements.txt
+
+# 3. Bina API key test karo (mock mode)
+py -3 agent.py --mock --auto
+
+# 4. Real LLM ke saath chalao
+py -3 agent.py --api-key sk-XXXX --model gpt-4o
+```
+
+> Agar `python`/`py` command kaam na karti ho toh ye full path use karo (is laptop par):
+> ```bash
+> "C:\Users\GLOBAL IT STORE\AppData\Local\Python\bin\python.exe" agent.py --mock --auto
+> ```
+
+### Web UI (recommended)
+
+```bash
+# Launcher se (double-click):
+start_ui.bat
+
+# Ya manually:
+py -3 webui.py --port 8080
+# Browser: http://127.0.0.1:8080
+```
+
+Web UI features:
+- **Chat** — SSE streaming, har tool call live dikhta hai (start → tool_call → tool_result → final)
+- **Tools** — saare 59 tools ki catalog + parameters
+- **Memory** — persistent memory add/delete karo
+- **Settings** — API key/base_url/model/mock mode browser se save karo (config.json mein)
+- **System** — OS, IPs, disk info
+
+### Mock mode (test ke liye — koi API key nahi chahiye)
+
+Mock mode mein ye command language samajh aati hai:
+
+```bash
+py -3 agent.py --mock --auto --once "run echo hello"
+py -3 agent.py --mock --auto --once "list files ."
+py -3 agent.py --mock --auto --once "read agent.py"
+py -3 agent.py --mock --auto --once "write test.txt:hello world"
+py -3 agent.py --mock --auto --once "remember project:my-project"
+py -3 agent.py --mock --auto --once "recall"
+py -3 agent.py --mock --auto --once "spawn list files"
+py -3 agent.py --mock --auto --once "search python 3.14 release date"
+py -3 agent.py --mock --auto --once "fetch https://example.com"
+py -3 agent.py --mock --auto --once "system info"
+py -3 agent.py --mock --auto --once "list tools"
+py -3 agent.py --mock --auto --once "dns example.com"
+py -3 agent.py --mock --auto --once "port scan 127.0.0.1"
+py -3 agent.py --mock --auto --once "password 20"
+py -3 agent.py --mock --auto --once "hash hello world"
+```
+
+---
+
+## 🔌 Real LLM se jodo (3 tareeqe)
+
+**Tareeqa 1 — Command line flags:**
+```bash
+py -3 agent.py --api-key sk-xxx --base-url https://api.openai.com/v1 --model gpt-4o
+```
+
+**Tareeqa 2 — `.env` file (recommended):**
+```bash
+copy .env.example .env
+# phir .env mein apni values daalo
+```
+
+**Tareeqa 3 — `config.json`:**
+```json
+{
+  "api_key": "sk-xxx",
+  "base_url": "https://api.openai.com/v1",
+  "model": "gpt-4o"
+}
+```
+
+### Free/local options
+
+| Provider | base_url | model example |
+|---|---|---|
+| OpenAI | `https://api.openai.com/v1` | `gpt-4o` |
+| OpenRouter | `https://openrouter.ai/api/v1` | `openai/gpt-4o` |
+| Groq (free) | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` |
+| Ollama (local, free) | `http://localhost:11434/v1` | `llama3` |
+| LM Studio (local) | `http://localhost:1234/v1` | koi bhi loaded model |
+
+---
+
+## 🛠️ 59 Built-in Tools
+
+### Core
+| Tool | Kya karta hai |
+|---|---|
+| `run_terminal` | Shell command chalao aur output lo |
+| `read_file` | Text file parho |
+| `write_file` | File likho (create/overwrite) |
+| `list_files` | Directory list karo |
+| `web_search` | DuckDuckGo se search (bina API key) |
+| `open_url` | Webpage fetch karke parho |
+| `remember` | Memory mein fact save karo |
+| `recall` | Memory se facts nikalo |
+| `spawn_agent` | Child agent spawn karo |
+| `list_tools` | Saare tools ki list |
+
+### System
+| Tool | Kya karta hai |
+|---|---|
+| `system_info` | OS, CPU, user, Python info |
+| `current_time` | Local/UTC time |
+| `process_list` | Chalti processes (filter ke saath) |
+| `disk_usage` | Disk space (path ya all drives) |
+| `ip_info` | IP addresses + gateway |
+
+### Files & Data
+| Tool | Kya karta hai |
+|---|---|
+| `search_files` | Name se files dhoondo |
+| `grep_files` | Files ke andar text dhoondo (regex) |
+| `file_info` | File metadata, magic bytes |
+| `hash_file` | MD5/SHA1/SHA256/SHA512 |
+| `json_format` | JSON validate + pretty-print |
+| `csv_preview` | CSV preview |
+| `create_archive` | Zip banao |
+| `extract_archive` | Zip/tar extract karo |
+| `diff_text` | Two texts/files ka diff |
+| `pdf_info` | PDF info (bina pypdf) |
+| `image_info` | Image dimensions (PNG/JPEG/GIF/WebP/BMP) |
+
+### Web
+| Tool | Kya karta hai |
+|---|---|
+| `http_request` | Custom HTTP request (GET/POST/HEAD...) |
+| `check_headers` | Security headers audit (HSTS, CSP...) |
+| `robots_txt` | robots.txt fetch karo |
+| `extract_links` | Page ke links nikalo |
+| `tech_detect` | Server/CMS/framework detect karo |
+| `url_status` | Multiple URLs ke status codes |
+
+### Network
+| Tool | Kya karta hai |
+|---|---|
+| `dns_lookup` | A/AAAA/CNAME/MX/NS/TXT records |
+| `reverse_dns` | PTR lookup |
+| `port_scan` | TCP connect scan + banner grab (pure Python, nmap nahi chahiye) |
+| `whois` | RDAP-based registration info |
+| `geoip` | IP location, ISP, ASN |
+| `ssl_info` | TLS certificate details (issuer, expiry, SANs) |
+| `ping_host` | ICMP ping (system ping) |
+
+### Recon
+| Tool | Kya karta hai |
+|---|---|
+| `subdomain_enum` | Certificate Transparency (crt.sh) se subdomains |
+| `dir_fuzz` | Common paths brute-force (built-in wordlist) |
+| `cve_lookup` | NVD API se CVE search (CVSS scores ke saath) |
+| `wordlist_gen` | Keywords se wordlist generate karo |
+
+### Code & Utilities
+| Tool | Kya karta hai |
+|---|---|
+| `run_python` | Python code execute karo (subprocess) |
+| `regex_test` | Regex test karo (capture groups ke saath) |
+| `generate_password` | Strong passwords (entropy report) |
+| `encode_decode` | base64/hex/url/base32/rot13 |
+| `hash_text` | String hashing (md5/sha1/sha256/sha512) |
+| `uuid_gen` | UUID v4 generate karo |
+
+### 🛡️ Pentest Arsenal (10 wrappers — scope complete)
+| Tool | Kya karta hai | Tool install kahan se |
+|---|---|---|
+| `nmap_scan` | Port/service scanning (`-sV -sC` profiles) | `apt install nmap` / nmap.org |
+| `sqlmap_check` | SQL injection auto-test | `pip install sqlmap` / sqlmap.org |
+| `nikto_scan` | Web server vulnerability scanner | `apt install nikto` / cirt.net |
+| `nuclei_scan` | Templates-based vuln scanner | github.com/projectdiscovery/nuclei |
+| `ffuf_fuzz` | Web fuzzing (FUZZ keyword) | github.com/ffuf/ffuf |
+| `gobuster_dir` | Directory/wordlist brute-force | github.com/OJ/gobuster |
+| `subfinder_enum` | Passive subdomain enum | github.com/projectdiscovery/subfinder |
+| `httpx_probe` | Bulk URL probe + title/tech detect | github.com/projectdiscovery/httpx |
+| `curl_request` | Raw curl request (headers/body) | Windows mein built-in |
+| `jwt_decode` | JWT decode + signature check | Pure Python (koi install nahi) |
+
+> Wrapper auto-detect karta hai `shutil.which` se. Tool installed nahi hai toh clear install hint deta hai (binary install karne ki zaroorat nahi — bas path par hona chahiye).
+
+---
+
+## 💬 Usage
+
+### Interactive chat
+```bash
+py -3 agent.py --api-key sk-xxx
+```
+
+REPL commands:
+- `/help` — help
+- `/tools` — available tools
+- `/memory` — saved memory dekho
+- `/memdel <key>` — memory delete karo
+- `/clear` — conversation reset
+- `exit` — bahar niklo
+
+### Single query
+```bash
+py -3 agent.py --once "E:\HackerAI\my-agent\ folder mein kya hai?"
+```
+
+### Security: terminal confirmation
+Default mein agent **har terminal command se pehle aapse permission maangta hai** (interactive mode mein). Fully automatic chahiye toh `--auto` use karo.
+
+---
+
+## 🏗️ Architecture (Ye kaise kaam karta hai)
+
+```
+Aapka message
+      │
+      ▼
+┌─────────────────────┐
+│  LLM (reasoning)    │──► Decide: jawab do ya tool call karo
+└─────────────────────┘
+      │ tool call (JSON)
+      ▼
+┌─────────────────────┐
+│  Tools (59)         │──► run_terminal, read_file, web_search,
+│  (think→act→observe)│    remember, spawn_agent, nmap_scan, ...
+└─────────────────────┘
+      │ result
+      ▼
+Loop repeat hota hai jab tak final answer na aa jaye
+      │
+      ▼
+Final jawab (user ki language mein)
+```
+
+Files:
+```
+my-agent/
+├── agent.py                    # CLI entry point (REPL + --once)
+├── webui.py                    # Web UI server (Flask, SSE streaming)
+├── start_ui.bat                # Launcher — double-click aur browser khulta hai
+├── templates/index.html        # Web UI frontend (dark hacker theme)
+├── static/style.css            # Web UI styling
+├── static/app.js               # Web UI logic (SSE, tools, memory, settings)
+├── ai_agent/
+│   ├── core.py                 # Agent class + think→act→observe loop
+│   ├── llm.py                  # OpenAI-compatible client + Mock client
+│   ├── memory.py               # Persistent memory (JSON, thread-safe)
+│   ├── config.py               # .env / config.json / flags loading
+│   └── tools/
+│       ├── __init__.py         # 59-tool registry + create_tools()
+│       ├── base.py             # Tool class + execute_tool()
+│       ├── terminal.py         # run_terminal, file read/write, list
+│       ├── system.py           # system_info, time, processes, disk, ip
+│       ├── files.py            # search, grep, hash, JSON/CSV, archives
+│       ├── web.py              # http_request, headers, tech detect
+│       ├── websearch.py        # web_search (DDG), open_url
+│       ├── network.py          # DNS, port scan, whois, geoip, ssl, ping
+│       ├── recon.py            # subdomain enum, dir fuzz, CVE, wordlist
+│       ├── code.py             # run_python, regex, password, encode
+│       └── pentest.py          # nmap/sqlmap/nikto/nuclei/ffuf/gobuster/subfinder/httpx/curl/JWT wrappers
+├── requirements.txt            # sirf requests
+├── .env.example
+└── README.md
+```
+
+---
+
+## 🛠️ Apne khud ke tools add karo
+
+Tool package ke kisi bhi module mein function likho, phir `ai_agent/tools/__init__.py` ki registry mein ek `Tool(...)` entry add karo:
+
+```python
+Tool(
+    "sha1_quick",
+    "Quick SHA1 hash of a file.",
+    {"type": "object",
+     "properties": {"path": {"type": "string"}},
+     "required": ["path"]},
+    lambda path="": tool_hash_quick(path),
+),
+```
+
+Bas — LLM khud naya tool discover kar lega aur jab zaroorat ho use karega.
+
+---
+
+## 📈 Ise aur powerful kaise banayein
+
+1. **Best model lagao** — Settings page mein API key daalo (OpenAI/Groq/OpenRouter/Ollama)
+2. **Pentest binaries install karo** — nmap, sqlmap, nikto, nuclei, ffuf, gobuster, subfinder, httpx PATH par honge toh agent unhe automatically use karega
+3. **RAG add karo** — apne documents/notes ka vector search memory mein
+4. **Bigger context** — Settings se `max_iterations` barhao complex tasks ke liye
+5. **Scheduled/parallel sub-agents** — ek saath multiple tasks
+
+---
+
+## ⚠️ Note
+
+Terminal tool aapki machine par commands chala sakta hai. Ise sirf apni authorized testing aur apne systems par use karo.

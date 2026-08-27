@@ -1,0 +1,17 @@
+# Secrets - NEVER commit these
+config.json
+.env
+*.env.local
+
+# Runtime data
+memory.json
+__pycache__/
+*.pyc
+
+# OS files
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
