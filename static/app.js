@@ -8,6 +8,9 @@ const $ = (sel) => document.querySelector(sel);
 const chatLog = $("#chat-log");
 const inputBox = $("#input");
 let busy = false;
+let currentSessionId = null;
+let watchdogInactive = null;
+let watchdogTotal = null;
 
 /* ---------------- view switching ---------------- */
 document.querySelectorAll(".nav-item").forEach((btn) => {
@@ -23,10 +26,9 @@ document.querySelectorAll(".nav-item").forEach((btn) => {
   });
 });
 
-$("#btn-new").addEventListener("click", async () => {
-  await fetch("/api/reset", { method: "POST" });
-  chatLog.innerHTML = "";
-  welcome();
+$("#btn-new").addEventListener("click", () => {
+  if (busy) return;
+  newChat();
 });
 
 /* ---------------- welcome chips ---------------- */
@@ -61,6 +63,103 @@ document.addEventListener("click", (e) => {
     sendMessage(e.target.dataset.msg);
   }
 });
+
+/* ---------------- chat sessions (persistent history) ---------------- */
+function newChat() {
+  if (busy) return;
+  currentSessionId = null;
+  chatLog.innerHTML = "";
+  welcome();
+  loadSessions();
+}
+
+async function loadSessions() {
+  try {
+    const res = await fetch("/api/sessions");
+    const data = await res.json();
+    renderSessions(data.sessions || []);
+  } catch { /* ignore */ }
+}
+
+function renderSessions(list) {
+  const box = $("#session-list");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!list.length) {
+    const empty = document.createElement("div");
+    empty.className = "session-empty";
+    empty.textContent = "no saved chats yet";
+    box.appendChild(empty);
+    return;
+  }
+  list.forEach((s) => {
+    const item = document.createElement("div");
+    item.className = "session-item" + (s.id === currentSessionId ? " active" : "");
+    item.title = s.title || "New chat";
+    const title = document.createElement("span");
+    title.className = "s-title";
+    title.textContent = s.title || "New chat";
+    const del = document.createElement("span");
+    del.className = "s-del";
+    del.textContent = "✕";
+    del.title = "delete chat";
+    del.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      deleteSession(s.id);
+    });
+    item.addEventListener("click", () => openSession(s.id));
+    item.appendChild(title);
+    item.appendChild(del);
+    box.appendChild(item);
+  });
+}
+
+async function deleteSession(id) {
+  if (busy) return;
+  try { await fetch("/api/sessions/" + encodeURIComponent(id), { method: "DELETE" }); } catch { /* ignore */ }
+  if (id === currentSessionId) {
+    currentSessionId = null;
+    chatLog.innerHTML = "";
+    welcome();
+  }
+  loadSessions();
+}
+
+async function openSession(id) {
+  if (busy || id === currentSessionId) return;
+  let s = null;
+  try {
+    const res = await fetch("/api/sessions/" + encodeURIComponent(id) + "/open", { method: "POST" });
+    if (!res.ok) return;
+    s = await res.json();
+  } catch { return; }
+  currentSessionId = s.id;
+  renderSession(s);
+  loadSessions();
+}
+
+function renderSession(s) {
+  chatLog.innerHTML = "";
+  (s.messages || []).forEach((m) => {
+    if (m.role === "user") {
+      addUserMsg(m.content || "");
+    } else if (m.role === "assistant") {
+      const bubble = addAssistantBubble((m.kind === "error" ? "⚠️ " : "") + (m.content || ""));
+      if (m.kind === "thinking") bubble.classList.add("thinking");
+    } else if (m.role === "tool") {
+      addToolCard(m.name || "?", typeof m.arguments === "string" ? m.arguments : JSON.stringify(m.arguments || ""));
+      if (m.result != null) {
+        const cards = chatLog.querySelectorAll(".toolcard");
+        const card = cards[cards.length - 1];
+        if (card) {
+          card.querySelector(".result").textContent = m.result;
+          if (/error|failed|not installed|timed out/i.test(m.result)) card.classList.add("err");
+        }
+      }
+    }
+  });
+  scrollDown();
+}
 
 /* ---------------- markdown-ish rendering ---------------- */
 function escapeHtml(s) {
@@ -154,26 +253,53 @@ function sendMessage(text) {
   busy = true;
   $("#send").disabled = true;
   $("#chat-hint").textContent = "working…";
+  armWatchdogTotal(); // hard cap on the whole request
+  armWatchdog();      // inactivity watchdog, re-armed on every SSE event
 
   const es = new EventSource("/api/chat?message=" + encodeURIComponent(message));
   let finalAdded = false;
   let preview = null; // last "llm" bubble — upgraded to final instead of duplicating
 
   // clean end of stream: clear "working…", reset busy so the next
-  // message can be sent (manual es.close() does NOT fire onerror)
-  function finish() {
+  // message can be sent (manual es.close() does NOT fire onerror).
+  // Idempotent — watchdog + error paths can race, so the "working…"
+  // state can never stay stuck after a request finishes.
+  function finish(note) {
+    if (!busy) return;
+    clearTimeout(watchdogInactive);
+    clearTimeout(watchdogTotal);
     es.close();
     typing.remove();
     busy = false;
     $("#send").disabled = false;
     $("#chat-hint").textContent = "";
+    if (note && !finalAdded) {
+      addAssistantBubble(note);
+      finalAdded = true;
+    }
     scrollDown();
     refreshStatus();
+    loadSessions();
+  }
+
+  function armWatchdog() {
+    clearTimeout(watchdogInactive);
+    watchdogInactive = setTimeout(() => {
+      finish("⚠️ connection stalled — no events for 5+ minutes, try again");
+    }, 330000);
+  }
+
+  function armWatchdogTotal() {
+    clearTimeout(watchdogTotal);
+    watchdogTotal = setTimeout(() => {
+      finish("⚠️ request timed out — stream released");
+    }, 400000);
   }
 
   es.onmessage = (ev) => {
     let e;
     try { e = JSON.parse(ev.data); } catch { return; }
+    armWatchdog(); // any event counts as activity
     if (e.type === "start") return;
 
     if (e.type === "llm") {
@@ -375,3 +501,9 @@ async function refreshStatus() {
 
 refreshStatus();
 setInterval(refreshStatus, 10000);
+
+/* ---------------- boot: load saved chats ---------------- */
+(async () => {
+  await loadSessions();
+  if (currentSessionId) openSession(currentSessionId);
+})();
