@@ -1,6 +1,7 @@
 """The Agent: an LLM wrapped in a think -> act -> observe loop."""
 
 import json
+import os
 import threading
 
 from .llm import LLMError
@@ -24,14 +25,31 @@ Rules:
   giving up.
 - Do not invent facts; base answers on tool results.
 - Be concise but complete. For technical work, include the key output.
+
+Formatting rules (very important):
+- Always format every reply in clean Markdown so it renders nicely in the UI.
+- Use ## and ### headings to structure longer answers; a short paragraph needs no heading.
+- Use bullet lists (-) and numbered lists (1. 2. 3.) for anything listed.
+- Use Markdown tables when comparing data, tool output columns, or options.
+- Wrap commands, code, logs and raw tool output in fenced code blocks (```).
+- Put a blank line between paragraphs, headings and lists - never cram text together.
+- Use **bold** only for key terms and *italics* sparingly.
 {memory_block}"""
+
+# Optional external system prompt override (project root).
+SYSTEM_PROMPT_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "system_prompt.txt",
+)
+
 
 
 class Agent:
-    def __init__(self, llm, memory=None, name="agent",
-                 max_iterations=12, max_messages=60,
+    def __init__(self, llm, memory=None, name="HackerAI",
+                 max_iterations=12, max_messages=150,
                  confirm_terminal=False, spawn_fn=None,
-                 spawn_depth=0, max_spawn_depth=2, allow_subagents=True):
+                 spawn_depth=0, max_spawn_depth=2, allow_subagents=True,
+                 spawn_timeout=600):
         self.llm = llm
         self.memory = memory
         self.name = name
@@ -41,12 +59,16 @@ class Agent:
         self.spawn_depth = spawn_depth
         self.max_spawn_depth = max_spawn_depth
         self.allow_subagents = allow_subagents
+        self.spawn_timeout = spawn_timeout
         self.messages = []
         self._tool_list = create_tools(
             memory, confirm_terminal=confirm_terminal,
             spawn_fn=(lambda task: self._spawn_impl(task, self.spawn_depth + 1))
             if allow_subagents else None,
             allow_spawn=allow_subagents,
+            spawn_parallel_fn=(lambda tasks, timeout=spawn_timeout:
+                               self._spawn_parallel_impl(tasks, timeout))
+            if allow_subagents else None,
         )
         self._tools_by_name = {t.name: t for t in self._tool_list}
 
@@ -60,7 +82,14 @@ class Agent:
                 memory_block = (
                     "\n\nSaved memory you should use when relevant:\n" + snap
                 )
-        return SYSTEM_PROMPT.format(name=self.name, memory_block=memory_block)
+        template = SYSTEM_PROMPT
+        try:
+            if os.path.exists(SYSTEM_PROMPT_FILE):
+                with open(SYSTEM_PROMPT_FILE, "r", encoding="utf-8") as f:
+                    template = f.read()
+        except Exception:
+            pass  # fall back to the built-in prompt on any error
+        return template.format(name=self.name, memory_block=memory_block)
 
     # ------------------------------------------------------------ loop
 
@@ -94,14 +123,20 @@ class Agent:
         tool_schemas = [t.schema() for t in self._tool_list]
 
         for _ in range(self.max_iterations):
+            prompt = ([{"role": "system", "content": self._system_prompt()}]
+                      + list(self.messages))
+            reply = None
             try:
-                reply = self.llm.chat(
-                    [{"role": "system", "content": self._system_prompt()}]
-                    + self.messages,
-                    tools=tool_schemas,
-                )
+                for ev in self.llm.chat_stream(prompt, tools=tool_schemas):
+                    if ev["type"] == "delta":
+                        yield {"type": "delta", "content": ev.get("content", "")}
+                    elif ev["type"] == "message":
+                        reply = ev["message"]
             except LLMError as exc:
                 yield {"type": "error", "content": "[LLM error] %s" % exc}
+                return
+            if reply is None:
+                yield {"type": "error", "content": "[LLM error] no reply received"}
                 return
 
             content = reply.get("content") or ""
@@ -218,12 +253,72 @@ class Agent:
                 box["err"] = "%s: %s" % (type(exc).__name__, exc)
         thread = threading.Thread(target=work, daemon=True)
         thread.start()
-        thread.join(timeout=240)
+        thread.join(timeout=self.spawn_timeout)
         if thread.is_alive():
-            return "Error: sub-agent timed out."
+            return "Error: sub-agent timed out after %ds." % self.spawn_timeout
         if "err" in box:
             return "Sub-agent error: %s" % box["err"]
         return box.get("out", "(no output)")
+
+    def _spawn_parallel_impl(self, tasks, timeout=600):
+        """Run multiple sub-agents concurrently; returns one combined result.
+
+        tasks: JSON array of strings, or a string with tasks separated by
+        '|||'. Each task runs in its own thread with its own agent.
+        """
+        if isinstance(tasks, str):
+            tasks = tasks.strip()
+            if not tasks:
+                return "Error: spawn_agents needs at least one task."
+            if tasks.lstrip().startswith("["):
+                try:
+                    tasks = json.loads(tasks)
+                except ValueError:
+                    return "Error: tasks JSON is invalid."
+            else:
+                tasks = [t.strip() for t in tasks.split("|||") if t.strip()]
+        if not isinstance(tasks, (list, tuple)) or not tasks:
+            return "Error: spawn_agents needs a list of tasks."
+        if len(tasks) > 8:
+            tasks = tasks[:8]
+
+        boxes = [{} for _ in tasks]
+        threads = []
+        for i, task in enumerate(tasks):
+            def work(idx, t):
+                try:
+                    child = Agent(
+                        llm=self.llm, memory=self.memory,
+                        name=self.name + "-child%d" % (idx + 1),
+                        max_iterations=self.max_iterations,
+                        max_messages=self.max_messages,
+                        confirm_terminal=False,
+                        spawn_depth=self.spawn_depth + 1,
+                        max_spawn_depth=self.max_spawn_depth,
+                        allow_subagents=self.allow_subagents,
+                        spawn_timeout=self.spawn_timeout,
+                    )
+                    boxes[idx]["out"] = child.run(t)
+                except Exception as exc:
+                    boxes[idx]["err"] = "%s: %s" % (type(exc).__name__, exc)
+            th = threading.Thread(target=work, args=(i, str(task)), daemon=True)
+            th.start()
+            threads.append(th)
+
+        for th in threads:
+            th.join(timeout=timeout)
+
+        lines = []
+        for i, (task, box) in enumerate(zip(tasks, boxes), 1):
+            snippet = " ".join(str(task).split())[:80]
+            lines.append("--- Sub-agent %d: %s ---" % (i, snippet))
+            if "err" in box:
+                lines.append("ERROR: %s" % box["err"])
+            elif "out" in box:
+                lines.append(box["out"])
+            else:
+                lines.append("(timed out after %ds)" % timeout)
+        return "\n\n".join(lines)
 
     # ------------------------------------------------------------ helpers
 

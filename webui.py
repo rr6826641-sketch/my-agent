@@ -13,6 +13,7 @@ Settings tab: API key, base URL and model are saved to config.json.
 import argparse
 import json
 import os
+import re
 import queue
 import sys
 import threading
@@ -35,6 +36,30 @@ CHATS_PATH = os.path.join(PROJECT_DIR, "chats.json")
 _chat_lock = threading.Lock()
 
 app = Flask(__name__)
+
+# --- encoding hardening: every response MUST be UTF-8 ---------------------
+# jsonify: emit raw UTF-8 instead of \uXXXX escapes (cleaner, smaller)
+try:
+    app.json.ensure_ascii = False
+except AttributeError:  # very old Flask fallback
+    app.config["JSON_AS_ASCII"] = False
+
+
+@app.after_request
+def _force_utf8(resp):
+    """Explicitly pin charset=utf-8 on every response header so the browser
+    decodes emoji / markdown glyphs as UTF-8 instead of guessing cp1252
+    (which turns '•' into '\u00e2\u20ac\u00a2'-style mojibake)."""
+    if not resp.content_type:
+        resp.content_type = "text/plain; charset=utf-8"
+    elif "charset=" in resp.content_type.lower():
+        resp.content_type = re.sub(r"charset=[^;]+", "charset=utf-8",
+                                   resp.content_type, flags=re.IGNORECASE)
+    else:
+        resp.content_type = "%s; charset=utf-8" % resp.content_type
+    resp.charset = "utf-8"
+    return resp
+
 
 _lock = threading.Lock()
 _state = {
@@ -71,9 +96,14 @@ def _build_agent(cfg):
             api_key=cfg.get("api_key") or "",
             base_url=cfg.get("base_url") or "https://api.openai.com/v1",
             model=cfg.get("model") or "gpt-4o-mini",
+            fallback_models=cfg.get("fallback_models"),
         )
     agent = Agent(llm, memory=memory,
                   max_iterations=cfg.get("max_iterations") or 12,
+                  max_messages=cfg.get("max_messages") or 400,
+                  spawn_timeout=cfg.get("spawn_timeout") or 900,
+                  max_spawn_depth=cfg.get("max_spawn_depth") or 3,
+                  allow_subagents=cfg.get("allow_subagents", True),
                   confirm_terminal=False)  # auto mode: no stdin prompts in UI
     return agent, memory
 
@@ -269,7 +299,7 @@ def api_chat():
             yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
 
     return Response(stream_with_context(gen()),
-                    mimetype="text/event-stream",
+                    content_type="text/event-stream; charset=utf-8",
                     headers={"Cache-Control": "no-cache",
                              "X-Accel-Buffering": "no"})
 

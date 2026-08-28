@@ -2,7 +2,7 @@
 
 Ye ek complete AI agent hai jo **sochta hai, tools use karta hai, aur kaam karta hai** — bilkul HackerAI jaise. Aap ise apni machine par chala sakte ho, kisi bhi OpenAI-compatible LLM ke saath jod sakte ho, aur apne khud ke tools add kar sakte ho.
 
-**Total 59 built-in tools** — terminal, files, web, network, recon, code, memory, sub-agents, aur complete pentest arsenal wrappers (nmap, sqlmap, nikto, nuclei, ffuf, gobuster, subfinder, httpx, curl, JWT).
+**Total 93 built-in tools** — terminal, files, web, network, recon, code, memory, sub-agents (parallel bhi), payload generation, manual web attack detectors, findings/reporting, scope enforcement, aur complete pentest arsenal wrappers (nmap, sqlmap, nikto, nuclei, ffuf, gobuster, subfinder, httpx, curl, JWT).
 
 **Web UI included** — dark hacker-theme dashboard (chat + streaming tool calls, tools catalog, memory manager, settings, system info). Chalao: double-click `start_ui.bat` → browser mein http://127.0.0.1:8080
 
@@ -18,7 +18,11 @@ Ye ek complete AI agent hai jo **sochta hai, tools use karta hai, aur kaam karta
 | 📁 File Tools | Files padhna, likhna, search, grep, hash, archive, diff, PDF/image info |
 | 🌐 Web Tools | Web search (bina API key), page fetch, headers audit, tech detect, link extract |
 | 🧠 Persistent Memory | Facts yaad rakhta hai `memory.json` mein — naye session mein bhi |
-| 👥 Sub-Agents | Kaam ke liye child agents spawn karta hai (depth limit ke saath) |
+| 👥 Sub-Agents | Kaam ke liye child agents spawn karta hai — **ab parallel bhi** (`spawn_agents`, max 8 ek saath) |
+| 💣 Payload Gen | Reverse/bind shells, web shells, listeners, obfuscation, wordlists — turant ready-to-use |
+| 🔍 Manual Web Tests | SQLi / XSS / CMDi / path traversal / SSRF / open redirect — bina bhari tool ke quick probes |
+| 📋 Findings & Reports | Har vulnerability structured log karo, end par professional Markdown pentest report banao |
+| 🎯 Scope Guard | `set_scope` se authorized targets fix karo — `check_scope` har host scan se pehle verify karta hai |
 | 🌍 Network Tools | DNS, port scan, whois, geoip, SSL certs, ping — sab pure Python (nmap/dig ki zaroorat nahi) |
 | 🎯 Recon Tools | Subdomain enum, dir fuzz, CVE lookup, wordlist gen |
 | 🛡️ Security | Interactive mode mein terminal commands se pehle confirmation maangta hai |
@@ -62,7 +66,7 @@ py -3 webui.py --port 8080
 
 Web UI features:
 - **Chat** — SSE streaming, har tool call live dikhta hai (start → tool_call → tool_result → final)
-- **Tools** — saare 59 tools ki catalog + parameters
+- **Tools** — saare 93 tools ki catalog + parameters
 - **Memory** — persistent memory add/delete karo
 - **Settings** — API key/base_url/model/mock mode browser se save karo (config.json mein)
 - **System** — OS, IPs, disk info
@@ -125,7 +129,7 @@ copy .env.example .env
 
 ---
 
-## 🛠️ 59 Built-in Tools
+## 🛠️ 93 Built-in Tools
 
 ### Core
 | Tool | Kya karta hai |
@@ -139,6 +143,7 @@ copy .env.example .env
 | `remember` | Memory mein fact save karo |
 | `recall` | Memory se facts nikalo |
 | `spawn_agent` | Child agent spawn karo |
+| `spawn_agents` | **Parallel** sub-agents (JSON array ya `|||` separated, max 8) |
 | `list_tools` | Saare tools ki list |
 
 ### System
@@ -220,6 +225,42 @@ copy .env.example .env
 
 > Wrapper auto-detect karta hai `shutil.which` se. Tool installed nahi hai toh clear install hint deta hai (binary install karne ki zaroorat nahi — bas path par hona chahiye).
 
+### 💣 Payload Generation
+| Tool | Kya karta hai |
+|---|---|
+| `gen_reverse_shell` | Linux/Windows reverse shell (bash/nc/python/powershell/php/perl/ruby/socat/msfvenom) + listener |
+| `gen_bind_shell` | Bind shell payload (nc/python/socat/powershell) |
+| `gen_webshell` | Password-gated web shell (php/asp/aspx/jsp) |
+| `gen_listener` | Shell pakadne ke listener commands (nc/socat/metasploit + pty upgrade) |
+| `gen_obfuscate` | Command obfuscation (base64/quote/unicode) — evasion testing |
+| `gen_wordlist` | Base words + leetspeak + suffixes se credential wordlist |
+
+### 🔍 Manual Web Attack Detectors
+| Tool | Kya karta hai |
+|---|---|
+| `sqli_test` | Boolean-based SQLi detection (sqlmap se pehle quick probe) |
+| `xss_test` | Reflected XSS detection |
+| `cmd_inject_test` | Command injection probes (non-destructive) |
+| `path_traversal_test` | LFI/traversal signatures (passwd, win.ini) |
+| `ssrf_test` | External callback URL ke saath SSRF detection |
+| `open_redirect_test` | Open redirect detection |
+
+### 📋 Findings & Reporting
+| Tool | Kya karta hai |
+|---|---|
+| `add_finding` | Vulnerability structured log karo (asset, CWE, severity, evidence, impact, remediation) |
+| `list_findings` | Findings dekho (severity/status filter, sort) |
+| `update_finding` | Finding update karo (status/severity/remediation) |
+| `delete_finding` | Finding delete karo |
+| `write_report` | Logged findings se professional Markdown pentest report (exec summary + severity table + details) |
+
+### 🎯 Scope Enforcement
+| Tool | Kya karta hai |
+|---|---|
+| `set_scope` | Authorized targets declare karo (domains/IPs/CIDRs/URLs) |
+| `show_scope` | Current scope dikhao |
+| `check_scope` | Host scope mein hai ya nahi — ALLOWED/BLOCKED verdict |
+
 ---
 
 ## 💬 Usage
@@ -259,7 +300,7 @@ Aapka message
       │ tool call (JSON)
       ▼
 ┌─────────────────────┐
-│  Tools (59)         │──► run_terminal, read_file, web_search,
+│  Tools (93)         │──► run_terminal, read_file, web_search,
 │  (think→act→observe)│    remember, spawn_agent, nmap_scan, ...
 └─────────────────────┘
       │ result
@@ -285,7 +326,7 @@ my-agent/
 │   ├── memory.py               # Persistent memory (JSON, thread-safe)
 │   ├── config.py               # .env / config.json / flags loading
 │   └── tools/
-│       ├── __init__.py         # 59-tool registry + create_tools()
+│       ├── __init__.py         # 93-tool registry + create_tools()
 │       ├── base.py             # Tool class + execute_tool()
 │       ├── terminal.py         # run_terminal, file read/write, list
 │       ├── system.py           # system_info, time, processes, disk, ip
@@ -295,7 +336,13 @@ my-agent/
 │       ├── network.py          # DNS, port scan, whois, geoip, ssl, ping
 │       ├── recon.py            # subdomain enum, dir fuzz, CVE, wordlist
 │       ├── code.py             # run_python, regex, password, encode
+│       ├── payloads.py         # reverse/bind shells, webshells, listeners, obfuscation, wordlists
+│       ├── webtests.py         # manual SQLi/XSS/CMDi/traversal/SSRF/redirect probes
+│       ├── reporting.py        # findings log + Markdown pentest report
+│       ├── scope.py            # engagement scope guard (set/show/check)
 │       └── pentest.py          # nmap/sqlmap/nikto/nuclei/ffuf/gobuster/subfinder/httpx/curl/JWT wrappers
+├── findings.jsonl              # logged findings (write_report isse report banata hai)
+├── scope.json                  # declared engagement scope
 ├── requirements.txt            # sirf requests
 ├── .env.example
 └── README.md
@@ -327,8 +374,19 @@ Bas — LLM khud naya tool discover kar lega aur jab zaroorat ho use karega.
 1. **Best model lagao** — Settings page mein API key daalo (OpenAI/Groq/OpenRouter/Ollama)
 2. **Pentest binaries install karo** — nmap, sqlmap, nikto, nuclei, ffuf, gobuster, subfinder, httpx PATH par honge toh agent unhe automatically use karega
 3. **RAG add karo** — apne documents/notes ka vector search memory mein
-4. **Bigger context** — Settings se `max_iterations` barhao complex tasks ke liye
-5. **Scheduled/parallel sub-agents** — ek saath multiple tasks
+4. **Bigger context** — `config.json` mein `max_iterations` ab default 60 hai (pehle 15) — bade tasks ke liye
+5. **Scheduled/parallel sub-agents** — `spawn_agents` se ek saath 8 tasks chalao
+
+---
+
+## ✅ Naya kya hai (HackerAI-style upgrade)
+
+- **Parallel sub-agents** — `spawn_agents` (max 8 concurrent, per-agent timeout 900s, depth 3)
+- **Payload generation** — reverse/bind shells, webshells, listeners, obfuscation, wordlists
+- **Manual web attack probes** — SQLi/XSS/CMDi/traversal/SSRF/open redirect quick tests
+- **Professional reporting** — findings tracker + Markdown pentest report generator
+- **Scope enforcement** — `set_scope`/`check_scope` se authorized targets ki guarding
+- **93 tools total** (pehle 59) — registry, config aur prompt sab upgrade ho chuke
 
 ---
 

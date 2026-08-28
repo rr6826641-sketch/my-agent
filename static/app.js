@@ -12,6 +12,24 @@ let currentSessionId = null;
 let watchdogInactive = null;
 let watchdogTotal = null;
 
+/* ---------------- utf-8 fetch helpers ----------------
+   Decode every API response explicitly as UTF-8 (TextDecoder) instead of
+   trusting the Content-Type charset. This stops '•' '—' '→' emoji/markdown
+   glyphs from being mis-decoded as cp1252/latin-1 mojibake (â€¢, â€“, â†’). */
+const utf8Decoder = new TextDecoder("utf-8");
+
+async function fetchUtf8(url, opts) {
+  const res = await fetch(url, opts);
+  const buf = await res.arrayBuffer();
+  return { res, text: utf8Decoder.decode(buf) };
+}
+
+async function fetchJSON(url, opts) {
+  const { res, text } = await fetchUtf8(url, opts);
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return JSON.parse(text);
+}
+
 /* ---------------- view switching ---------------- */
 document.querySelectorAll(".nav-item").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -75,8 +93,7 @@ function newChat() {
 
 async function loadSessions() {
   try {
-    const res = await fetch("/api/sessions");
-    const data = await res.json();
+    const data = await fetchJSON("/api/sessions");
     renderSessions(data.sessions || []);
   } catch { /* ignore */ }
 }
@@ -129,9 +146,10 @@ async function openSession(id) {
   if (busy || id === currentSessionId) return;
   let s = null;
   try {
-    const res = await fetch("/api/sessions/" + encodeURIComponent(id) + "/open", { method: "POST" });
+    const { res, text } = await fetchUtf8(
+      "/api/sessions/" + encodeURIComponent(id) + "/open", { method: "POST" });
     if (!res.ok) return;
-    s = await res.json();
+    s = JSON.parse(text);
   } catch { return; }
   currentSessionId = s.id;
   renderSession(s);
@@ -163,10 +181,34 @@ function renderSession(s) {
 
 /* ---------------- markdown-ish rendering ---------------- */
 function escapeHtml(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function mdToDom(text, el) {
+  if (window.marked && typeof window.marked.parse === "function") {
+    // marked.js: escape first so raw HTML from the model can never inject,
+    // then parse GFM (headings, lists, tables, code fences, blockquotes).
+    const safe = escapeHtml(text);
+    el.innerHTML = marked.parse(safe, { gfm: true, breaks: false });
+    el.querySelectorAll("pre").forEach((pre) => {
+      if (pre.parentElement && pre.parentElement.classList.contains("codewrap")) return;
+      const code = pre.querySelector("code");
+      const wrap = document.createElement("div");
+      wrap.className = "codewrap";
+      const btn = document.createElement("button");
+      btn.className = "copy-btn";
+      btn.textContent = "copy";
+      btn.addEventListener("click", () => {
+        if (code) navigator.clipboard.writeText(code.textContent);
+      });
+      pre.parentNode.insertBefore(wrap, pre);
+      wrap.appendChild(btn);
+      wrap.appendChild(pre);
+    });
+    return;
+  }
+  // fallback: lightweight renderer if marked.min.js failed to load
   window.__mdBlocks = [];
   const blocks = [];
   let html = escapeHtml(text);
@@ -179,7 +221,10 @@ function mdToDom(text, el) {
   html = html.replace(/`([^`\n]+)`/g, "<code class='inline'>$1</code>");
   html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
     "<a href='$2' target='_blank' rel='noopener'>$1</a>");
-  html = html.replace(/(^|\n)#{1,3} (.+)/g, "$1<h4>$2</h4>");
+  html = html.replace(/(^|\n)(#{1,6})\s+([^\n]+)/g, (m, pre, hashes, title) => {
+    const level = Math.min(6, hashes.length + 2);
+    return `${pre}<h${level}>${title}</h${level}>`;
+  });
   html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/(https?:\/\/[^\s<>)]+)/g,
     "<a href='$1' target='_blank' rel='noopener'>$1</a>");
@@ -303,12 +348,30 @@ function sendMessage(text) {
     if (e.type === "start") return;
 
     if (e.type === "llm") {
+      // full assistant content before tool calls -> render as markdown
       typing.remove();
-      const b = addAssistantBubble(e.content || "");
-      b.classList.add("thinking");
-      preview = { bubble: b, text: e.content || "" };
+      const content = e.content || "";
+      if (preview && preview.bubble.isConnected) {
+        preview.text = content;
+        mdToDom(content, preview.bubble.querySelector(".bubble"));
+      } else {
+        const b = addAssistantBubble(content);
+        b.classList.add("thinking");
+        preview = { bubble: b, text: content };
+      }
+    } else if (e.type === "delta") {
+      // streaming token -> append to live bubble (typewriter effect)
+      typing.remove();
+      if (!preview || !preview.bubble.isConnected) {
+        const b = addAssistantBubble("");
+        b.classList.add("thinking");
+        preview = { bubble: b, text: "" };
+      }
+      preview.text += e.content || "";
+      preview.bubble.querySelector(".bubble").textContent = preview.text;
     } else if (e.type === "tool_call") {
       typing.remove();
+      preview = null; // next assistant text gets a fresh bubble
       addToolCard(e.name, typeof e.arguments === "string" ? e.arguments : JSON.stringify(e.arguments || ""));
     } else if (e.type === "tool_result") {
       const cards = chatLog.querySelectorAll(".toolcard");
@@ -324,11 +387,9 @@ function sendMessage(text) {
       // one prompt -> exactly one response bubble
       typing.remove();
       const content = e.content || "";
-      if (preview && preview.text.trim() === content.trim() && preview.bubble.isConnected) {
-        // "thinking" bubble already shows the final answer -> upgrade it, no duplicate
-        const bubble = preview.bubble.querySelector(".bubble");
-        bubble.innerHTML = "";
-        mdToDom(content, bubble);
+      if (preview && preview.bubble.isConnected) {
+        // live streamed bubble already shows the answer -> render as markdown
+        mdToDom(content, preview.bubble.querySelector(".bubble"));
         preview.bubble.classList.remove("thinking");
       } else if (!finalAdded) {
         addAssistantBubble(content);
@@ -375,8 +436,7 @@ let allTools = [];
 async function loadTools() {
   const grid = $("#tool-grid");
   grid.innerHTML = '<p style="color:var(--muted)">loading…</p>';
-  const res = await fetch("/api/tools");
-  allTools = await res.json();
+  allTools = await fetchJSON("/api/tools");
   $("#tools-count").textContent = allTools.length + " tools registered";
   renderTools("");
 }
@@ -406,8 +466,7 @@ $("#tool-search").addEventListener("input", (e) => renderTools(e.target.value.to
 async function loadMemory() {
   const list = $("#memory-list");
   list.innerHTML = '<p style="color:var(--muted)">loading…</p>';
-  const res = await fetch("/api/memory");
-  const rows = await res.json();
+  const rows = await fetchJSON("/api/memory");
   $("#badge-memory").textContent = rows.length;
   list.innerHTML = "";
   if (!rows.length) {
@@ -443,8 +502,7 @@ $("#mem-add").addEventListener("click", async () => {
 
 /* ---------------- settings ---------------- */
 async function loadSettings() {
-  const res = await fetch("/api/settings");
-  const s = await res.json();
+  const s = await fetchJSON("/api/settings");
   $("#set-key").value = s.api_key || "";
   $("#set-url").value = s.base_url || "";
   $("#set-model").value = s.model || "";
@@ -478,8 +536,7 @@ $("#set-save").addEventListener("click", async () => {
 async function loadSystem() {
   const box = $("#sys-box");
   box.textContent = "loading…";
-  const res = await fetch("/api/system");
-  const s = await res.json();
+  const s = await fetchJSON("/api/system");
   box.textContent = s.system + "\n\n" + s.ip + "\n\n" + s.disk;
 }
 $("#sys-refresh").addEventListener("click", loadSystem);
@@ -487,8 +544,7 @@ $("#sys-refresh").addEventListener("click", loadSystem);
 /* ---------------- status ---------------- */
 async function refreshStatus() {
   try {
-    const res = await fetch("/api/status");
-    const s = await res.json();
+    const s = await fetchJSON("/api/status");
     const dot = $("#dot-mode");
     dot.className = "dot " + (s.mode === "live" ? "live" : "mock");
     $("#status-mode").textContent = s.mode === "live" ? "live · " + s.model : "mock mode";

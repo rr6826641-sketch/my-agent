@@ -41,6 +41,30 @@ from .pentest import (
     tool_subfinder_enum, tool_httpx_probe, tool_curl_request,
     tool_jwt_decode,
 )
+from .tasks import tool_manage_tasks
+
+from .extra import (
+    tool_http_methods, tool_cors_check, tool_waf_detect,
+    tool_redirect_chain, tool_dns_axfr, tool_extract_iocs,
+    tool_http_cookies, tool_local_listeners, tool_sqlite_query,
+    tool_password_strength, tool_mac_vendor, tool_subnet_calc,
+)
+
+from .payloads import (
+    tool_gen_reverse_shell, tool_gen_bind_shell, tool_gen_webshell,
+    tool_gen_listener, tool_gen_obfuscate, tool_gen_wordlist,
+)
+from .reporting import (
+    tool_add_finding, tool_list_findings, tool_update_finding,
+    tool_delete_finding, tool_write_report,
+)
+from .webtests import (
+    tool_sqli_test, tool_xss_test, tool_cmd_inject_test,
+    tool_path_traversal_test, tool_ssrf_test, tool_open_redirect_test,
+)
+from .scope import (
+    tool_set_scope, tool_show_scope, tool_check_scope,
+)
 
 from .base import Tool as _Tool  # noqa: F401
 
@@ -54,13 +78,19 @@ def _str_prop(desc, default=None, enum=None):
     return p
 
 
-def create_tools(memory, confirm_terminal=True, spawn_fn=None, allow_spawn=True):
+def create_tools(memory, confirm_terminal=True, spawn_fn=None,
+                 allow_spawn=True, spawn_parallel_fn=None):
     """Build the full tool list for an Agent."""
 
     def tool_spawn_agent(task):
         if not allow_spawn or spawn_fn is None:
             return "Error: sub-agents are disabled."
         return spawn_fn(task)
+
+    def tool_spawn_agents(tasks):
+        if not allow_spawn or spawn_parallel_fn is None:
+            return "Error: parallel sub-agents are disabled."
+        return spawn_parallel_fn(tasks or "")
 
     def tool_list_tools():
         names = "\n".join("  %-22s %s" % (t.name, t.description)
@@ -135,9 +165,32 @@ def create_tools(memory, confirm_terminal=True, spawn_fn=None, allow_spawn=True)
               "properties": {"task": _str_prop("the task for the sub-agent")},
               "required": ["task"]},
              lambda task="": tool_spawn_agent(task or "")),
+        Tool("spawn_agents",
+             "Run MULTIPLE sub-agents in PARALLEL. Pass a JSON array of tasks "
+             "or tasks separated by '|||'. Up to 8 concurrent sub-agents - "
+             "use for big multi-part jobs (parallel recon, multiple targets, "
+             "independent checks).",
+             {"type": "object",
+              "properties": {"tasks": _str_prop("JSON array of task strings, or 'task1 ||| task2 ||| task3'")},
+              "required": ["tasks"]},
+             lambda tasks="": tool_spawn_agents(tasks or "")),
         Tool("list_tools", "List every available tool with a short description.",
              {"type": "object", "properties": {}, "required": []},
              lambda: tool_list_tools()),
+        Tool("manage_tasks",
+             "Manage your task/todo list for multi-step assessments: add, "
+             "list, update (pending/in_progress/completed/cancelled), delete, clear.",
+             {"type": "object",
+              "properties": {
+                  "action": _str_prop("add | list | update | delete | clear", "list"),
+                  "task_id": _str_prop("short task id, required for update/delete", ""),
+                  "content": _str_prop("task description (required for add)", ""),
+                  "status": _str_prop("pending | in_progress | completed | cancelled", ""),
+              },
+              "required": []},
+             lambda action="list", task_id="", content="", status="":
+                 tool_manage_tasks(action or "list", task_id or "",
+                                   content or "", status or "")),
 
         # ---- system ----
         Tool("system_info", "OS, CPU, memory, hostname, cwd, user info.",
@@ -472,6 +525,266 @@ def create_tools(memory, confirm_terminal=True, spawn_fn=None, allow_spawn=True)
               "properties": {"token": _str_prop("JWT token")},
               "required": ["token"]},
              lambda token="": tool_jwt_decode(token)),
+        # ---- extra security & utilities ----
+        Tool("http_methods", "Probe which HTTP methods a server allows "
+             "(OPTIONS, PUT, DELETE, TRACE...) and flag TRACE/XST risk.",
+             {"type": "object",
+              "properties": {"url": _str_prop("target URL")},
+              "required": ["url"]},
+             lambda url="": tool_http_methods(url)),
+        Tool("cors_check", "Test CORS misconfiguration: sends attacker "
+             "origins and checks Access-Control-Allow-Origin reflection.",
+             {"type": "object",
+              "properties": {"url": _str_prop("target URL")},
+              "required": ["url"]},
+             lambda url="": tool_cors_check(url)),
+        Tool("waf_detect", "Detect a WAF: fingerprint headers and send "
+             "attack payloads to look for blocking/anomalies.",
+             {"type": "object",
+              "properties": {"url": _str_prop("target URL")},
+              "required": ["url"]},
+             lambda url="": tool_waf_detect(url)),
+        Tool("redirect_chain", "Follow and display the full redirect chain "
+             "of a URL with each hop status and Location.",
+             {"type": "object",
+              "properties": {"url": _str_prop("target URL"),
+                             "max_hops": {"type": "integer", "default": 10}},
+              "required": ["url"]},
+             lambda url="", max_hops=10: tool_redirect_chain(url, int(max_hops or 10))),
+        Tool("dns_axfr", "Attempt a DNS zone transfer (AXFR) for a domain; "
+             "success = serious misconfiguration (full record dump).",
+             {"type": "object",
+              "properties": {"domain": _str_prop("domain to test"),
+                             "nameserver": _str_prop("optional NS to query")},
+              "required": ["domain"]},
+             lambda domain="", nameserver="": tool_dns_axfr(domain, nameserver or "")),
+        Tool("extract_iocs", "Extract IOCs from text: URLs, emails, IPs, "
+             "domains, hashes (MD5/SHA1/SHA256/SHA512).",
+             {"type": "object",
+              "properties": {"text": _str_prop("text to scan")},
+              "required": ["text"]},
+             lambda text="": tool_extract_iocs(text)),
+        Tool("http_cookies", "Audit cookies set by a URL: names, flags "
+             "(HttpOnly, Secure, SameSite), expiry, and weaknesses.",
+             {"type": "object",
+              "properties": {"url": _str_prop("target URL")},
+              "required": ["url"]},
+             lambda url="": tool_http_cookies(url)),
+        Tool("local_listeners", "List locally listening TCP/UDP ports with "
+             "the owning process name (Windows/Linux).",
+             {"type": "object", "properties": {}, "required": []},
+             lambda: tool_local_listeners()),
+        Tool("sqlite_query", "Run read-only SQL against a SQLite database "
+             "file; '.tables' and '.schema' helpers supported.",
+             {"type": "object",
+              "properties": {"db_path": _str_prop("path to .db/.sqlite file"),
+                             "query": _str_prop("SQL or .tables/.schema", ".tables")},
+              "required": ["db_path"]},
+             lambda db_path="", query=".tables": tool_sqlite_query(db_path, query or ".tables")),
+        Tool("password_strength", "Analyze a password: length, charset, "
+             "entropy, strength score (0-4), common-password check.",
+             {"type": "object",
+              "properties": {"password": _str_prop("password to analyze")},
+              "required": ["password"]},
+             lambda password="": tool_password_strength(password)),
+        Tool("mac_vendor", "Look up the NIC vendor (OUI) for a MAC address "
+             "via macvendors.com with offline fallback.",
+             {"type": "object",
+              "properties": {"mac_address": _str_prop("MAC address, e.g. 00:0c:29:ab:cd:ef")},
+              "required": ["mac_address"]},
+             lambda mac_address="": tool_mac_vendor(mac_address)),
+        Tool("subnet_calc", "CIDR subnet calculator: network, mask, "
+             "broadcast, usable hosts, first/last address.",
+             {"type": "object",
+              "properties": {"cidr": _str_prop("e.g. 192.168.1.0/24")},
+              "required": ["cidr"]},
+             lambda cidr="": tool_subnet_calc(cidr)),
+
+        # ---- exploit & payload generation ----
+        Tool("gen_reverse_shell", "Generate a ready-to-run reverse shell "
+             "payload (bash/nc/python/powershell/php/perl/ruby/socat/msfvenom) "
+             "with the matching listener command.",
+             {"type": "object",
+              "properties": {"os_type": _str_prop("linux | windows", "linux"),
+                             "lhost": _str_prop("listener IP", "127.0.0.1"),
+                             "lport": {"type": "integer", "default": 4444},
+                             "method": _str_prop("auto | bash | nc | python | powershell | php | perl | ruby | socat | msfvenom", "auto"),
+                             "encode": {"type": "boolean", "default": False}},
+              "required": []},
+             lambda os_type="linux", lhost="127.0.0.1", lport=4444, method="auto", encode=False:
+                 tool_gen_reverse_shell(os_type or "linux", lhost or "127.0.0.1",
+                                        lport, method or "auto", bool(encode))),
+        Tool("gen_bind_shell", "Generate a bind shell payload for the target.",
+             {"type": "object",
+              "properties": {"os_type": _str_prop("linux | windows", "linux"),
+                             "port": {"type": "integer", "default": 4444},
+                             "method": _str_prop("auto | nc | python | powershell | socat", "auto")},
+              "required": []},
+             lambda os_type="linux", port=4444, method="auto":
+                 tool_gen_bind_shell(os_type or "linux", port, method or "auto")),
+        Tool("gen_webshell", "Generate a minimal web shell (php/asp/aspx/jsp) "
+             "gated by a password parameter.",
+             {"type": "object",
+              "properties": {"platform": _str_prop("php | asp | aspx | jsp", "php"),
+                             "password": _str_prop("gate password", "s3cr3t")},
+              "required": []},
+             lambda platform="php", password="s3cr3t":
+                 tool_gen_webshell(platform or "php", password or "s3cr3t")),
+        Tool("gen_listener", "Generate listener commands to catch a shell.",
+             {"type": "object",
+              "properties": {"lhost": _str_prop("bind address", "0.0.0.0"),
+                             "lport": {"type": "integer", "default": 4444},
+                             "upgrade": {"type": "boolean", "default": False}},
+              "required": []},
+             lambda lhost="0.0.0.0", lport=4444, upgrade=False:
+                 tool_gen_listener(lhost or "0.0.0.0", lport, bool(upgrade))),
+        Tool("gen_obfuscate", "Obfuscate a command for evasion testing: "
+             "base64, single/double quote, unicode (windows).",
+             {"type": "object",
+              "properties": {"payload": _str_prop("command to obfuscate"),
+                             "technique": _str_prop("b64 | single_quote | double_quote | unicode", "b64"),
+                             "os_type": _str_prop("linux | windows", "linux")},
+              "required": ["payload"]},
+             lambda payload="", technique="b64", os_type="linux":
+                 tool_gen_obfuscate(payload, technique or "b64", os_type or "linux")),
+        Tool("gen_wordlist", "Generate a candidate wordlist from base words "
+             "with leetspeak + suffixes (password/credential testing).",
+             {"type": "object",
+              "properties": {"base_words": _str_prop("comma or newline separated"),
+                             "l33t": {"type": "boolean", "default": True},
+                             "suffixes": _str_prop("comma-separated suffixes", "!,@,#,$,123,1234,2024,2025")},
+              "required": ["base_words"]},
+             lambda base_words="", l33t=True, suffixes="":
+                 tool_gen_wordlist(base_words or "", bool(l33t), suffixes or "")),
+
+        # ---- manual web attack detectors ----
+        Tool("sqli_test", "Manual boolean-based SQL injection detection on a "
+             "parameter (no sqlmap needed). Follow up with sqlmap_check.",
+             {"type": "object",
+              "properties": {"url": _str_prop("target URL"),
+                             "param": _str_prop("parameter to test"),
+                             "method": _str_prop("GET | POST", "GET"),
+                             "data": _str_prop("POST body (optional)")},
+              "required": ["url", "param"]},
+             lambda url="", param="", method="GET", data="":
+                 tool_sqli_test(url, param, method or "GET", data or "")),
+        Tool("xss_test", "Manual reflected XSS detection on a parameter.",
+             {"type": "object",
+              "properties": {"url": _str_prop("target URL"),
+                             "param": _str_prop("parameter to test"),
+                             "method": _str_prop("GET | POST", "GET"),
+                             "data": _str_prop("POST body (optional)")},
+              "required": ["url", "param"]},
+             lambda url="", param="", method="GET", data="":
+                 tool_xss_test(url, param, method or "GET", data or "")),
+        Tool("cmd_inject_test", "Manual command injection detection on a "
+             "parameter (non-destructive echo probes).",
+             {"type": "object",
+              "properties": {"url": _str_prop("target URL"),
+                             "param": _str_prop("parameter to test"),
+                             "method": _str_prop("GET | POST", "GET"),
+                             "data": _str_prop("POST body (optional)")},
+              "required": ["url", "param"]},
+             lambda url="", param="", method="GET", data="":
+                 tool_cmd_inject_test(url, param, method or "GET", data or "")),
+        Tool("path_traversal_test", "Manual path traversal / LFI detection on "
+             "a parameter (passwd / win.ini / proc signatures).",
+             {"type": "object",
+              "properties": {"url": _str_prop("target URL"),
+                             "param": _str_prop("parameter to test"),
+                             "method": _str_prop("GET | POST", "GET"),
+                             "data": _str_prop("POST body (optional)")},
+              "required": ["url", "param"]},
+             lambda url="", param="", method="GET", data="":
+                 tool_path_traversal_test(url, param, method or "GET", data or "")),
+        Tool("ssrf_test", "SSRF detection via an external callback URL you "
+             "control (listener / webhook.site / interactsh).",
+             {"type": "object",
+              "properties": {"url": _str_prop("target URL"),
+                             "param": _str_prop("parameter to test"),
+                             "callback_url": _str_prop("your callback URL")},
+              "required": ["url", "param", "callback_url"]},
+             lambda url="", param="", callback_url="":
+                 tool_ssrf_test(url, param, callback_url or "")),
+        Tool("open_redirect_test", "Manual open redirect detection on a parameter.",
+             {"type": "object",
+              "properties": {"url": _str_prop("target URL"),
+                             "param": _str_prop("parameter to test")},
+              "required": ["url", "param"]},
+             lambda url="", param="": tool_open_redirect_test(url, param)),
+
+        # ---- findings & reporting ----
+        Tool("add_finding", "Log a vulnerability finding for the engagement "
+             "(asset, title, severity, CWE, evidence, impact, remediation).",
+             {"type": "object",
+              "properties": {"asset": _str_prop("affected URL/host/endpoint"),
+                             "title": _str_prop("short finding title"),
+                             "severity": _str_prop("critical | high | medium | low | info", "medium"),
+                             "cwe": _str_prop("e.g. CWE-89", ""),
+                             "description": _str_prop("what and where", ""),
+                             "evidence": _str_prop("proof: payload + response excerpt", ""),
+                             "impact": _str_prop("demonstrated blast radius", ""),
+                             "remediation": _str_prop("fix guidance", ""),
+                             "confidence": _str_prop("low | medium | high | confirmed", "medium"),
+                             "status": _str_prop("open | confirmed | needs-validation | hypothesis | false-positive | fixed", "open")},
+              "required": ["asset", "title"]},
+             lambda asset="", title="", severity="medium", cwe="", description="", evidence="", impact="", remediation="", confidence="medium", status="open":
+                 tool_add_finding(asset, title, severity or "medium", cwe or "", description or "", evidence or "", impact or "", remediation or "", confidence or "medium", status or "open")),
+        Tool("list_findings", "List all logged findings, optionally filtered "
+             "by severity/status.",
+             {"type": "object",
+              "properties": {"severity": _str_prop("comma list e.g. high,critical", ""),
+                             "status": _str_prop("comma list e.g. open,confirmed", ""),
+                             "sort_by": _str_prop("severity | asset | ts", "severity")},
+              "required": []},
+             lambda severity="", status="", sort_by="severity":
+                 tool_list_findings(severity or "", status or "", sort_by or "severity")),
+        Tool("update_finding", "Update a logged finding by id (severity, status, remediation...).",
+             {"type": "object",
+              "properties": {"finding_id": _str_prop("e.g. F-1A2B3C4D"),
+                             "severity": _str_prop("critical | high | medium | low | info", ""),
+                             "status": _str_prop("open | confirmed | false-positive | fixed | ...", ""),
+                             "title": _str_prop("new title", ""),
+                             "remediation": _str_prop("new remediation", ""),
+                             "confidence": _str_prop("low | medium | high | confirmed", "")},
+              "required": ["finding_id"]},
+             lambda finding_id="", severity="", status="", title="", remediation="", confidence="":
+                 tool_update_finding(finding_id or "", severity or "", status or "", title or "", remediation or "", confidence or "")),
+        Tool("delete_finding", "Delete a finding by id.",
+             {"type": "object",
+              "properties": {"finding_id": _str_prop("e.g. F-1A2B3C4D")},
+              "required": ["finding_id"]},
+             lambda finding_id="": tool_delete_finding(finding_id or "")),
+        Tool("write_report", "Generate a complete Markdown penetration test "
+             "report from the logged findings (exec summary, severity table, "
+             "detailed findings, remediation).",
+             {"type": "object",
+              "properties": {"target": _str_prop("assessed asset / engagement name"),
+                             "author": _str_prop("report author", "HackerAI Agent"),
+                             "output_path": _str_prop("optional file path"),
+                             "include_open_only": {"type": "boolean", "default": False},
+                             "include_remediation": {"type": "boolean", "default": True}},
+              "required": ["target"]},
+             lambda target="", author="HackerAI Agent", output_path="", include_open_only=False, include_remediation=True:
+                 tool_write_report(target or "", author or "HackerAI Agent", output_path or "", bool(include_open_only), bool(include_remediation))),
+
+        # ---- scope enforcement ----
+        Tool("set_scope", "Set the engagement scope: comma-separated domains, "
+             "IPs, CIDRs, URLs. Only these targets may be tested.",
+             {"type": "object",
+              "properties": {"targets": _str_prop("comma-separated targets"),
+                             "note": _str_prop("optional engagement note", "")},
+              "required": ["targets"]},
+             lambda targets="", note="": tool_set_scope(targets or "", note or "")),
+        Tool("show_scope", "Show the current engagement scope.",
+             {"type": "object", "properties": {}, "required": []},
+             lambda: tool_show_scope()),
+        Tool("check_scope", "Verify a host/URL is inside the declared engagement "
+             "scope before scanning it. Returns ALLOWED or BLOCKED.",
+             {"type": "object",
+              "properties": {"host": _str_prop("host, IP or URL to check")},
+              "required": ["host"]},
+             lambda host="": tool_check_scope(host or "")),
     ]
 
     global _REGISTRY

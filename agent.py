@@ -51,6 +51,7 @@ def main():
             api_key=cfg["api_key"],
             base_url=cfg["base_url"],
             model=cfg["model"],
+            fallback_models=cfg.get("fallback_models"),
         )
         if not cfg["api_key"] and cfg["base_url"].startswith("https://api.openai.com"):
             print("[warning] no API key set - add it via --api-key, "
@@ -61,6 +62,10 @@ def main():
     agent = Agent(
         llm, memory=memory,
         max_iterations=cfg["max_iterations"] or 12,
+        max_messages=cfg.get("max_messages") or 400,
+        spawn_timeout=cfg.get("spawn_timeout") or 900,
+        max_spawn_depth=cfg.get("max_spawn_depth") or 3,
+        allow_subagents=cfg.get("allow_subagents", True),
         confirm_terminal=(not cfg["auto"]),
     )
 

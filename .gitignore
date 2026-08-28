@@ -15,3 +15,10 @@ desktop.ini
 # Editors
 .vscode/
 .idea/
+
+# Task list runtime data
+tasks.json
+
+# Runtime chat/log data
+chats.json
+webui.log

@@ -3,6 +3,7 @@
 MockClient simulates an LLM for offline testing of the agent loop.
 """
 
+import json
 import os
 import re
 
@@ -14,18 +15,43 @@ class LLMError(Exception):
 
 
 class OpenAIClient:
-    """OpenAI-compatible chat completions client (function calling)."""
+    """OpenAI-compatible chat completions client (function calling).
+
+    Automatic failover: if the primary model errors (429, empty/invalid
+    response body, network failure), the next model in fallback_models is
+    tried in order until one answers.
+    """
+
+    FALLBACK_MODELS = [
+        "minimax/minimax-m3:free",
+        "liquid/lfm-2.5-2.6b:free",
+        "dots-studio/dots-3-note-preview:free",
+    ]
 
     def __init__(self, api_key="", base_url="https://api.openai.com/v1",
-                 model="gpt-4o-mini", timeout=120):
+                 model="gpt-4o-mini", timeout=120, fallback_models=None):
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
         self.base_url = (base_url or "https://api.openai.com/v1").rstrip("/")
         self.model = model or "gpt-4o-mini"
         self.timeout = timeout
+        self.fallback_models = list(fallback_models or self.FALLBACK_MODELS)
 
     def chat(self, messages, tools=None, temperature=0.2):
+        models = [self.model] + list(self.fallback_models)
+        last_error = None
+        for index, model in enumerate(models):
+            try:
+                return self._chat_once(model, messages, tools, temperature)
+            except LLMError as exc:
+                last_error = exc
+                if index + 1 < len(models):
+                    continue
+                raise
+        raise last_error
+
+    def _chat_once(self, model, messages, tools, temperature):
         payload = {
-            "model": self.model,
+            "model": model,
             "messages": messages,
             "temperature": temperature,
         }
@@ -40,13 +66,147 @@ class OpenAIClient:
                                  timeout=self.timeout)
         except requests.exceptions.RequestException as exc:
             raise LLMError("API request failed: %s" % exc)
+        # SSE/JSON bodies are always UTF-8; stop requests from guessing
+        # ISO-8859-1 when the upstream omits the charset (mojibake source)
+        resp.encoding = "utf-8"
         if resp.status_code != 200:
             raise LLMError("API %s: %s" % (resp.status_code, resp.text[:500]))
-        data = resp.json()
+        if not resp.text or not resp.text.strip():
+            raise LLMError("API 200: empty response body from model '%s'" % model)
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            raise LLMError("API 200: invalid JSON from model '%s': %s"
+                           % (model, exc))
         try:
             return data["choices"][0]["message"]
-        except (KeyError, IndexError):
+        except (KeyError, IndexError, TypeError):
             raise LLMError("Unexpected API response: %s" % str(data)[:500])
+
+
+    def chat_stream(self, messages, tools=None, temperature=0.2):
+        """Stream a completion: yields delta events, then a message event.
+
+        Models are tried in order (primary + fallback_models) until one
+        actually produces content. A model that errors out before the first
+        token (429, empty/whitespace body, invalid JSON, connection failure)
+        is skipped and the next candidate is tried.
+        """
+        models = [self.model] + list(self.fallback_models)
+        last_error = None
+        for index, model in enumerate(models):
+            try:
+                produced = False
+                for ev in self._stream_once(model, messages, tools, temperature):
+                    if ev["type"] == "delta":
+                        produced = True
+                    yield ev
+                if produced:
+                    return
+                last_error = LLMError("model '%s' returned no content" % model)
+            except LLMError as exc:
+                last_error = exc
+            if index + 1 < len(models):
+                continue
+            break
+        raise last_error
+    def _stream_once(self, model, messages, tools, temperature):
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": True,
+        }
+        if tools:
+            payload["tools"] = tools
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = "Bearer " + self.api_key
+        url = self.base_url + "/chat/completions"
+        try:
+            resp = requests.post(url, headers=headers, json=payload,
+                                 timeout=self.timeout, stream=True)
+        except requests.exceptions.RequestException as exc:
+            raise LLMError("API request failed: %s" % exc)
+        # SSE/JSON bodies are always UTF-8; stop requests from guessing
+        # ISO-8859-1 when the upstream omits the charset (mojibake source)
+        resp.encoding = "utf-8"
+        if resp.status_code != 200:
+            body = ""
+            try:
+                body = resp.text[:500]
+            except Exception:
+                pass
+            resp.close()
+            raise LLMError("API %s: %s" % (resp.status_code, body))
+
+        content_parts = []
+        tool_slots = {}
+        try:
+            for raw in resp.iter_lines(decode_unicode=True):
+                if not raw:
+                    continue
+                line = raw.strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                except ValueError:
+                    continue
+                try:
+                    choice = chunk["choices"][0]
+                except (KeyError, IndexError, TypeError):
+                    continue
+                delta = choice.get("delta") or {}
+                if delta.get("content"):
+                    content_parts.append(delta["content"])
+                    yield {"type": "delta", "content": delta["content"]}
+                for tc in delta.get("tool_calls") or []:
+                    try:
+                        idx = int(tc.get("index", 0))
+                    except (TypeError, ValueError):
+                        idx = 0
+                    slot = tool_slots.get(idx)
+                    if slot is None:
+                        slot = tool_slots[idx] = {
+                            "id": tc.get("id") or "call_%d" % idx,
+                            "name": "",
+                            "args": "",
+                        }
+                    fn = tc.get("function") or {}
+                    if tc.get("id"):
+                        slot["id"] = tc["id"]
+                    if fn.get("name"):
+                        slot["name"] += fn["name"]
+                    if fn.get("arguments"):
+                        slot["args"] += fn["arguments"]
+        except requests.exceptions.RequestException:
+            pass
+        finally:
+            resp.close()
+
+        tool_calls = []
+        for idx in sorted(tool_slots):
+            slot = tool_slots[idx]
+            args = slot["args"] or "{}"
+            try:
+                json.loads(args)
+            except ValueError:
+                pass
+            tool_calls.append({
+                "id": slot["id"],
+                "type": "function",
+                "function": {"name": slot["name"], "arguments": args},
+            })
+        message = {
+            "role": "assistant",
+            "content": "".join(content_parts),
+            "tool_calls": tool_calls or None,
+        }
+        yield {"type": "message", "message": message}
 
 
 class MockClient:
@@ -61,6 +221,7 @@ class MockClient:
       search <query>         -> calls web_search
       fetch <url>            -> calls open_url
       spawn <task>           -> calls spawn_agent
+      spawns <json tasks>    -> calls spawn_agents (parallel)
       plan <cmd>             -> run_terminal, then final answer
       system info            -> calls system_info
       list tools             -> calls list_tools
@@ -121,6 +282,8 @@ class MockClient:
             return call("open_url", '{"url": "%s"}' % text[6:].strip())
         if lower.startswith("spawn ") and "spawn_agent" in names:
             return call("spawn_agent", '{"task": "%s"}' % text[6:].replace('"', '\\"'))
+        if lower.startswith("spawns ") and "spawn_agents" in names:
+            return call("spawn_agents", '{"tasks": "%s"}' % text[7:].replace('"', '\\"'))
         if lower.startswith("plan ") and "run_terminal" in names:
             cmd = text[5:].strip()
             step1 = call("run_terminal", '{"command": "%s"}' % cmd.replace('"', '\\"'))
@@ -141,3 +304,12 @@ class MockClient:
         answer = ("Mock LLM reply: understood your message. "
                   "(Run with a real API key to unlock full reasoning.)")
         return {"role": "assistant", "content": answer}
+    def chat_stream(self, messages, tools=None, temperature=0.2):
+        """Mock streaming: simulate the delta -> message event sequence."""
+        message = self.chat(messages, tools=tools, temperature=temperature)
+        content = message.get("content") or ""
+        words = content.split(" ")
+        for i in range(0, len(words), 3):
+            chunk = " ".join(words[i:i + 3])
+            yield {"type": "delta", "content": chunk + " "}
+        yield {"type": "message", "message": message}
