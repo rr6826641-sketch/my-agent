@@ -35,7 +35,7 @@ def build_parser():
     p.add_argument("--once", default="", help="Run a single query and exit")
     p.add_argument("--memory-file", default="", help="Path to memory JSON file")
     p.add_argument("--max-iterations", type=int, default=0,
-                   help="Max tool-call loop iterations (default 12)")
+                   help="Max tool-call loop iterations (default 60)")
     return p
 
 
@@ -61,7 +61,7 @@ def main():
     interactive = sys.stdin.isatty() and not cfg["once"]
     agent = Agent(
         llm, memory=memory,
-        max_iterations=cfg["max_iterations"] or 12,
+        max_iterations=cfg["max_iterations"] or 60,
         max_messages=cfg.get("max_messages") or 400,
         spawn_timeout=cfg.get("spawn_timeout") or 900,
         max_spawn_depth=cfg.get("max_spawn_depth") or 3,

@@ -13,7 +13,7 @@ DEFAULTS = {
     "auto": False,
     "once": "",
     "memory_file": os.path.join(PROJECT_DIR, "memory.json"),
-    "max_iterations": 12,
+    "max_iterations": 60,
 }
 
 ENV_MAP = {

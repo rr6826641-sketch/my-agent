@@ -46,10 +46,10 @@ SYSTEM_PROMPT_FILE = os.path.join(
 
 class Agent:
     def __init__(self, llm, memory=None, name="HackerAI",
-                 max_iterations=12, max_messages=150,
+                 max_iterations=60, max_messages=400,
                  confirm_terminal=False, spawn_fn=None,
-                 spawn_depth=0, max_spawn_depth=2, allow_subagents=True,
-                 spawn_timeout=600):
+                 spawn_depth=0, max_spawn_depth=3, allow_subagents=True,
+                 spawn_timeout=900):
         self.llm = llm
         self.memory = memory
         self.name = name

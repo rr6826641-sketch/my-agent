@@ -4,6 +4,8 @@ Add your own tools by writing a function in any module here and one
 Tool(...) entry below. The LLM discovers them automatically.
 """
 
+import os
+
 from .base import Tool, execute_tool, truncate
 from .system import (
     tool_system_info, tool_current_time, tool_process_list,
@@ -65,6 +67,10 @@ from .webtests import (
 from .scope import (
     tool_set_scope, tool_show_scope, tool_check_scope,
 )
+from .custom import (
+    tool_sha1_quick, tool_strings_extract, tool_html_to_text,
+    tool_dedupe_lines, tool_count_lines,
+)
 
 from .base import Tool as _Tool  # noqa: F401
 
@@ -105,6 +111,14 @@ def create_tools(memory, confirm_terminal=True, spawn_fn=None,
 
     def _recall(query=""):
         return memory.recall(query or None)
+
+    def _vector_search(query="", top_k=5):
+        return memory.vector_search(query or "", int(top_k or 5))
+
+    def _rag_index(folder=""):
+        return memory.index_documents(folder or os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__)))), "docs"))
 
     REGISTRY = [
         # ---- core ----
@@ -158,6 +172,24 @@ def create_tools(memory, confirm_terminal=True, spawn_fn=None,
               "properties": {"query": _str_prop("optional keyword filter", "")},
               "required": []},
              lambda query="": _recall(query)),
+        Tool("vector_search",
+             "RAG semantic search over saved notes + indexed documents. "
+             "Returns the most relevant notes/chunks with similarity scores "
+             "for a natural-language query. Use before answering when the "
+             "question depends on saved knowledge.",
+             {"type": "object",
+              "properties": {"query": _str_prop("natural-language query"),
+                             "top_k": {"type": "integer", "default": 5}},
+              "required": ["query"]},
+             lambda query="", top_k=5: _vector_search(query, top_k)),
+        Tool("rag_index",
+             "Index documents (txt/md/csv/json/log) from a folder into "
+             "memory for vector_search. Default folder: ./docs in the "
+             "project root.",
+             {"type": "object",
+              "properties": {"folder": _str_prop("folder path (optional)", "")},
+              "required": []},
+             lambda folder="": _rag_index(folder)),
         Tool("spawn_agent",
              "Create a sub-agent that independently works on a task and "
              "returns its final answer. Use for parallel/specialized work.",
@@ -448,6 +480,45 @@ def create_tools(memory, confirm_terminal=True, spawn_fn=None,
               "properties": {"count": {"type": "integer", "default": 1}},
               "required": []},
              lambda count=1: tool_uuid_gen(int(count or 1))),
+
+        # ---- custom utilities ----
+        Tool("sha1_quick", "Quick SHA1 hash of a file (streaming).",
+             {"type": "object",
+              "properties": {"path": _str_prop("file path")},
+              "required": ["path"]},
+             lambda path="": tool_sha1_quick(path)),
+        Tool("strings_extract", "Extract printable strings from a binary/file "
+             "(recon, malware, config dumps).",
+             {"type": "object",
+              "properties": {"path": _str_prop("file path"),
+                             "min_len": {"type": "integer", "default": 4},
+                             "limit": {"type": "integer", "default": 200}},
+              "required": ["path"]},
+             lambda path="", min_len=4, limit=200:
+                 tool_strings_extract(path, int(min_len or 4), int(limit or 200))),
+        Tool("html_to_text", "Convert HTML (URL or raw source) into readable "
+             "text - useful to read page content without tags.",
+             {"type": "object",
+              "properties": {"source": _str_prop("URL or raw HTML string"),
+                             "max_chars": {"type": "integer", "default": 4000}},
+              "required": ["source"]},
+             lambda source="", max_chars=4000:
+                 tool_html_to_text(source or "", int(max_chars or 4000))),
+        Tool("dedupe_lines", "Remove duplicate lines from a file (wordlist/scope "
+             "cleanup); optionally write the cleaned file.",
+             {"type": "object",
+              "properties": {"path": _str_prop("input file"),
+                             "output_path": _str_prop("output file (optional)", "")},
+              "required": ["path"]},
+             lambda path="", output_path="":
+                 tool_dedupe_lines(path, output_path or "")),
+        Tool("count_lines", "Count lines in a file, optionally matching a regex.",
+             {"type": "object",
+              "properties": {"path": _str_prop("file path"),
+                             "pattern": _str_prop("regex (optional)", "")},
+              "required": ["path"]},
+             lambda path="", pattern="":
+                 tool_count_lines(path, pattern or "")),
 
         # ---- pentest arsenal (external binary wrappers) ----
         Tool("nmap_scan", "Run nmap against a host with service detection "

@@ -2,7 +2,7 @@
 
 Ye ek complete AI agent hai jo **sochta hai, tools use karta hai, aur kaam karta hai** — bilkul HackerAI jaise. Aap ise apni machine par chala sakte ho, kisi bhi OpenAI-compatible LLM ke saath jod sakte ho, aur apne khud ke tools add kar sakte ho.
 
-**Total 93 built-in tools** — terminal, files, web, network, recon, code, memory, sub-agents (parallel bhi), payload generation, manual web attack detectors, findings/reporting, scope enforcement, aur complete pentest arsenal wrappers (nmap, sqlmap, nikto, nuclei, ffuf, gobuster, subfinder, httpx, curl, JWT).
+**Total 100 built-in tools** — terminal, files, web, network, recon, code, memory + RAG (vector search), sub-agents (parallel bhi), payload generation, manual web attack detectors, findings/reporting, scope enforcement, custom file utilities, aur complete pentest arsenal wrappers (nmap, sqlmap, nikto, nuclei, ffuf, gobuster, subfinder, httpx, curl, JWT).
 
 **Web UI included** — dark hacker-theme dashboard (chat + streaming tool calls, tools catalog, memory manager, settings, system info). Chalao: double-click `start_ui.bat` → browser mein http://127.0.0.1:8080
 
@@ -17,7 +17,7 @@ Ye ek complete AI agent hai jo **sochta hai, tools use karta hai, aur kaam karta
 | 💻 Terminal Access | Commands chala sakta hai, output parh kar jawab deta hai |
 | 📁 File Tools | Files padhna, likhna, search, grep, hash, archive, diff, PDF/image info |
 | 🌐 Web Tools | Web search (bina API key), page fetch, headers audit, tech detect, link extract |
-| 🧠 Persistent Memory | Facts yaad rakhta hai `memory.json` mein — naye session mein bhi |
+| 🧠 Persistent Memory + RAG | Facts yaad rakhta hai `memory.json` mein + `rag_index`/`vector_search` se documents ka TF-IDF vector search (pure Python) |
 | 👥 Sub-Agents | Kaam ke liye child agents spawn karta hai — **ab parallel bhi** (`spawn_agents`, max 8 ek saath) |
 | 💣 Payload Gen | Reverse/bind shells, web shells, listeners, obfuscation, wordlists — turant ready-to-use |
 | 🔍 Manual Web Tests | SQLi / XSS / CMDi / path traversal / SSRF / open redirect — bina bhari tool ke quick probes |
@@ -66,7 +66,7 @@ py -3 webui.py --port 8080
 
 Web UI features:
 - **Chat** — SSE streaming, har tool call live dikhta hai (start → tool_call → tool_result → final)
-- **Tools** — saare 93 tools ki catalog + parameters
+- **Tools** — saare 100 tools ki catalog + parameters
 - **Memory** — persistent memory add/delete karo
 - **Settings** — API key/base_url/model/mock mode browser se save karo (config.json mein)
 - **System** — OS, IPs, disk info
@@ -129,7 +129,7 @@ copy .env.example .env
 
 ---
 
-## 🛠️ 93 Built-in Tools
+## 🛠️ 100 Built-in Tools
 
 ### Core
 | Tool | Kya karta hai |
@@ -208,6 +208,11 @@ copy .env.example .env
 | `encode_decode` | base64/hex/url/base32/rot13 |
 | `hash_text` | String hashing (md5/sha1/sha256/sha512) |
 | `uuid_gen` | UUID v4 generate karo |
+| `sha1_quick` | File ka quick SHA1 hash (single line output) |
+| `strings_extract` | Binary/file se printable strings nikalo |
+| `html_to_text` | HTML/URL se clean readable text (tags hata kar) |
+| `dedupe_lines` | File ki duplicate lines hatao |
+| `count_lines` | File ki lines count karo (regex filter ke saath) |
 
 ### 🛡️ Pentest Arsenal (10 wrappers — scope complete)
 | Tool | Kya karta hai | Tool install kahan se |
@@ -224,6 +229,10 @@ copy .env.example .env
 | `jwt_decode` | JWT decode + signature check | Pure Python (koi install nahi) |
 
 > Wrapper auto-detect karta hai `shutil.which` se. Tool installed nahi hai toh clear install hint deta hai (binary install karne ki zaroorat nahi — bas path par hona chahiye).
+>
+> **Is machine par pre-installed:** nmap 7.80, sqlmap (pip runner), nuclei v3.11.1, ffuf v2.2.1, gobuster v3.8.2, subfinder v2.16.0, httpx v1.10.0 — `E:\HackerAI\pentest-tools\bin` (user PATH mein add hai).
+>
+> ⚠️ **Windows Defender caveat:** `nikto.pl` aur raw `sqlmap.py` ko Defender PUA detection block karta hai (admin ke bina exclusion add nahi ho sakta). Isliye sqlmap pip package ke through chalta hai (`bin/sqlmap.cmd`). Nikto ke liye admin rights se `Add-MpPreference -ExclusionPath 'E:\HackerAI\pentest-tools'` chalao — phir `nikto_scan` kaam karega.
 
 ### 💣 Payload Generation
 | Tool | Kya karta hai |
@@ -260,6 +269,12 @@ copy .env.example .env
 | `set_scope` | Authorized targets declare karo (domains/IPs/CIDRs/URLs) |
 | `show_scope` | Current scope dikhao |
 | `check_scope` | Host scope mein hai ya nahi — ALLOWED/BLOCKED verdict |
+
+### 🧠 RAG (Vector Search)
+| Tool | Kya karta hai |
+|---|---|
+| `rag_index` | Documents/files ka index banao (pure-Python TF-IDF, koi ML dependency nahi) |
+| `vector_search` | Indexed text mein cosine-similarity search — query se related chunks (top-k) |
 
 ---
 
@@ -300,7 +315,7 @@ Aapka message
       │ tool call (JSON)
       ▼
 ┌─────────────────────┐
-│  Tools (93)         │──► run_terminal, read_file, web_search,
+│  Tools (100)        │──► run_terminal, read_file, web_search,
 │  (think→act→observe)│    remember, spawn_agent, nmap_scan, ...
 └─────────────────────┘
       │ result
@@ -323,10 +338,10 @@ my-agent/
 ├── ai_agent/
 │   ├── core.py                 # Agent class + think→act→observe loop
 │   ├── llm.py                  # OpenAI-compatible client + Mock client
-│   ├── memory.py               # Persistent memory (JSON, thread-safe)
+│   ├── memory.py               # Persistent memory (JSON) + RAG (TF-IDF vector search)
 │   ├── config.py               # .env / config.json / flags loading
 │   └── tools/
-│       ├── __init__.py         # 93-tool registry + create_tools()
+│       ├── __init__.py         # 100-tool registry + create_tools()
 │       ├── base.py             # Tool class + execute_tool()
 │       ├── terminal.py         # run_terminal, file read/write, list
 │       ├── system.py           # system_info, time, processes, disk, ip
@@ -340,7 +355,9 @@ my-agent/
 │       ├── webtests.py         # manual SQLi/XSS/CMDi/traversal/SSRF/redirect probes
 │       ├── reporting.py        # findings log + Markdown pentest report
 │       ├── scope.py            # engagement scope guard (set/show/check)
+│       ├── custom.py           # custom utilities (sha1_quick, strings, html_to_text, dedupe, count)
 │       └── pentest.py          # nmap/sqlmap/nikto/nuclei/ffuf/gobuster/subfinder/httpx/curl/JWT wrappers
+├── test_new_tools.py           # 47 unit tests (payloads, webtests, reporting, scope, RAG, spawn)
 ├── findings.jsonl              # logged findings (write_report isse report banata hai)
 ├── scope.json                  # declared engagement scope
 ├── requirements.txt            # sirf requests
@@ -372,8 +389,8 @@ Bas — LLM khud naya tool discover kar lega aur jab zaroorat ho use karega.
 ## 📈 Ise aur powerful kaise banayein
 
 1. **Best model lagao** — Settings page mein API key daalo (OpenAI/Groq/OpenRouter/Ollama)
-2. **Pentest binaries install karo** — nmap, sqlmap, nikto, nuclei, ffuf, gobuster, subfinder, httpx PATH par honge toh agent unhe automatically use karega
-3. **RAG add karo** — apne documents/notes ka vector search memory mein
+2. **Pentest binaries** — is machine par `E:\HackerAI\pentest-tools\bin` mein install hain (PATH mein); dusri machine par inhe PATH par laga do toh agent automatically use karega
+3. **RAG use karo** — `rag_index` se documents index karo, phir `vector_search` se nikal lo (koi ML dependency nahi)
 4. **Bigger context** — `config.json` mein `max_iterations` ab default 60 hai (pehle 15) — bade tasks ke liye
 5. **Scheduled/parallel sub-agents** — `spawn_agents` se ek saath 8 tasks chalao
 
@@ -386,7 +403,10 @@ Bas — LLM khud naya tool discover kar lega aur jab zaroorat ho use karega.
 - **Manual web attack probes** — SQLi/XSS/CMDi/traversal/SSRF/open redirect quick tests
 - **Professional reporting** — findings tracker + Markdown pentest report generator
 - **Scope enforcement** — `set_scope`/`check_scope` se authorized targets ki guarding
-- **93 tools total** (pehle 59) — registry, config aur prompt sab upgrade ho chuke
+- **RAG vector search** — `rag_index` + `vector_search` (pure-Python TF-IDF + cosine)
+- **Custom file utilities** — sha1_quick, strings_extract, html_to_text, dedupe_lines, count_lines
+- **Unit test suite** — `test_new_tools.py` (47 tests, sab pass)
+- **100 tools total** (pehle 59) — registry, config aur prompt sab upgrade ho chuke
 
 ---
 

@@ -99,7 +99,7 @@ def _build_agent(cfg):
             fallback_models=cfg.get("fallback_models"),
         )
     agent = Agent(llm, memory=memory,
-                  max_iterations=cfg.get("max_iterations") or 12,
+                  max_iterations=cfg.get("max_iterations") or 60,
                   max_messages=cfg.get("max_messages") or 400,
                   spawn_timeout=cfg.get("spawn_timeout") or 900,
                   max_spawn_depth=cfg.get("max_spawn_depth") or 3,
@@ -447,7 +447,7 @@ def api_settings():
         "base_url": cfg.get("base_url", ""),
         "model": cfg.get("model", ""),
         "mock": bool(cfg.get("mock")),
-        "max_iterations": cfg.get("max_iterations", 12),
+        "max_iterations": cfg.get("max_iterations", 60),
     })
 
 
