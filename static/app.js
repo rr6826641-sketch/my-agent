@@ -167,6 +167,8 @@ function renderSession(s) {
       addValidationCard(m.status, m.finding, m.reason);
     } else if (m.role === "assistant" && m.kind === "validation_done") {
       addValidationSummary(m.content, m.verified, m.rejected, m.unverified, m.count);
+    } else if (m.role === "assistant" && m.kind === "validation_spawned") {
+      addValidationSpawned(m.reason, m.count);
     } else if (m.role === "tool" && m.validator) {
       addValidationToolCard(m.name || "?", typeof m.arguments === "string" ? m.arguments : JSON.stringify(m.arguments || ""));
       if (m.result != null) {
@@ -383,6 +385,18 @@ function addValidationHeader(count) {
   return div;
 }
 
+function addValidationSpawned(reason, count) {
+  const div = document.createElement("div");
+  div.className = "validation-card val-start";
+  div.innerHTML =
+    `<span class="val-ico">🛡</span><span class="val-body"><b>[VALIDATION SUB-AGENT]</b>` +
+    ` spawned for ${Number(count) || 0} finding(s)` +
+    (reason ? ` — ${escapeHtml(reason)}` : "") + `…</span>`;
+  chatLog.appendChild(div);
+  scrollDown();
+  return div;
+}
+
 function addValidationToolCard(name, args) {
   const div = document.createElement("div");
   div.className = "toolcard val-tool";
@@ -576,6 +590,11 @@ function sendMessage(text) {
       // end-of-turn panel: saved scan outputs + markdown report button
       typing.remove();
       renderArtifactsPanel(e.artifacts, e.chat_id);
+    } else if (e.type === "validation_spawned") {
+      // an independent validation sub-agent was spawned for critical/high
+      // findings, complex bugs, or unresolved findings
+      typing.remove();
+      addValidationSpawned(e.reason, e.count);
     } else if (e.type === "validation_start") {
       // validator child began re-checking; preview (main answer) must survive
       typing.remove();

@@ -60,6 +60,51 @@ _RE_HEADER_CLAIM = re.compile(
     r"X-Content-Type-Options|Referrer-Policy|Permissions-Policy|"
     r"X-XSS-Protection)\b", re.I)
 
+# ---------------------------------------------------------------------------
+# Severity heuristics for the automated validation loop.
+# ---------------------------------------------------------------------------
+# Drives the sub-agent orchestration in ai_agent/core.py: any finding the
+# agent reports as CRITICAL or HIGH severity (keyword, CVSS score, or
+# inherently high-impact vulnerability class) ALWAYS triggers an independent
+# validation sub-agent (spawn_agent machinery) that re-checks the claim and
+# re-verifies the payload before the result can be marked verified.
+_SEV_CRITICAL = re.compile(
+    r"\b(?:critical|catastrophic)\b"
+    r"|\bCVSS\s*(?:score\s*)?(?:9|10)(?:\.\d+)?\b"
+    r"|\b(?:rce|remote code execution|remote command execution)\b"
+    r"|\b(?:unauthenticated|pre[- ]auth)\s+(?:rce|remote code execution|\w+)\b",
+    re.I)
+_SEV_HIGH = re.compile(
+    r"\b(?:high[- ]severity|high[- ]risk|severity\s*[:=]\s*high|risk\s*[:=]\s*high)\b"
+    r"|\bCVSS\s*(?:score\s*)?(?:7|8)(?:\.\d+)?\b"
+    r"|\b(?:privilege escalation|privesc|auth(?:entication)? bypass|\barbitrary code\b)"
+    r"|\bbypass\s+(?:authentication|access control|auth)\b",
+    re.I)
+_SEV_MEDIUM = re.compile(
+    r"\b(?:medium[- ]severity|medium[- ]risk|severity\s*[:=]\s*medium)\b"
+    r"|\bCVSS\s*(?:score\s*)?(?:4|5|6)(?:\.\d+)?\b"
+    r"|\b(?:xss|cross[- ]site scripting|csrf|ssrf|idor|open redirect|clickjacking|"
+    r"information disclosure|directory listing|security misconfig\w*)\b",
+    re.I)
+
+# Injection-class keywords used to pick the matching payload re-verification
+# plan for each finding the validation sub-agent receives.
+_RE_SQLI_CLAIM = re.compile(
+    r"\b(?:sqli|sql injection|sql error|sqlmap)\b", re.I)
+_RE_XSS_CLAIM = re.compile(
+    r"\b(?:xss|cross[- ]site scripting|reflected|stored)\b", re.I)
+_RE_CMDI_CLAIM = re.compile(
+    r"\b(?:cmd ?i|command injection|command execution|os command|rce)\b", re.I)
+_RE_PT_CLAIM = re.compile(
+    r"\b(?:path traversal|directory traversal|lfi|file read|arbitrary file|traversal)\b",
+    re.I)
+_RE_SSRF_CLAIM = re.compile(
+    r"\bssrf|server[- ]side request forgery\b", re.I)
+_RE_XXE_CLAIM = re.compile(r"\bxxe|xml external entit\w*\b", re.I)
+_RE_SSTI_CLAIM = re.compile(
+    r"\bssti|server[- ]side template injection\b", re.I)
+_RE_OR_CLAIM = re.compile(r"\bopen redirect\b", re.I)
+
 
 def _verdict(status, reason, evidence=""):
     return {"status": status, "reason": reason, "evidence": evidence,
@@ -254,6 +299,95 @@ def classify_finding(value):
     if _RE_DOMAIN.search(value):
         return "subdomain"
     return "vuln"
+
+
+def classify_severity(value):
+    """Best-guess severity of a finding claim: critical|high|medium|low.
+
+    Used by the automated validation loop in ai_agent/core.py: claims that
+    classify as critical or high severity ALWAYS trigger an independent
+    validation sub-agent (spawn_agent machinery) so the payload is
+    cross-checked before the result can be marked verified.
+    """
+    value = value or ""
+    if _SEV_CRITICAL.search(value):
+        return "critical"
+    if _SEV_HIGH.search(value):
+        return "high"
+    if _SEV_MEDIUM.search(value):
+        return "medium"
+    return "low"
+
+
+def needs_subagent_validation(value):
+    """True when a finding claim must be handed to the independent
+    validation sub-agent (critical/high severity)."""
+    return classify_severity(value) in ("critical", "high")
+
+
+# ---------------------------------------------------------------------------
+# Payload re-verification plans for the validation sub-agent.
+# ---------------------------------------------------------------------------
+# Each finding handed to the spawned validator carries the matching plan so
+# the sub-agent re-runs the EXACT payload (safe, non-destructive) and only
+# marks VERIFIED when the payload provokes the expected distinguishing
+# response - this is the false-positive rejection net.
+PAYLOAD_VERIFY_GUIDANCE = {
+    "sqli": ("Re-run the EXACT SQLi payload and confirm the distinguishing "
+             "response (SQL error text, timing delay, or boolean difference) "
+             "- VERIFIED only when the payload provokes it"),
+    "xss": ("Re-send the exact XSS payload and confirm it is reflected in the "
+            "response (and executed in a real browser context when possible) "
+            "before VERIFIED"),
+    "cmdi": ("Re-execute the command-injection payload with a benign marker "
+              "(e.g. '; echo VALID8' / '| nslookup marker.example') and "
+              "confirm the marker appears in the output"),
+    "path_traversal": ("Re-request the traversal payload (e.g. ../../etc/passwd) "
+                        "and confirm a distinguishable file/directory in the "
+                        "response before VERIFIED"),
+    "ssrf": ("Re-fetch through the vulnerable parameter with the payload URL "
+             "and confirm the response reflects the fetched resource before "
+             "VERIFIED"),
+    "xxe": ("Re-submit the XML payload and confirm entity expansion / external "
+            "content appears in the returned data"),
+    "ssti": ("Re-submit the template payload and confirm the evaluated output "
+              "marker appears in the response"),
+    "open_redirect": ("Re-send the redirect payload and confirm a 3xx Location "
+                       "header points to the supplied destination"),
+    "cve": ("Confirm the CVE exists in the vulnerability databases AND the "
+             "identified software/version is within the affected range"),
+    "open_port": ("Re-probe the exact host:port with a TCP connect and confirm "
+                   "the port accepts connections"),
+    "subdomain": ("Re-resolve the subdomain with DNS and confirm an A/AAAA "
+                   "record exists"),
+    "header": ("Re-run a live header audit on the URL and confirm the claimed "
+                "header is present/missing"),
+    "generic": ("Re-run a benign request against the target and confirm the "
+                 "response supports the claim - never VERIFIED on the main "
+                 "agent's word alone"),
+}
+
+
+def payload_verify_plan(value):
+    """Return the payload-verification guidance line for a finding value."""
+    value = value or ""
+    if _RE_CVE.search(value):
+        return PAYLOAD_VERIFY_GUIDANCE["cve"]
+    if _RE_HOST_PORT.search(value) or re.search(r"\bport\s+\d+\b", value,
+                                                re.I):
+        return PAYLOAD_VERIFY_GUIDANCE["open_port"]
+    if _RE_DOMAIN.search(value) and not _RE_URL.search(value):
+        return PAYLOAD_VERIFY_GUIDANCE["subdomain"]
+    for key, pat in (("sqli", _RE_SQLI_CLAIM), ("xss", _RE_XSS_CLAIM),
+                     ("cmdi", _RE_CMDI_CLAIM),
+                     ("path_traversal", _RE_PT_CLAIM),
+                     ("ssrf", _RE_SSRF_CLAIM), ("xxe", _RE_XXE_CLAIM),
+                     ("ssti", _RE_SSTI_CLAIM),
+                     ("open_redirect", _RE_OR_CLAIM),
+                     ("header", _RE_HEADER_CLAIM)):
+        if pat.search(value):
+            return PAYLOAD_VERIFY_GUIDANCE[key]
+    return PAYLOAD_VERIFY_GUIDANCE["generic"]
 
 
 def lightweight_verify_finding(finding):

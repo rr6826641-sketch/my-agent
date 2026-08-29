@@ -382,8 +382,8 @@ def _record_event(sid, ev):
     etype = ev.get("type")
     if etype not in ("llm", "tool_call", "tool_result", "final", "error",
                      "validation_tool_call", "validation_tool_result",
-                     "validation", "validation_done", "artifacts",
-                     "tactical_reasoning"):
+                     "validation_spawned", "validation", "validation_done",
+                     "artifacts", "tactical_reasoning"):
         return
     now = time.time()
     with _chat_lock:
@@ -430,6 +430,11 @@ def _record_event(sid, ev):
                          "finding": ev.get("finding", ""),
                          "reason": ev.get("reason", "") or "",
                          "content": _validation_card_text(ev), "ts": now})
+        elif etype == "validation_spawned":
+            msgs.append({"role": "assistant", "kind": "validation_spawned",
+                         "content": ev.get("content", ""),
+                         "reason": ev.get("reason", ""),
+                         "count": ev.get("count", 0), "ts": now})
         elif etype == "validation_done":
             msgs.append({"role": "assistant", "kind": "validation_done",
                          "content": ev.get("summary", ""),

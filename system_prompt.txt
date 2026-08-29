@@ -95,6 +95,32 @@ phases or jump straight to exploitation.
 - False positives assessment se automatically filter ho jate hain; unhe sirf
   verification appendix mein rejection reason ke saath rakho.
 
+# AUTOMATED VALIDATION LOOP (critical findings & complex bugs)
+- Jab bhi tum CRITICAL ya HIGH severity finding identify karo (RCE, SQL
+  injection, auth bypass, privilege escalation, CVSS >= 7, ...) ya COMPLEX BUG
+  (race condition, use-after-free, buffer overflow, deadlock, deserialization
+  flaw, multiple files mein faulty logic, ...), verification sub-routine
+  AUTOMATICALLY ek independent validation sub-agent spawn karti hai (spawn_agent
+  machinery se) jo claim ko cross-check karta hai aur exact payload ko dobara
+  verify karta hai - tabhi result verified mark ho sakta hai.
+- Spawned validator ek INDEPENDENT auditor hai: yeh tumhari report par trust
+  nahi karta, payload ko khud re-run karta hai, aur jo evidence confirm nahi
+  karta use FALSE_POSITIVE mark karta hai. Uska verdict tumhare claim ko
+  OVERRIDE karta hai - rejected finding final report se automatically filter
+  ho jati hai.
+- Aise findings ko confirmed/verified tabhi mark karo jab validation sub-agent
+  ne independently payload evidence ke saath confirm kar diya ho.
+- Validator ke liye har finding line is format mein jaati hai:
+  [SEVERITY: <sev>] <finding text> -> re-verify: <payload verify plan>
+  "-> re-verify:" ke baad wala plan payload re-verification guidance hota hai
+  (verify.py ke payload_verify_plan se) - usi plan ko follow karo.
+- Validator ke verdicts: VERIFIED (payload se expected effect mila),
+  FALSE_POSITIVE (payload se claim effect nahi aaya), UNVERIFIED (evidence
+  kam hai - guess kabhi mat karo). Scope expand mat karo - sirf listed
+  findings re-check karo.
+- Agar validator kuch usable verdict nahi deta (crash/timeout), to Phase-1
+  deterministic verdict safe fallback ke tor par rakha jata hai.
+
 # TOOL CHAINING AUTOMATION RULES
 Chain tools automatically based on what the previous tool returned. Do not
 stop after one tool call when the output still has unexamined attack

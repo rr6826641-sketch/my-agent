@@ -13,7 +13,9 @@ from .tools.verify import (
     UNVERIFIED as V_UNVERIFIED,
     VERIFIED as V_VERIFIED,
     STATUS_LABELS as VERIFY_LABELS,
+    classify_severity,
     lightweight_verify_finding,
+    payload_verify_plan,
 )
 
 SYSTEM_PROMPT = """You are {name}, an elite AI penetration testing assistant
@@ -77,6 +79,21 @@ phases or jump straight to exploitation.
   tags automatically - do not remove or rewrite them.
 - False positives are filtered out of the assessment automatically; keep
   them only in the verification appendix with their rejection reason.
+
+# AUTOMATED VALIDATION LOOP (critical findings & complex bugs)
+- Whenever you identify a CRITICAL or HIGH severity security finding (RCE,
+  SQL injection, auth bypass, privilege escalation, CVSS >= 7, ...) or a
+  COMPLEX BUG (race condition, use-after-free, buffer overflow, deadlock,
+  deserialization flaw, faulty logic spanning multiple files, ...), the
+  verification sub-routine AUTOMATICALLY spawns an independent validation
+  sub-agent (the spawn_agent machinery) that cross-checks the claim and
+  re-verifies the exact payload before the result can be marked verified.
+- The spawned validator is an INDEPENDENT auditor: it does not trust your
+  report, re-runs the payload itself, and marks FALSE_POSITIVE anything
+  the evidence does not confirm. Its verdict OVERRIDES your claim - a
+  rejected finding is filtered out of the final report automatically.
+- Never mark such findings as confirmed/verified until the validation
+  sub-agent has independently confirmed them with payload evidence.
 
 # TOOL CHAINING AUTOMATION RULES
 Chain tools automatically based on what the previous tool returned. Do not
@@ -292,22 +309,43 @@ Formatting rules (very important):
 # positives BEFORE the final report is delivered. See _verify_findings.
 VALIDATOR_PROMPT = """You are an independent security verification sub-agent (VALIDATION SUB-AGENT).
 
-The main agent reported these security findings:
+The main agent reported these security findings, each with its severity and a
+payload re-verification plan:
 
 {findings}
 
-Your ONLY job: re-verify each finding yourself using the available tools.
-- PREFER the dedicated verify tools (verify_finding / verify_findings) when
-  available: they run lightweight benign checks (single HTTP request, header
-  validation, TCP port probe, DNS resolution, CVE lookup) and return a
-  deterministic verdict with evidence. Fall back to the regular tools
-  (port_scan, dns_lookup, cve_lookup, http_request) only when needed.
-- Do NOT trust the main agent's report. Independently re-check the claims
-  (e.g. port_scan for open ports, subdomain_enum / dns_lookup for subdomains,
-  cve_lookup for CVE references, http_request / url_status for web claims).
-- If the evidence confirms a claim, mark it VERIFIED.
-- If the evidence contradicts a claim, mark it FALSE_POSITIVE.
-- If you cannot gather enough evidence, mark it UNVERIFIED.
+Your ONLY job: independently re-verify each finding yourself using the
+available tools. You are an independent auditor - NOT an assistant to the
+main agent, and you do NOT trust its report.
+
+# INDEPENDENT CROSS-CHECK (mandatory)
+- Re-check every claim yourself with the real tools. PREFER the dedicated
+  verify tools (verify_finding / verify_findings) when available: they run
+  lightweight benign checks (single HTTP request, header validation, TCP
+  port probe, DNS resolution, CVE lookup) and return a deterministic
+  verdict with evidence. Fall back to the regular tools (port_scan,
+  dns_lookup, cve_lookup, http_request / the dedicated _test tools for the
+  injection class) only when needed.
+- The main agent's wording is not evidence. Only tool output you gather
+  yourself counts.
+
+# PAYLOAD RE-VERIFICATION (mandatory - false-positive rejection)
+- Each finding carries a plan after "-> re-verify:". Follow it: re-run the
+  EXACT payload in its safe, non-destructive form and confirm the expected
+  distinguishing response actually appears.
+- Mark VERIFIED ONLY when the payload provokes the expected effect:
+  SQL error text / timing delay / boolean difference (SQLi); payload
+  reflected in the response (XSS); command-output marker (command
+  injection); file contents returned (path traversal); fetched resource
+  reflected (SSRF); expanded external entity (XXE); evaluated marker
+  (SSTI); 3xx Location to the supplied destination (open redirect); port
+  accepting a connection; DNS A/AAAA record existing; header present or
+  missing exactly as claimed; CVE present AND software/version inside the
+  affected range.
+- If the payload does NOT produce the claimed effect, the claim is a
+  FALSE POSITIVE - mark it FALSE_POSITIVE and give the contradiction as
+  the reason. NEVER mark VERIFIED on the main agent's word alone.
+- If you cannot gather enough evidence, mark it UNVERIFIED - never guess.
 - Do NOT expand scope or attack anything new. Only re-check the listed findings.
 - Be concise and evidence-based. Do not write a report; just verify.
 
@@ -367,6 +405,15 @@ _RE_VULN = re.compile(
     r"expos(?:ed|ing)\s+(?:service|services|endpoint|endpoints|port|ports|"
     r"interface|interfaces|admin|panel|dashboard|api|console|database|db|files?))\b",
     re.I)
+# Complex-bug keywords: code-level / logic findings also force the
+# independent validation sub-agent, exactly like critical/high severity
+# security claims (see _verify_findings Phase 2).
+_RE_COMPLEX_BUG = re.compile(
+    r"\b(complex bug|logic(?:al)? (?:error|flaw|bug)|race condition|"
+    r"use[- ]after[- ]free|buffer overflow|integer overflow|off[- ]by[- ]one|"
+    r"null pointer dereference|deadlock|memory leak|double[- ]free|"
+    r"deserialization|code audit|static analysis|multi[- ]file refactor|"
+    r"bug in the code|code flaw|defect|faulty logic)\b", re.I)
 
 # ---------------------------------------------------------------------------
 # Dynamic tactical reasoning engine: shared constants.
@@ -1448,6 +1495,7 @@ class Agent:
         Verification sub-agent events (only when the final answer contains
         security findings and auto_verify is enabled):
           validation_start           -> re-verification began (N findings)
+          validation_spawned         -> validation sub-agent spawned (reason, findings)
           validation_tool_call       -> validator child tool call
           validation_tool_result     -> validator child tool result
           validation                 -> {status, finding, reason} per finding
@@ -1647,7 +1695,8 @@ class Agent:
             if key in seen:
                 return
             seen.add(key)
-            out.append({"type": ftype, "value": value})
+            out.append({"type": ftype, "value": value,
+                        "severity": classify_severity(value)})
 
         def add_port(port, host=None):
             if not _valid_port(port):
@@ -1777,25 +1826,64 @@ class Agent:
                        "finding": f["value"], "reason": d.get("reason", ""),
                        "method": "deterministic"}
 
-        # ---- Phase 2: independent validation sub-agent (unresolved only) --
-        child_out, child_err = "", ""
+        # ---- Phase 2: independent validation sub-agent ------------------
+        # Trigger: critical/high-severity claims, complex-bug reports, or
+        # findings the deterministic pass could not resolve. The spawned
+        # validator does NOT trust the main agent's report - it re-runs the
+        # exact payload (payload_verify_plan) and its verdict OVERRIDES the
+        # main agent's per-finding status.
+        text_sev = classify_severity(text)
+        severity_flagged = []
+        for f in findings:
+            sev = f.get("severity") or classify_severity(f["value"])
+            if sev in ("critical", "high") or \
+                    text_sev in ("critical", "high"):
+                severity_flagged.append(f)
+        complex_bug = bool(_RE_COMPLEX_BUG.search(text))
+        finding_pool = []
+        seen_values = set()
+        for f in list(pending) + severity_flagged:
+            key = f["value"].lower()
+            if key not in seen_values:
+                seen_values.add(key)
+                finding_pool.append(f)
+        if complex_bug:
+            bug_value = _RE_COMPLEX_BUG.search(text).group(0)
+            if bug_value.lower() not in seen_values:
+                finding_pool.append({"type": "bug", "value": bug_value,
+                                     "severity": "high"})
+
+        trigger_reasons = []
+        if severity_flagged:
+            trigger_reasons.append("%d critical/high severity finding(s)"
+                                   % len(severity_flagged))
+        if complex_bug:
+            trigger_reasons.append("complex bug reported")
         if pending:
-            yield {"type": "validation_start",
-                   "content": "[VALIDATION SUB-AGENT] Deep re-check of "
-                               "%d unresolved finding(s)..." % len(pending)}
-            child = Agent(
-                llm=self.llm, memory=None,
-                name=self.name + "-validator",
+            trigger_reasons.append("%d unresolved finding(s)" % len(pending))
+
+        child_out, child_err = "", ""
+        if finding_pool:
+            reason = "; ".join(trigger_reasons) or "independent validation"
+            yield {"type": "validation_spawned", "reason": reason,
+                   "count": len(finding_pool),
+                   "content": "[VALIDATION SUB-AGENT] Spawned independent "
+                              "validator for %d finding(s): %s"
+                              % (len(finding_pool), reason)}
+            yield {"type": "validation_start", "count": len(finding_pool),
+                   "content": "[VALIDATION SUB-AGENT] Independent deep "
+                              "re-check of %d finding(s) (payload "
+                              "re-verification)..." % len(finding_pool)}
+            child, _ = self._make_subagent(
+                name_suffix="-validator",
                 max_iterations=min(self.max_iterations, 10),
-                max_messages=200, confirm_terminal=False,
-                spawn_depth=self.spawn_depth + 1,
-                max_spawn_depth=self.max_spawn_depth,
-                allow_subagents=False, auto_verify=False,
-                spawn_timeout=self.spawn_timeout,
-                game_master=False, world_state=None, lorebook=None,
-                reasoning_engine=False,
-            )
-            lines = ["- [%s] %s" % (f["type"], f["value"]) for f in pending]
+                max_messages=200, allow_subagents=False,
+                memory=None, reasoning_engine=False)
+            lines = ["- [SEVERITY: %s] [%s] %s -> re-verify: %s"
+                     % (f.get("severity") or classify_severity(f["value"]),
+                        f["type"], f["value"],
+                        payload_verify_plan(f["value"]))
+                     for f in finding_pool]
             task = VALIDATOR_PROMPT.format(findings="\n".join(lines))
             deadline = time.time() + min(max(self.spawn_timeout, 30), 180)
             try:
@@ -1848,18 +1936,34 @@ class Agent:
                         return vd
                 return None
 
-            for f in pending:
-                vd = match_verdict(f["value"])
+            for f in finding_pool:
+                key = f["value"].lower()
+                vd = match_verdict(f["value"]) if verdicts else None
                 if vd:
+                    # per-finding verdict: the sub-agent OVERRIDES whatever
+                    # the main agent / deterministic pass concluded
                     status = vd["status"]
                     reason = vd.get("reason", "") or ""
-                else:
+                    method = "sub-agent"
+                    resolved[key] = {"status": status, "reason": reason,
+                                     "method": method}
+                elif verdicts:
+                    # no per-finding line: fall back to the overall verdict
                     status, reason = overall_status, overall_reason or ""
-                resolved[f["value"].lower()] = {
-                    "status": status, "reason": reason, "method": "sub-agent"}
+                    method = "sub-agent"
+                    resolved[key] = {"status": status, "reason": reason,
+                                     "method": method}
+                else:
+                    # validator gave nothing usable: keep the Phase-1 verdict
+                    # (never downgrade a deterministic VERIFIED just because
+                    # the sub-agent produced no parseable output)
+                    prev = resolved.get(key) or {}
+                    status = prev.get("status", V_UNVERIFIED)
+                    reason = prev.get("reason", "")
+                    method = prev.get("method", "sub-agent")
                 yield {"type": "validation", "status": status,
                        "finding": f["value"], "reason": reason,
-                       "method": "sub-agent"}
+                       "method": method}
 
         # ---- persist verdicts for final-answer tagging ------------------
         self._verification_results = [{
@@ -1942,21 +2046,51 @@ class Agent:
 
     # ------------------------------------------------------------ sub-agents
 
-    def _spawn_impl(self, task, depth=0):
-        if not self.allow_subagents or depth >= self.max_spawn_depth:
-            return "Error: sub-agent depth limit reached."
-        persona, rest = extract_persona(task)
+    def _make_subagent(self, task=None, name_suffix="-child", depth=None,
+                       max_iterations=None, max_messages=None,
+                       allow_subagents=None, memory=None, persona=None,
+                       reasoning_engine=None):
+        """Shared factory for every child agent this agent spawns.
+
+        Centralizes the isolation kwargs (confirm_terminal=False,
+        game_master=False, auto_verify=False, max_spawn_depth bookkeeping,
+        spawn_timeout) so spawn_agent / spawn_agents and the automated
+        validation loop construct identical children.
+
+        Returns (child_agent, remaining_task): the persona directive is
+        peeled off the task and passed to the child as npc_persona.
+        """
+        if persona is None and task:
+            persona, task = extract_persona(task)
         child = Agent(
-            llm=self.llm, memory=self.memory,
-            name=self.name + "-child", max_iterations=self.max_iterations,
-            max_messages=self.max_messages, confirm_terminal=False,
-            spawn_depth=depth, max_spawn_depth=self.max_spawn_depth,
-            allow_subagents=self.allow_subagents,
+            llm=self.llm,
+            memory=self.memory if memory is None else memory,
+            name=self.name + name_suffix,
+            max_iterations=(self.max_iterations if max_iterations is None
+                            else max_iterations),
+            max_messages=(self.max_messages if max_messages is None
+                          else max_messages),
+            confirm_terminal=False,
+            spawn_depth=(self.spawn_depth + 1 if depth is None else depth),
+            max_spawn_depth=self.max_spawn_depth,
+            allow_subagents=(self.allow_subagents
+                             if allow_subagents is None else allow_subagents),
             npc_persona=persona,
             game_master=False, world_state=self.world_state,
             lorebook=self.lorebook, auto_verify=False,
             knowledge=self.knowledge,
+            spawn_timeout=self.spawn_timeout,
+            reasoning_engine=(getattr(self, "reasoning_engine", False)
+                              if reasoning_engine is None
+                              else reasoning_engine),
         )
+        return child, task or ""
+
+    def _spawn_impl(self, task, depth=0):
+        if not self.allow_subagents or depth >= self.max_spawn_depth:
+            return "Error: sub-agent depth limit reached."
+        child, rest = self._make_subagent(task, name_suffix="-child",
+                                          depth=depth)
         box = {}
         def work():
             try:
@@ -1999,22 +2133,8 @@ class Agent:
         for i, task in enumerate(tasks):
             def work(idx, t):
                 try:
-                    persona, rest = extract_persona(str(t))
-                    child = Agent(
-                        llm=self.llm, memory=self.memory,
-                        name=self.name + "-child%d" % (idx + 1),
-                        max_iterations=self.max_iterations,
-                        max_messages=self.max_messages,
-                        confirm_terminal=False,
-                        spawn_depth=self.spawn_depth + 1,
-                        max_spawn_depth=self.max_spawn_depth,
-                        allow_subagents=self.allow_subagents,
-                        spawn_timeout=self.spawn_timeout,
-                        npc_persona=persona,
-                        game_master=False, world_state=self.world_state,
-                        lorebook=self.lorebook, auto_verify=False,
-                        knowledge=self.knowledge,
-                    )
+                    child, rest = self._make_subagent(
+                        t, name_suffix="-child%d" % (idx + 1))
                     boxes[idx]["out"] = child.run(rest)
                 except Exception as exc:
                     boxes[idx]["err"] = "%s: %s" % (type(exc).__name__, exc)

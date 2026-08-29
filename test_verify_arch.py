@@ -35,7 +35,8 @@ def section(title):
 import ai_agent.tools.verify as verify_mod
 from ai_agent.tools.verify import (
     REJECTED, UNVERIFIED, VERIFIED,
-    classify_finding, lightweight_verify_finding, parse_host_port,
+    classify_finding, classify_severity, lightweight_verify_finding,
+    needs_subagent_validation, parse_host_port, payload_verify_plan,
     verify_cve, verify_open_port, verify_subdomain, verify_vuln,
 )
 
@@ -56,6 +57,19 @@ def test_verify_module():
     check("classify plain -> vuln", classify_finding(
         "no clear claim here") == "vuln")
 
+    check("severity critical", classify_severity(
+        "critical RCE at http://x/login") == "critical")
+    check("severity high", classify_severity(
+        "auth bypass in login") == "high")
+    check("severity medium", classify_severity(
+        "XSS in search form") == "medium")
+    check("severity low", classify_severity(
+        "port 80 open") == "low")
+    check("needs subagent high", needs_subagent_validation(
+        "privilege escalation") is True)
+    check("needs subagent low", needs_subagent_validation(
+        "port 80 open") is False)
+
     h, p = parse_host_port("192.168.1.10:8080")
     check("parse host:port", h == "192.168.1.10" and p == 8080, "%s:%s" % (h, p))
     h, p = parse_host_port("port 22 open on 10.0.0.1")
@@ -64,6 +78,40 @@ def test_verify_module():
     check("parse port only", h == "" and p == 443, "%s:%s" % (h, p))
     h, p = parse_host_port("nothing here")
     check("parse no target", h == "" and p == 0, "%s:%s" % (h, p))
+
+
+def test_payload_verify_plan():
+    section("verify.py - payload re-verification plans")
+
+    g = verify_mod.PAYLOAD_VERIFY_GUIDANCE
+    check("sqli plan", payload_verify_plan(
+        "SQL injection at http://10.0.0.1/login") == g["sqli"])
+    check("xss plan", payload_verify_plan(
+        "stored XSS in the profile form") == g["xss"])
+    check("cmdi plan", payload_verify_plan(
+        "command injection in the ping parameter") == g["cmdi"])
+    check("path traversal plan", payload_verify_plan(
+        "path traversal in download.php") == g["path_traversal"])
+    check("ssrf plan", payload_verify_plan(
+        "SSRF via the url parameter") == g["ssrf"])
+    check("xxe plan", payload_verify_plan(
+        "XXE in the XML upload") == g["xxe"])
+    check("ssti plan", payload_verify_plan(
+        "server-side template injection in name field") == g["ssti"])
+    check("open redirect plan", payload_verify_plan(
+        "open redirect on the login page") == g["open_redirect"])
+    check("cve plan", payload_verify_plan(
+        "CVE-2024-1234 affects Apache 2.4.1") == g["cve"])
+    check("open port plan", payload_verify_plan(
+        "port 80 open on 192.0.2.1") == g["open_port"])
+    check("subdomain plan", payload_verify_plan(
+        "api.example.com discovered") == g["subdomain"])
+    check("header plan", payload_verify_plan(
+        "missing Content-Security-Policy header") == g["header"])
+    check("generic plan", payload_verify_plan(
+        "something odd in the response") == g["generic"])
+    check("plan demands evidence before VERIFIED",
+          "VERIFIED" in g["sqli"] and "EXACT" in g["sqli"])
 
 
 def test_verify_open_port(monkeypatch, tmp):
@@ -450,6 +498,123 @@ def test_parse_validator_output():
           and verdicts[0]["finding"] == "(overall)", str(verdicts))
 
 
+def test_verify_findings_severity_trigger(monkeypatch, tmp):
+    section("core.py - severity trigger spawns independent validator")
+
+    monkeypatch(verify_mod, "_probe_port",
+                lambda host, port, timeout=3.0: (True, "open"))
+    monkeypatch(core_mod, "execute_tool",
+                lambda name, args, **kw: (
+                    "port_scan: no open ports found on 192.0.2.1"))
+
+    agent = Agent(llm=MockClient(), auto_verify=False)
+    text = ("High-severity auth bypass in the login flow. "
+            "Port scan: port 80 open on 192.0.2.1.")
+    events = list(agent._verify_findings(text))
+    types = [e.get("type") for e in events]
+    check("deterministic phase ran", "validation" in types, str(types))
+    spawns = [e for e in events if e.get("type") == "validation_spawned"]
+    check("validator spawned on high severity", len(spawns) == 1,
+          str(spawns))
+    if spawns:
+        check("spawn reason cites severity",
+              "severity" in spawns[0].get("reason", "").lower(),
+              spawns[0].get("reason", ""))
+    check("sub-agent tool events flowed", "validation_tool_call" in types,
+          str(types))
+    by_value = {r["value"].lower(): r for r in agent._verification_results}
+    port = by_value.get("port 80 open on 192.0.2.1") or {}
+    check("severity-flagged finding re-checked by sub-agent",
+          port.get("method") == "sub-agent", str(port))
+    check("sub-agent verdict overrides deterministic",
+          port.get("status") == REJECTED, str(port))
+
+
+def test_verify_findings_complex_bug_trigger(monkeypatch, tmp):
+    section("core.py - complex-bug trigger spawns validator")
+
+    monkeypatch(verify_mod, "_probe_port",
+                lambda host, port, timeout=3.0: (True, "open"))
+
+    agent = Agent(llm=MockClient(), auto_verify=False)
+    text = ("The code audit found a race condition in the payment module. "
+            "Port 80 open on 192.0.2.1.")
+    events = list(agent._verify_findings(text))
+    types = [e.get("type") for e in events]
+    spawns = [e for e in events if e.get("type") == "validation_spawned"]
+    check("validator spawned on complex bug", len(spawns) == 1, str(spawns))
+    if spawns:
+        check("spawn reason cites complex bug",
+              "complex bug" in spawns[0].get("reason", "").lower(),
+              spawns[0].get("reason", ""))
+    by_value = {r["value"].lower(): r for r in agent._verification_results}
+    bug = by_value.get("race condition") or {}
+    check("bug finding validated by sub-agent",
+          bug.get("method") == "sub-agent", str(bug))
+    check("bug finding kept in results", bug.get("type") == "bug",
+          str(bug))
+
+
+def test_verify_findings_subagent_override_fp(monkeypatch, tmp):
+    section("core.py - false-positive rejection net (validator override)")
+
+    monkeypatch(verify_mod, "_probe_port",
+                lambda host, port, timeout=3.0: (True, "open"))
+    monkeypatch(core_mod, "execute_tool",
+                lambda name, args, **kw: (
+                    "port_scan: no open ports found on 192.0.2.1"))
+
+    agent = Agent(llm=MockClient(), auto_verify=False)
+    text = ("Critical RCE at http://192.0.2.1/login. "
+            "Port 80 open on 192.0.2.1.")
+    events = list(agent._verify_findings(text))
+    done = next(e for e in events if e.get("type") == "validation_done")
+    check("rejected counted in summary", done.get("rejected") >= 1,
+          str(done))
+    by_value = {r["value"].lower(): r for r in agent._verification_results}
+    port = by_value.get("port 80 open on 192.0.2.1") or {}
+    check("deterministic-verified finding rejected by validator",
+          port.get("status") == REJECTED, str(port))
+    rce = by_value.get("rce") or {}
+    check("unresolved finding re-verified by sub-agent",
+          rce.get("method") == "sub-agent" and rce.get("status") == REJECTED,
+          str(rce))
+    methods = {r.get("method") for r in agent._verification_results}
+    check("all findings via sub-agent", methods == {"sub-agent"},
+          str(methods))
+
+
+def test_run_stream_critical_spawn_validation(monkeypatch, tmp):
+    section("core.py - run_stream automated validation loop")
+
+    monkeypatch(verify_mod, "_probe_port",
+                lambda host, port, timeout=3.0: (True, "open"))
+    monkeypatch(core_mod, "execute_tool",
+                lambda name, args, **kw: (
+                    "High-severity auth bypass in login. "
+                    "Port 80 open on 192.0.2.1."))
+
+    agent = Agent(llm=MockClient(), auto_verify=True)
+    events = list(agent.run_stream(
+        "port scan 192.0.2.1 and report"))
+    types = [e.get("type") for e in events]
+    check("validation_spawned emitted in run_stream",
+          "validation_spawned" in types, str(types))
+    spawns = [e for e in events if e.get("type") == "validation_spawned"]
+    if spawns:
+        check("spawn reason cites severity",
+              "severity" in spawns[0].get("reason", "").lower(),
+              spawns[0].get("reason", ""))
+    finals = [e for e in events if e.get("type") == "final"]
+    check("final answer emitted", len(finals) == 1, str(finals))
+    if finals:
+        content = finals[0]["content"]
+        check("verification summary appended to final",
+              "VERIFICATION" in content, content[:300])
+        check("verification report present",
+              "Verification Report" in content, content[:300])
+
+
 def test_verify_findings_deterministic_only(monkeypatch, tmp):
     section("core.py - _verify_findings phase 1 (deterministic only)")
 
@@ -543,11 +708,16 @@ def test_run_stream_tags_final(monkeypatch, tmp):
 # ------------------------------------------------------------------ runner
 def run_all():
     tests = [
-        test_verify_module, test_verify_open_port, test_verify_subdomain,
+        test_verify_module, test_payload_verify_plan,
+        test_verify_open_port, test_verify_subdomain,
         test_verify_cve, test_verify_vuln, test_verify_dispatch,
         test_reporting, test_verify_finding_tool, test_write_report,
         test_find_finding_pos, test_extract_findings, test_apply_tags,
-        test_parse_validator_output, test_verify_findings_deterministic_only,
+        test_parse_validator_output, test_verify_findings_severity_trigger,
+        test_verify_findings_complex_bug_trigger,
+        test_verify_findings_subagent_override_fp,
+        test_run_stream_critical_spawn_validation,
+        test_verify_findings_deterministic_only,
         test_verify_findings_with_subagent, test_run_stream_tags_final,
     ]
 
@@ -561,6 +731,10 @@ def run_all():
                 test_verify_open_port, test_verify_subdomain,
                 test_verify_cve, test_verify_vuln, test_verify_dispatch,
                 test_reporting, test_verify_finding_tool, test_write_report,
+                test_verify_findings_severity_trigger,
+                test_verify_findings_complex_bug_trigger,
+                test_verify_findings_subagent_override_fp,
+                test_run_stream_critical_spawn_validation,
                 test_verify_findings_deterministic_only,
                 test_verify_findings_with_subagent,
                 test_run_stream_tags_final,
