@@ -237,6 +237,17 @@ class MemoryStore:
 # ---------------------------------------------------------------------------
 
 
+def _norm_tags(tags):
+    """Accept a list or a comma-separated string; return a clean list."""
+    if tags is None:
+        return []
+    if isinstance(tags, str):
+        parts = tags.split(",")
+    else:
+        parts = tags
+    return [str(t).strip() for t in parts if str(t).strip()]
+
+
 class Lorebook:
     """Persistent campaign lorebook for RPG sessions.
 
@@ -278,7 +289,7 @@ class Lorebook:
         category = (category or "general").strip()[:40]
         title = (title or "untitled").strip()[:200]
         content = (content or "").strip()
-        tags = ",".join(t.strip() for t in (tags or []) if t.strip())[:400]
+        tags = ",".join(_norm_tags(tags))[:400]
         ts = datetime.datetime.now().isoformat(timespec="seconds")
         with self._lock:
             cur = self._conn.execute(
@@ -300,8 +311,7 @@ class Lorebook:
                 return None
             tags_str = row["tags"]
             if tags is not None:
-                tags_str = ",".join(
-                    t.strip() for t in tags if t.strip())[:400]
+                tags_str = ",".join(_norm_tags(tags))[:400]
             self._conn.execute(
                 "UPDATE lore SET category = ?, title = ?, content = ?,"
                 " tags = ? WHERE entry_id = ?",

@@ -218,7 +218,13 @@ class RPGEngine:
         with self._lock:
             state = self._states.get(game_id)
             if state is None:
-                return None
+                # auto-load saved campaigns from disk so play works after
+                # a server restart without an explicit /load call
+                path = self.game_path(game_id)
+                if os.path.exists(path):
+                    state = GameState(path)
+                    self._states[game_id] = state
+                    self._agents[game_id] = self._build_agent(game_id, state)
             return state
 
     def get_state_payload(self, game_id):
