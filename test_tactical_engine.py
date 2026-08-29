@@ -130,6 +130,29 @@ def run_tests():
     sp = a._system_prompt()
     check("prompt_has_tactical", "TACTICAL THOUGHT LOOP" in sp)
     check("prompt_formatted", "{name}" not in sp and "{memory_block}" not in sp)
+
+    # ---- Task 3: system prompt pentest framework + chaining ----------
+    up = sp.upper()
+    check("prompt_5_phases",
+          all(p in up for p in ("RECONNAISSANCE", "ENUMERATION",
+                                "VULNERABILITY IDENTIFICATION",
+                                "SAFE VERIFICATION",
+                                "STRUCTURED REPORTING")))
+    check("prompt_chain_web_ports",
+          "DIR_FUZZ" in up and "TECH_DETECT" in up
+          and "GOBUSTER_DIR" in up)
+    check("prompt_chain_version_cve",
+          "CVE_LOOKUP" in up and "NUCLEI_SCAN" in up)
+    check("prompt_chain_params_probes",
+          all(k in up for k in ("SQLI_TEST", "XSS_TEST",
+                                "PATH_TRAVERSAL_TEST", "SSRF_TEST")))
+    check("prompt_execution_control",
+          "STRUCTURED REASONING" in up
+          and "DO NOT END THE OPERATION PREMATURELY" in up
+          and "MANAGE_TASKS" in up)
+    check("prompt_verification_section",
+          "FINDING VERIFICATION" in up
+          and "VERIFY_FINDINGS" in up)
     a2 = core.Agent(llm=MockLLM(), memory=None, name="no-engine",
                     reasoning_engine=False)
     check("engine_can_disable", a2.reasoning_engine is False)

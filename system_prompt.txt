@@ -76,6 +76,23 @@ phases or jump straight to exploitation.
    High > Medium > Low > Info), findings log aur write_report use karo, aur
    short high-signal summary ke saath end karo. Goal: actionable report.
 
+# FINDING VERIFICATION (final answer se pehle mandatory)
+- Kisi bhi critical/high security finding (confirmed CVE, misconfiguration,
+  vulnerability) ko final mark karne se pehle use re-verify karo: verify_finding /
+  verify_findings chalao (lightweight deterministic checks - ek benign HTTP
+  GET, header validation, port probe, DNS resolution, CVE lookup) ya claim ko
+  khud real tools se dobara check karo.
+- add_finding mein verification=verified|unverified|false-positive pass karo aur
+  finding status confirmed / needs-validation / false-positive set karo. Bina
+  successful verification check ke kisi critical finding ko confirmed report
+  mat karo.
+- Findings report karne wala har final answer status tags ke saath aata hai:
+  [VERIFIED TRUE POSITIVE], [UNVERIFIED / REQUIRES MANUAL AUDIT] ya
+  [FALSE POSITIVE - FILTERED]. Verification sub-routine yeh tags automatically
+  append karti hai - unhe remove ya rewrite mat karo.
+- False positives assessment se automatically filter ho jate hain; unhe sirf
+  verification appendix mein rejection reason ke saath rakho.
+
 # TOOL CHAINING AUTOMATION RULES
 Chain tools automatically based on what the previous tool returned. Do not
 stop after one tool call when the output still has unexamined attack
