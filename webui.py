@@ -85,6 +85,22 @@ MODEL_CATALOG = [
 MODEL_LABELS = {m["id"]: m["label"] for m in MODEL_CATALOG}
 
 # keyword groups used by the auto-router (case-insensitive substring match)
+# checked FIRST: complex logic / architecture / code-analysis / security-
+# assessment-design queries must reach a flagship reasoning model, never a
+# cheap default (Task 4: High-Reasoning Fallback & Auto-Router).
+_REASONING_WORDS = [
+    "complex", "complicated", "intricate", "nuanced", "deep dive",
+    "in-depth", "in depth", "thorough", "architecture", "architect",
+    "system design", "design review", "root cause", "underlying cause",
+    "systemic", "systemic risk", "edge case", "edge cases",
+    "corner case", "multi-perspective", "multi perspective",
+    "exploit chain", "attack chain", "attack path", "kill chain",
+    "code analysis", "code review", "static analysis",
+    "threat model", "threat modeling", "risk assessment",
+    "risk analysis", "impact analysis", "blast radius", "cascading",
+    "trade-off", "tradeoff", "feasibility", "hypothesis",
+    "counter-evidence", "counter evidence", "reasoning", "conclude",
+]
 _CYBER_WORDS = [
     "scan", "port scan", "nmap", "recon", "subdomain", "osint", "whois",
     "dns", "enumerate", "fingerprint", "fuzz", "sqlmap", "sql injection",
@@ -124,6 +140,8 @@ MODEL_ROUTES = {
     "cyber": "cognitivecomputations/dolphin-mistral-24b-venice-edition",
     "uncensored": "thinkingmachines/inkling:free",
     "coding": "deepseek/deepseek-r1",
+    # flagship reasoning: complex logic / architecture / code analysis
+    "reasoning": "deepseek/deepseek-r1",
 }
 
 
@@ -142,6 +160,9 @@ def route_model(prompt, cfg=None):
     for w in ("uncensored", "jailbreak", "nsfw", "adult"):
         if w in text:
             return MODEL_ROUTES["uncensored"], "uncensored / jailbreak prompt"
+    for w in _REASONING_WORDS:
+        if w in text:
+            return MODEL_ROUTES["reasoning"], "complex reasoning / architecture / analysis task"
     for w in _CYBER_WORDS:
         if w in text:
             return MODEL_ROUTES["cyber"], "cyber security / recon task"

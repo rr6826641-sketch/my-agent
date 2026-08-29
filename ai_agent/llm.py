@@ -20,6 +20,39 @@ class RunCancelled(Exception):
     pass
 
 
+# Flagship reasoning models (Task 4: High-Reasoning Fallback & Auto-Router).
+# When the primary model is one of these, the OTHER flagship is tried before
+# the cheap generic fallbacks, so hard reasoning/architecture/code-analysis
+# tasks never silently downgrade to a tiny free model on the first 429/error.
+HIGH_REASONING_MODELS = {
+    "deepseek/deepseek-r1",
+    "meta-llama/llama-3.3-70b-instruct",
+}
+HIGH_REASONING_FALLBACKS = [
+    "meta-llama/llama-3.3-70b-instruct",
+    "deepseek/deepseek-r1",
+]
+
+
+def _candidate_models(primary, fallback_models,
+                      high_reasoning_models=HIGH_REASONING_MODELS,
+                      high_reasoning_fallbacks=HIGH_REASONING_FALLBACKS):
+    """Build the ordered model-failover chain for a call.
+
+    Primary first; if it is a flagship reasoning model, the sibling flagship
+    comes second (deduped); then the cheap generic fallbacks (deduped).
+    """
+    chain = [primary]
+    if primary in high_reasoning_models:
+        for m in high_reasoning_fallbacks:
+            if m not in chain:
+                chain.append(m)
+    for m in fallback_models:
+        if m not in chain:
+            chain.append(m)
+    return chain
+
+
 class OpenAIClient:
     """OpenAI-compatible chat completions client (function calling).
 
@@ -43,7 +76,7 @@ class OpenAIClient:
         self.fallback_models = list(fallback_models or self.FALLBACK_MODELS)
 
     def chat(self, messages, tools=None, temperature=0.2):
-        models = [self.model] + list(self.fallback_models)
+        models = _candidate_models(self.model, self.fallback_models)
         last_error = None
         for index, model in enumerate(models):
             try:
@@ -103,7 +136,7 @@ class OpenAIClient:
         aborted by raising RunCancelled.
         model: optional per-call override (used by the Smart Auto-Router).
         """
-        models = [model or self.model] + list(self.fallback_models)
+        models = _candidate_models(model or self.model, self.fallback_models)
         last_error = None
         for index, model in enumerate(models):
             if cancel_event is not None and cancel_event.is_set():
