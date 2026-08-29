@@ -106,6 +106,44 @@ def run_tests():
     a6 = [v["action"] for v in ts6.pending_vectors]
     check("chain_empty_rescan", "ffuf_fuzz" in a6, str(a6))
 
+    # ---- Task 5: exploit chaining framework -------------------------
+    # web ports -> cors_check alongside fingerprint/header/dir_fuzz
+    ts8 = core.TacticalState()
+    ren8 = core.TacticalReasoner(ts8)
+    ren8.analyze(ts8, "nmap_scan", {"host": "10.0.0.6"},
+                 "PORT STATE SERVICE\n443/tcp open https\n")
+    a8 = [v["action"] for v in ts8.pending_vectors]
+    check("chain_web_cors", "cors_check" in a8, str(a8))
+    check("chain_cors_phase",
+          core._TACTICAL_PHASE_OF.get("cors_check") == "vuln-identification",
+          str(core._TACTICAL_PHASE_OF.get("cors_check")))
+
+    # check_headers revealing a versioned fingerprint -> CVE + nuclei
+    ts9 = core.TacticalState()
+    ren9 = core.TacticalReasoner(ts9)
+    ren9.analyze(ts9, "check_headers", {"url": "http://hdr.local"},
+                 "Server: nginx/1.18.0\n[MISS] Strict-Transport-Security")
+    a9 = [v["action"] for v in ts9.pending_vectors]
+    check("chain_header_cve",
+          "cve_lookup" in a9 and "nuclei_scan" in a9, str(a9))
+
+    # check_headers without a version -> no false CVE chain
+    ts10 = core.TacticalState()
+    ren10 = core.TacticalReasoner(ts10)
+    ren10.analyze(ts10, "check_headers", {"url": "http://hdr2.local"},
+                  "Server: Apache\n1 header issue(s) found")
+    a10 = [v["action"] for v in ts10.pending_vectors]
+    check("chain_header_no_version", "cve_lookup" not in a10, str(a10))
+
+    # dynamic endpoint params -> CORS check + mapped path-traversal probe
+    ts11 = core.TacticalState()
+    ren11 = core.TacticalReasoner(ts11)
+    ren11.analyze(ts11, "http_request",
+                  {"url": "http://x/file?path=etc/passwd"}, "200 OK")
+    a11 = [v["action"] for v in ts11.pending_vectors]
+    check("chain_param_cors",
+          "cors_check" in a11 and "path_traversal_test" in a11, str(a11))
+
     # write_report satisfies
     ts7 = core.TacticalState()
     ren7 = core.TacticalReasoner(ts7)
@@ -134,10 +172,10 @@ def run_tests():
     # ---- Task 3: system prompt pentest framework + chaining ----------
     up = sp.upper()
     check("prompt_5_phases",
-          all(p in up for p in ("RECONNAISSANCE", "ENUMERATION",
-                                "VULNERABILITY IDENTIFICATION",
-                                "SAFE VERIFICATION",
-                                "STRUCTURED REPORTING")))
+          all(p in up for p in ("RECONNAISSANCE", "SERVICE ENUMERATION",
+                                "VULNERABILITY MAPPING",
+                                "SAFE PROOF-OF-CONCEPT VALIDATION",
+                                "REMEDIATION STRATEGY")))
     check("prompt_chain_web_ports",
           "DIR_FUZZ" in up and "TECH_DETECT" in up
           and "GOBUSTER_DIR" in up)
@@ -146,6 +184,11 @@ def run_tests():
     check("prompt_chain_params_probes",
           all(k in up for k in ("SQLI_TEST", "XSS_TEST",
                                 "PATH_TRAVERSAL_TEST", "SSRF_TEST")))
+    check("prompt_chain_cors",
+          "CORS_CHECK" in up and "CORS POLICY" in up)
+    check("prompt_chain_header_cve",
+          "X-POWERED-BY" in up and "CVE_LOOKUP" in up
+          and "NUCLEI_SCAN" in up and "CHECK_HEADERS" in up)
     check("prompt_execution_control",
           "STRUCTURED REASONING" in up
           and "DO NOT END THE OPERATION PREMATURELY" in up
@@ -166,6 +209,9 @@ def run_tests():
     check("step_event_fields",
           ev.get("phase") and ev.get("reasoning") and ev.get("state"),
           str(ev.keys()) if ev else "None")
+    check("step_phase_label",
+          ev.get("phase_label") == "Service Enumeration",
+          str(ev.get("phase_label")))
     check("step_reasoning_count", a._tactical.reasoning_count >= 1)
     check("blocks_cap_4", len(a._tactical_blocks) <= 4,
           str(len(a._tactical_blocks)))
@@ -204,6 +250,20 @@ def run_tests():
           str(sorted(phases)))
     check("phase_map_size", len(core._TACTICAL_PHASE_OF) >= 40,
           str(len(core._TACTICAL_PHASE_OF)))
+
+    # ---- Task 5: phase label vocabulary ------------------------------
+    check("phase_labels_complete",
+          set(core._PHASE_LABELS) == {"reconnaissance", "enumeration",
+                                      "vuln-identification",
+                                      "safe-verification", "reporting"},
+          str(sorted(core._PHASE_LABELS)))
+    check("phase_label_names",
+          core._PHASE_LABELS["enumeration"] == "Service Enumeration"
+          and core._PHASE_LABELS["vuln-identification"]
+          == "Vulnerability Mapping"
+          and core._PHASE_LABELS["safe-verification"]
+          == "Safe Proof-of-Concept Validation"
+          and core._PHASE_LABELS["reporting"] == "Remediation Strategy")
 
 
 if __name__ == "__main__":

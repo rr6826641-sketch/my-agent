@@ -35,29 +35,31 @@ phases or jump straight to exploitation.
    not done, then subdomain_enum, dns_lookup, whois, ssl_info, httpx_probe.
    Goal: know the target's identity, IPs, subdomains and exposed services.
 
-2. ENUMERATION - active service discovery: port_scan / nmap_scan for open
-   ports and service versions; for each web port (80, 443, 8080, 8000,
-   8443, 3000) run http_request, check_headers, tech_detect; then dir_fuzz
+2. SERVICE ENUMERATION - active service discovery: port_scan / nmap_scan
+   for open ports and service versions; for each web port (80, 443, 8080,
+   8000, 8443, 3000) run http_request, check_headers, tech_detect; then dir_fuzz
    / gobuster_dir / ffuf_fuzz for hidden paths. Goal: build a full map of
    services, versions, headers, endpoints and parameters.
 
-3. VULNERABILITY IDENTIFICATION - match what you enumerated against known
+3. VULNERABILITY MAPPING - match what you enumerated against known
    weaknesses: cve_lookup on each identified software+version, nuclei_scan
    / nikto_scan templates, and targeted manual web tests (sqli_test,
    xss_test, cmd_inject_test, path_traversal_test, ssrf_test, xxe_test,
    ssti_test, graphql_check, ...). Goal: produce a candidate list with
    severity, CWE and evidence.
 
-4. SAFE VERIFICATION - confirm each candidate without destructive impact:
-   reproduce the issue, verify it is real (not a false positive), check
-   scope, and log confirmed/probable findings with add_finding. Avoid
-   irreversible or destructive commands unless the user explicitly asked
-   for that exact action. Goal: verified findings with reproduction steps.
+4. SAFE PROOF-OF-CONCEPT VALIDATION - confirm each candidate without
+   destructive impact: reproduce the issue as a safe proof-of-concept,
+   verify it is real (not a false positive), check scope, and log
+   confirmed/probable findings with add_finding. Avoid irreversible or
+   destructive commands unless the user explicitly asked for that exact
+   action. Goal: verified findings with reproduction steps.
 
-5. STRUCTURED REPORTING - summarize what was found, how to reproduce it,
+5. REMEDIATION STRATEGY - summarize what was found, how to reproduce it,
    and how to fix it. Prioritize by severity (Critical > High > Medium >
    Low > Info), use the findings log and write_report, and end with a short
-   high-signal summary. Goal: an actionable report.
+   high-signal summary plus a prioritized remediation strategy. Goal: an
+   actionable report.
 
 # FINDING VERIFICATION (mandatory before final answer)
 - Before any critical/high security finding (confirmed CVE, misconfiguration,
@@ -84,15 +86,17 @@ surface. Follow these conditional chains:
 - IF a network/port scan (port_scan, nmap_scan) reveals open WEB ports
   (80, 443, 8080, 8000, 8443, 3000, 8888):
     THEN queue directory fuzzing (dir_fuzz or gobuster_dir / ffuf_fuzz)
-    AND tech stack detection (tech_detect) + check_headers on each web
-    port. Continue with extract_links / robots_txt for more surface.
+    AND tech stack detection (tech_detect) + check_headers + a CORS policy
+    check (cors_check) on each web port. Continue with extract_links /
+    robots_txt for more surface.
 
 - IF web enumeration (http_request, tech_detect, check_headers, dir_fuzz)
   discovers a specific software/CMS version (e.g. WordPress 6.1, nginx
   1.18, PHP 8.1) or fingerprint headers (server, x-powered-by, generator):
     THEN trigger cve_lookup on that software+version, AND run
     nuclei_scan (or nikto_scan if nuclei unavailable) with templates
-    matching that technology.
+    matching that technology. check_headers output that alone reveals
+    Server / X-Powered-By versions triggers the same lookup.
 
 - IF exposed endpoints, dynamic parameters (id=, page=, q=), API routes
   (/api/, /graphql, /admin), or file upload points are found:
@@ -100,7 +104,8 @@ surface. Follow these conditional chains:
     to its likely injection class (SQLi -> sqli_test/sqlmap_check,
     reflected -> xss_test, file path -> path_traversal_test, URL fetch ->
     ssrf_test, XML -> xxe_test, JSON -> graphql_check, JWT -> jwt_attack,
-    templates -> ssti_test) and run the matching probes.
+    templates -> ssti_test) and run the matching probes, PLUS a CORS
+    policy check (cors_check) on dynamic endpoints.
 
 - IF a scan returns no results: reconsider - wrong target? wrong port?
   WAF/firewall? Try an alternative approach (different wordlist, -Pn,
@@ -127,8 +132,9 @@ surface. Follow these conditional chains:
   FINDINGS SUMMARY / ATTACK SURFACE ANALYSIS / NEXT TACTICAL VECTOR /
   COMPLETED STEPS / PENDING VECTORS
 - Chain tool use automatically: web ports found -> tech_detect /
-  check_headers / dir_fuzz; tech_detect -> cve_lookup / nuclei_scan;
-  dir_fuzz paths -> http_request on the found paths; http_request with
+  check_headers / dir_fuzz / cors_check; tech_detect or header
+  fingerprints -> cve_lookup / nuclei_scan; dir_fuzz paths ->
+  http_request on the found paths; http_request with
   dynamic params -> the matching injection probes (sqli/xss/path
   traversal/ssrf/cmdi/xxe/ssti); empty scan -> one alternative re-scan.
 - Do NOT stop with pending vectors while the objective is unsatisfied: the
@@ -338,6 +344,7 @@ _TACTICAL_PHASE_OF = {
     "deserialization_check": "vuln-identification",
     "smuggling_detect": "vuln-identification", "oauth_check": "vuln-identification",
     "cloud_meta_test": "vuln-identification",
+    "cors_check": "vuln-identification",
     "open_redirect_test": "vuln-identification", "lockfile_scan": "vuln-identification",
     "ad_svc_probe": "vuln-identification",
     # Phase 4 - safe verification
@@ -345,6 +352,16 @@ _TACTICAL_PHASE_OF = {
     "update_finding": "safe-verification", "waf_detect": "safe-verification",
     # Phase 5 - reporting
     "write_report": "reporting", "list_findings": "reporting",
+}
+
+
+# Human-readable Task 5 phase labels (machine values -> methodology names).
+_PHASE_LABELS = {
+    "reconnaissance": "Reconnaissance",
+    "enumeration": "Service Enumeration",
+    "vuln-identification": "Vulnerability Mapping",
+    "safe-verification": "Safe Proof-of-Concept Validation",
+    "reporting": "Remediation Strategy",
 }
 
 
@@ -814,6 +831,8 @@ class TacticalReasoner:
                                    "web port %s open on %s" % (port, host))
                 state.queue_vector("check_headers", url,
                                    "headers of web service on %s" % host)
+                state.queue_vector("cors_check", url,
+                                   "CORS policy of web service on %s" % host)
                 state.queue_vector("dir_fuzz", url,
                                    "enumerate paths on web service")
                 break
@@ -823,6 +842,14 @@ class TacticalReasoner:
                                "fingerprinted software on %s" % base)
             state.queue_vector("nuclei_scan", base,
                                "known CVEs / patterns for %s" % base)
+        # 2b. check_headers alone revealing versioned fingerprint headers
+        #     (Server / X-Powered-By) -> same CVE + template scan.
+        if name == "check_headers" and base and re.search(
+                r"(?im)^\s*(?:server|x-powered-by)\s*:[^\n]*[/\d]", text):
+            state.queue_vector("cve_lookup", base,
+                               "header fingerprint on %s" % base)
+            state.queue_vector("nuclei_scan", base,
+                               "header-derived technology patterns for %s" % base)
         # 3. dir_fuzz paths -> fetch the interesting paths (else re-fuzz).
         if name == "dir_fuzz" and base:
             paths = _extract_paths(text)
@@ -868,6 +895,8 @@ class TacticalReasoner:
                     break
             for action, tgt, why in probes:
                 state.queue_vector(action, tgt, why)
+            state.queue_vector("cors_check", base,
+                               "validate CORS policy on dynamic endpoint")
         # 5. Empty / negative scan -> one alternative re-scan.
         if name in ("nuclei_scan", "nikto_scan", "sqli_test", "xss_test",
                     "cmd_inject_test", "path_traversal_test", "ssrf_test",
@@ -1033,6 +1062,8 @@ class Agent:
         return {
             "type": "tactical_reasoning",
             "phase": self._tactical.phase,
+            "phase_label": _PHASE_LABELS.get(
+                self._tactical.phase, self._tactical.phase),
             "objective": self._tactical.objective,
             "reasoning": block,
             "state": self._tactical.snapshot(),
