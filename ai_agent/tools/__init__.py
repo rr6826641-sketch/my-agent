@@ -64,6 +64,12 @@ from .webtests import (
     tool_sqli_test, tool_xss_test, tool_cmd_inject_test,
     tool_path_traversal_test, tool_ssrf_test, tool_open_redirect_test,
 )
+from .capabilities import (
+    tool_xxe_test, tool_header_inject_test, tool_nosql_inject_test,
+    tool_ssti_test, tool_jwt_attack, tool_graphql_check,
+    tool_deserialization_check, tool_smuggling_detect, tool_oauth_check,
+    tool_cloud_meta_test, tool_lockfile_scan, tool_ad_svc_probe,
+)
 from .scope import (
     tool_set_scope, tool_show_scope, tool_check_scope,
 )
@@ -783,6 +789,127 @@ def create_tools(memory, confirm_terminal=True, spawn_fn=None,
                              "param": _str_prop("parameter to test")},
               "required": ["url", "param"]},
              lambda url="", param="": tool_open_redirect_test(url, param)),
+
+        # ---- advanced capability detectors (XXE / NoSQLi / SSTI / JWT / GQL / etc.) ----
+        Tool("xxe_test", "XXE detection: inject external entity payloads (XML + "
+             "JSON variants), look for file-read / SSRF / error reflection.",
+             {"type": "object",
+              "properties": {"url": _str_prop("target URL"),
+                             "param": _str_prop("parameter holding XML/JSON"),
+                             "data": _str_prop("full request body (optional)"),
+                             "method": _str_prop("POST | GET", "POST"),
+                             "content_type": _str_prop("content-type override", "")},
+              "required": ["url"]},
+             lambda url="", param="", data="", method="POST", content_type="":
+                 tool_xxe_test(url or "", param or "", data or "", method or "POST", content_type or "")),
+        Tool("header_inject_test", "CRLF / header injection detection on a parameter "
+             "(response splitting, cache poisoning surface).",
+             {"type": "object",
+              "properties": {"url": _str_prop("target URL"),
+                             "param": _str_prop("parameter to test"),
+                             "method": _str_prop("GET | POST", "GET"),
+                             "data": _str_prop("POST body (optional)")},
+              "required": ["url", "param"]},
+             lambda url="", param="", method="GET", data="":
+                 tool_header_inject_test(url or "", param or "", method or "GET", data or "")),
+        Tool("nosql_inject_test", "NoSQL injection (MongoDB $ne/$gt/$or operator "
+             "auth-bypass) on a login endpoint.",
+             {"type": "object",
+              "properties": {"url": _str_prop("login endpoint URL"),
+                             "user_param": _str_prop("username field name", "username"),
+                             "pass_param": _str_prop("password field name", "password"),
+                             "method": _str_prop("POST | GET", "POST")},
+              "required": ["url"]},
+             lambda url="", user_param="username", pass_param="password", method="POST":
+                 tool_nosql_inject_test(url or "", user_param or "username", pass_param or "password", method or "POST")),
+        Tool("ssti_test", "Server-Side Template Injection detection on a parameter "
+             "({{7*7}} math probes across common engines).",
+             {"type": "object",
+              "properties": {"url": _str_prop("target URL"),
+                             "param": _str_prop("parameter to test"),
+                             "method": _str_prop("GET | POST", "GET"),
+                             "data": _str_prop("POST body (optional)")},
+              "required": ["url", "param"]},
+             lambda url="", param="", method="GET", data="":
+                 tool_ssti_test(url or "", param or "", method or "GET", data or "")),
+        Tool("jwt_attack", "JWT attack lab: decode, verify signature, try alg=none / "
+             "key-confusion / weak-HS256 brute-force on a token.",
+             {"type": "object",
+              "properties": {"token": _str_prop("the JWT to analyze"),
+                             "public_key": _str_prop("public key (RS256->HS256 confusion)", ""),
+                             "wordlist": _str_prop("common secrets wordlist (optional)", "")},
+              "required": ["token"]},
+             lambda token="", public_key="", wordlist="":
+                 tool_jwt_attack(token or "", public_key or "", wordlist or "")),
+        Tool("graphql_check", "GraphQL endpoint check: introspection query, schema "
+             "dump, field enumeration, depth/alias abuse probes.",
+             {"type": "object",
+              "properties": {"url": _str_prop("GraphQL endpoint URL"),
+                             "auth_header": _str_prop("optional 'Authorization: ...' value", "")},
+              "required": ["url"]},
+             lambda url="", auth_header="":
+                 tool_graphql_check(url or "", auth_header or "")),
+        Tool("deserialization_check", "Deserialization detection: probe common gadget "
+             "signatures (Java/PHP/Python/JSON) in serialized payloads, flag "
+             "error/behavioral signals.",
+             {"type": "object",
+              "properties": {"request_text": _str_prop("raw serialized payload / request"),
+                             "url": _str_prop("target URL (optional)", ""),
+                             "param": _str_prop("parameter holding the payload", ""),
+                             "method": _str_prop("POST | GET", "POST")},
+              "required": []},
+             lambda request_text="", url="", param="", method="POST":
+                 tool_deserialization_check(request_text or "", url or "", param or "", method or "POST")),
+        Tool("smuggling_detect", "HTTP request smuggling detection: send CL+TE / "
+             "TE+CL probe pairs and look for desynced response evidence.",
+             {"type": "object",
+              "properties": {"url": _str_prop("target URL"),
+                             "method": _str_prop("POST | GET", "POST")},
+              "required": ["url"]},
+             lambda url="", method="POST":
+                 tool_smuggling_detect(url or "", method or "POST")),
+        Tool("oauth_check", "OAuth flow audit: analyze authorization URL for "
+             "redirect_uri validation, state usage, response-type flaws.",
+             {"type": "object",
+              "properties": {"auth_url": _str_prop("authorization endpoint URL"),
+                             "redirect_uri": _str_prop("client redirect_uri", ""),
+                             "client_id": _str_prop("client_id", ""),
+                             "state": _str_prop("expected state value", "")},
+              "required": ["auth_url"]},
+             lambda auth_url="", redirect_uri="", client_id="", state="":
+                 tool_oauth_check(auth_url or "", redirect_uri or "", client_id or "", state or "")),
+        Tool("cloud_meta_test", "Cloud metadata SSRF probe: test a URL-fetching param "
+             "against 169.254.169.254 / 100.100.100.200 with IMDSv1/v2 payloads, "
+             "look for cloud credentials reflection.",
+             {"type": "object",
+              "properties": {"url": _str_prop("SSRF-capable endpoint URL"),
+                             "param": _str_prop("URL parameter to test"),
+                             "method": _str_prop("GET | POST", "GET"),
+                             "data": _str_prop("POST body (optional)")},
+              "required": ["url", "param"]},
+             lambda url="", param="", method="GET", data="":
+                 tool_cloud_meta_test(url or "", param or "", method or "GET", data or "")),
+        Tool("lockfile_scan", "Dependency CVE scan: parse package lockfiles "
+             "(package-lock.json, yarn.lock, requirements.txt, Pipfile.lock, "
+             "poetry.lock, go.sum, Cargo.lock, composer.lock) and query the "
+             "OSV API for known CVEs.",
+             {"type": "object",
+              "properties": {"path": _str_prop("path to lockfile"),
+                             "max_packages": {"type": "integer", "default": 200}},
+              "required": ["path"]},
+             lambda path="", max_packages=200:
+                 tool_lockfile_scan(path or "", int(max_packages or 200))),
+        Tool("ad_svc_probe", "Active Directory presence probe: TCP-connect to AD "
+             "service ports (Kerberos/LDAP/SMB/GC/RDP) and score how likely "
+             "the host is a domain controller.",
+             {"type": "object",
+              "properties": {"host": _str_prop("IP or hostname"),
+                             "ports": _str_prop("comma-separated custom ports", ""),
+                             "timeout": {"type": "integer", "default": 3}},
+              "required": ["host"]},
+             lambda host="", ports="", timeout=3:
+                 tool_ad_svc_probe(host or "", ports or "", int(timeout or 3))),
+
 
         # ---- findings & reporting ----
         Tool("add_finding", "Log a vulnerability finding for the engagement "
