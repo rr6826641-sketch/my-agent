@@ -59,6 +59,7 @@ from .payloads import (
 from .reporting import (
     tool_add_finding, tool_list_findings, tool_update_finding,
     tool_delete_finding, tool_write_report,
+    tool_verify_finding, tool_verify_all_findings,
 )
 from .webtests import (
     tool_sqli_test, tool_xss_test, tool_cmd_inject_test,
@@ -1022,10 +1023,12 @@ def create_tools(memory, knowledge=None, confirm_terminal=True,
                              "impact": _str_prop("demonstrated blast radius", ""),
                              "remediation": _str_prop("fix guidance", ""),
                              "confidence": _str_prop("low | medium | high | confirmed", "medium"),
-                             "status": _str_prop("open | confirmed | needs-validation | hypothesis | false-positive | fixed", "open")},
+                             "status": _str_prop("open | confirmed | needs-validation | hypothesis | false-positive | fixed", "open"),
+                             "verification": _str_prop("verified | unverified | false-positive - verification state of the claim (sets matching status)", ""),
+                             "verification_reason": _str_prop("why the claim was verified/filtered", "")},
               "required": ["asset", "title"]},
-             lambda asset="", title="", severity="medium", cwe="", description="", evidence="", impact="", remediation="", confidence="medium", status="open":
-                 tool_add_finding(asset, title, severity or "medium", cwe or "", description or "", evidence or "", impact or "", remediation or "", confidence or "medium", status or "open")),
+             lambda asset="", title="", severity="medium", cwe="", description="", evidence="", impact="", remediation="", confidence="medium", status="open", verification="", verification_reason="":
+                 tool_add_finding(asset, title, severity or "medium", cwe or "", description or "", evidence or "", impact or "", remediation or "", confidence or "medium", status or "open", verification or "", verification_reason or "")),
         Tool("list_findings", "List all logged findings, optionally filtered "
              "by severity/status.",
              {"type": "object",
@@ -1042,15 +1045,37 @@ def create_tools(memory, knowledge=None, confirm_terminal=True,
                              "status": _str_prop("open | confirmed | false-positive | fixed | ...", ""),
                              "title": _str_prop("new title", ""),
                              "remediation": _str_prop("new remediation", ""),
-                             "confidence": _str_prop("low | medium | high | confirmed", "")},
+                             "confidence": _str_prop("low | medium | high | confirmed", ""),
+                             "verification": _str_prop("verified | unverified | false-positive", ""),
+                             "verification_reason": _str_prop("why the claim was verified/filtered", "")},
               "required": ["finding_id"]},
-             lambda finding_id="", severity="", status="", title="", remediation="", confidence="":
-                 tool_update_finding(finding_id or "", severity or "", status or "", title or "", remediation or "", confidence or "")),
+             lambda finding_id="", severity="", status="", title="", remediation="", confidence="", verification="", verification_reason="":
+                 tool_update_finding(finding_id or "", severity or "", status or "", title or "", remediation or "", confidence or "", verification or "", verification_reason or "")),
         Tool("delete_finding", "Delete a finding by id.",
              {"type": "object",
               "properties": {"finding_id": _str_prop("e.g. F-1A2B3C4D")},
               "required": ["finding_id"]},
              lambda finding_id="": tool_delete_finding(finding_id or "")),
+        Tool("verify_finding", "Re-verify one logged finding with lightweight "
+             "benign checks (TCP port probe, DNS resolution, CVE database "
+             "lookup, single HTTP GET + header validation) and update its "
+             "verification state + status automatically.",
+             {"type": "object",
+              "properties": {"finding_id": _str_prop("e.g. F-1A2B3C4D"),
+                             "method": _str_prop("verification method label", "auto")},
+              "required": ["finding_id"]},
+             lambda finding_id="", method="auto":
+                 tool_verify_finding(finding_id or "", method or "auto")),
+        Tool("verify_findings", "Re-verify all (unverified) logged findings with "
+             "lightweight benign checks; confirmed ones become verified true "
+             "positives, contradicted ones are filtered as false positives "
+             "with an explanation.",
+             {"type": "object",
+              "properties": {"only_unverified": {"type": "boolean",
+                                                     "default": True}},
+              "required": []},
+             lambda only_unverified=True:
+                 tool_verify_all_findings(bool(only_unverified))),
         Tool("write_report", "Generate a complete Markdown penetration test "
              "report from the logged findings (exec summary, severity table, "
              "detailed findings, remediation).",

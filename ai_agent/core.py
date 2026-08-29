@@ -8,6 +8,13 @@ import time
 
 from .llm import LLMError, RunCancelled
 from .tools import create_tools, execute_tool
+from .tools.verify import (
+    REJECTED as V_REJECTED,
+    UNVERIFIED as V_UNVERIFIED,
+    VERIFIED as V_VERIFIED,
+    STATUS_LABELS as VERIFY_LABELS,
+    lightweight_verify_finding,
+)
 
 SYSTEM_PROMPT = """You are {name}, an elite AI penetration testing assistant
 for authorized cybersecurity professionals.
@@ -51,6 +58,23 @@ phases or jump straight to exploitation.
    and how to fix it. Prioritize by severity (Critical > High > Medium >
    Low > Info), use the findings log and write_report, and end with a short
    high-signal summary. Goal: an actionable report.
+
+# FINDING VERIFICATION (mandatory before final answer)
+- Before any critical/high security finding (confirmed CVE, misconfiguration,
+  vulnerability) is marked final in your reply, it must be re-verified: run
+  verify_finding / verify_findings (lightweight deterministic checks - one
+  benign HTTP GET, header validation, port probe, DNS resolution, CVE lookup)
+  or re-check the claim yourself with the real tools.
+- add_finding must pass verification=verified|unverified|false-positive and
+  set the finding status to confirmed / needs-validation / false-positive
+  accordingly. Do not report a critical finding as confirmed without a
+  successful verification check.
+- Every final answer that reports findings carries the status tags
+  [VERIFIED TRUE POSITIVE], [UNVERIFIED / REQUIRES MANUAL AUDIT] or
+  [FALSE POSITIVE - FILTERED]. The verification sub-routine appends these
+  tags automatically - do not remove or rewrite them.
+- False positives are filtered out of the assessment automatically; keep
+  them only in the verification appendix with their rejection reason.
 
 # TOOL CHAINING AUTOMATION RULES
 Chain tools automatically based on what the previous tool returned. Do not
@@ -146,6 +170,11 @@ The main agent reported these security findings:
 {findings}
 
 Your ONLY job: re-verify each finding yourself using the available tools.
+- PREFER the dedicated verify tools (verify_finding / verify_findings) when
+  available: they run lightweight benign checks (single HTTP request, header
+  validation, TCP port probe, DNS resolution, CVE lookup) and return a
+  deterministic verdict with evidence. Fall back to the regular tools
+  (port_scan, dns_lookup, cve_lookup, http_request) only when needed.
 - Do NOT trust the main agent's report. Independently re-check the claims
   (e.g. port_scan for open ports, subdomain_enum / dns_lookup for subdomains,
   cve_lookup for CVE references, http_request / url_status for web claims).
@@ -304,6 +333,21 @@ def _valid_port(num, exclude_years=True):
     if exclude_years and 1900 <= n <= 2100:
         return False
     return True
+
+
+def _find_finding_pos(original, needle):
+    """Find `needle` in `original`, treating any whitespace run as equal to
+    a single space (final answers often wrap the claim across lines).
+    Returns the original-string index or -1."""
+    parts = [re.escape(tok) for tok in re.split(r"\s+", needle.strip()) if tok]
+    if not parts:
+        return -1
+    try:
+        pat = re.compile(r"\s+".join(parts), re.I)
+    except re.error:
+        return original.find(needle)
+    m = pat.search(original)
+    return m.start() if m else -1
 
 
 def _ports_from_text(seg):
@@ -870,6 +914,7 @@ class Agent:
                      if game_master else None),
         )
         self._tools_by_name = {t.name: t for t in self._tool_list}
+        self._verification_results = []
 
     # ------------------------------------------------------------ prompt
 
@@ -1126,6 +1171,8 @@ class Agent:
                         yield {"type": "validation_done",
                                "summary": ("[VALIDATION SUB-AGENT] verification "
                                            "error: %s" % exc)}
+                    if getattr(self, "_verification_results", None):
+                        content = self._apply_verification_tags(content)
                     if summary:
                         content = "%s\n\n---\n\n%s" % (content, summary)
                 yield {"type": "final", "content": content or "(empty reply)"}
@@ -1326,107 +1373,212 @@ class Agent:
         return verdicts
 
     def _verify_findings(self, text, stop_event=None, model=None):
-        """Spawn an independent child sub-agent that re-checks the security
-        findings in `text` with real tools and rejects false positives.
-        Runs inline (blocking the final answer) with a time budget.
+        """Two-phase autonomous finding verification (blocks the final
+        answer so no finding reaches the UI/report unverified).
 
-        Yields UI events: validation_start -> validation_tool_call /
-        validation_tool_result -> validation (per finding) -> validation_done.
+        Phase 1 - deterministic pass (no LLM tokens): every candidate is
+        re-checked with lightweight_verify_finding - a single benign probe
+        (TCP connect for open ports, DNS resolution for subdomains, NVD/OSV
+        lookup for CVEs, one benign HTTP GET / header validation for web
+        claims). Claims confirmed or contradicted by these checks get their
+        verdict immediately.
+
+        Phase 2 - validation sub-agent: only the findings the deterministic
+        pass could NOT resolve are handed to an independent LLM child that
+        re-checks them with real tools (including the verify_* tools) and
+        rejects false positives.
+
+        Stores per-finding verdicts in self._verification_results so the
+        final answer can be tagged [VERIFIED TRUE POSITIVE] /
+        [UNVERIFIED / REQUIRES MANUAL AUDIT] and false positives filtered.
+
+        Yields UI events: validation_start -> validation (per finding, with
+        method=deterministic|sub-agent) -> validation_done.
         """
         findings = self._extract_findings(text)
+        self._verification_results = []
         if not findings:
             return
         yield {"type": "validation_start", "count": len(findings),
-               "content": "[VALIDATION SUB-AGENT] Re-verifying %d finding(s)..."
+               "content": "[VALIDATION] Re-verifying %d finding(s) "
+                           "(deterministic checks + sub-agent)..."
                            % len(findings)}
-        child = Agent(
-            llm=self.llm, memory=None,
-            name=self.name + "-validator",
-            max_iterations=min(self.max_iterations, 10),
-            max_messages=200, confirm_terminal=False,
-            spawn_depth=self.spawn_depth + 1,
-            max_spawn_depth=self.max_spawn_depth,
-            allow_subagents=False, auto_verify=False,
-            spawn_timeout=self.spawn_timeout,
-            game_master=False, world_state=None, lorebook=None,
-            reasoning_engine=False,
-        )
-        lines = ["- [%s] %s" % (f["type"], f["value"]) for f in findings]
-        task = VALIDATOR_PROMPT.format(findings="\n".join(lines))
-        deadline = time.time() + min(max(self.spawn_timeout, 30), 180)
-        child_out, child_err = "", ""
-        try:
-            for ev in child.run_stream(task, stop_event=stop_event,
-                                       model=model):
-                if time.time() > deadline:
-                    break
-                t = ev.get("type")
-                if t == "tool_call":
-                    yield {"type": "validation_tool_call",
-                           "name": ev.get("name", "?"),
-                           "arguments": ev.get("arguments", "{}")}
-                elif t == "tool_result":
-                    yield {"type": "validation_tool_result",
-                           "name": ev.get("name", "?"),
-                           "content": (ev.get("content") or "")[:1500]}
-                elif t == "final":
-                    child_out = ev.get("content", "") or ""
-                elif t == "error":
-                    child_err = ev.get("content", "") or ""
-        except RunCancelled:
-            raise
-        except Exception as exc:
-            child_err = "%s: %s" % (type(exc).__name__, exc)
 
-        verdicts = self._parse_validator_output(child_out)
-        overall_status, overall_reason = None, ""
-        if verdicts:
-            for vd in verdicts:
-                if vd.get("finding") == "(overall)":
-                    overall_status = vd["status"]
-                    overall_reason = vd.get("reason", "")
-                    break
-            if overall_status is None:
-                overall_status = verdicts[0]["status"]
-                overall_reason = verdicts[0].get("reason", "")
-        if overall_status is None:
-            if child_err:
-                overall_status, overall_reason = "unverified", \
-                    "validator failed (%s)" % child_err[:140]
-            else:
-                overall_status, overall_reason = "unverified", "no verdict returned"
-
-        def match_verdict(value):
-            v = value.lower()
-            for vd in verdicts:
-                f = (vd.get("finding") or "").lower()
-                if f and f != "(overall)" and (v in f or f in v):
-                    return vd
-            return None
-
-        seen_findings = set()
+        # ---- Phase 1: lightweight deterministic verification -----------
+        resolved = {}      # lowercase finding value -> verdict dict
+        pending = []       # findings the deterministic pass could not resolve
         for f in findings:
-            vd = match_verdict(f["value"])
-            if vd:
-                status, reason = vd["status"], vd.get("reason", "") or ""
+            d = lightweight_verify_finding(f)
+            resolved[f["value"].lower()] = d
+            if d.get("status") == V_UNVERIFIED:
+                pending.append(f)
             else:
-                status, reason = overall_status, overall_reason or ""
-            key = (status, f["value"].lower())
-            if key in seen_findings:
-                continue
-            seen_findings.add(key)
-            yield {"type": "validation", "status": status,
-                   "finding": f["value"], "reason": reason}
+                yield {"type": "validation", "status": d["status"],
+                       "finding": f["value"], "reason": d.get("reason", ""),
+                       "method": "deterministic"}
 
-        verified = sum(1 for vd in verdicts if vd["status"] == "verified")
-        rejected = sum(1 for vd in verdicts if vd["status"] == "rejected")
-        unverified = sum(1 for vd in verdicts if vd["status"] == "unverified")
-        summary = ("[VALIDATION SUB-AGENT] %d finding(s) re-checked: "
-                   "%d verified, %d false positives rejected, %d unverified."
+        # ---- Phase 2: independent validation sub-agent (unresolved only) --
+        child_out, child_err = "", ""
+        if pending:
+            yield {"type": "validation_start",
+                   "content": "[VALIDATION SUB-AGENT] Deep re-check of "
+                               "%d unresolved finding(s)..." % len(pending)}
+            child = Agent(
+                llm=self.llm, memory=None,
+                name=self.name + "-validator",
+                max_iterations=min(self.max_iterations, 10),
+                max_messages=200, confirm_terminal=False,
+                spawn_depth=self.spawn_depth + 1,
+                max_spawn_depth=self.max_spawn_depth,
+                allow_subagents=False, auto_verify=False,
+                spawn_timeout=self.spawn_timeout,
+                game_master=False, world_state=None, lorebook=None,
+                reasoning_engine=False,
+            )
+            lines = ["- [%s] %s" % (f["type"], f["value"]) for f in pending]
+            task = VALIDATOR_PROMPT.format(findings="\n".join(lines))
+            deadline = time.time() + min(max(self.spawn_timeout, 30), 180)
+            try:
+                for ev in child.run_stream(task, stop_event=stop_event,
+                                           model=model):
+                    if time.time() > deadline:
+                        break
+                    t = ev.get("type")
+                    if t == "tool_call":
+                        yield {"type": "validation_tool_call",
+                               "name": ev.get("name", "?"),
+                               "arguments": ev.get("arguments", "{}")}
+                    elif t == "tool_result":
+                        yield {"type": "validation_tool_result",
+                               "name": ev.get("name", "?"),
+                               "content": (ev.get("content") or "")[:1500]}
+                    elif t == "final":
+                        child_out = ev.get("content", "") or ""
+                    elif t == "error":
+                        child_err = ev.get("content", "") or ""
+            except RunCancelled:
+                raise
+            except Exception as exc:
+                child_err = "%s: %s" % (type(exc).__name__, exc)
+
+            verdicts = self._parse_validator_output(child_out)
+            overall_status, overall_reason = None, ""
+            if verdicts:
+                for vd in verdicts:
+                    if vd.get("finding") == "(overall)":
+                        overall_status = vd["status"]
+                        overall_reason = vd.get("reason", "")
+                        break
+                if overall_status is None:
+                    overall_status = verdicts[0]["status"]
+                    overall_reason = verdicts[0].get("reason", "")
+            if overall_status is None:
+                if child_err:
+                    overall_status, overall_reason = V_UNVERIFIED, \
+                        "validator failed (%s)" % child_err[:140]
+                else:
+                    overall_status, overall_reason = V_UNVERIFIED, \
+                        "no verdict returned"
+
+            def match_verdict(value):
+                v = value.lower()
+                for vd in verdicts:
+                    f = (vd.get("finding") or "").lower()
+                    if f and f != "(overall)" and (v in f or f in v):
+                        return vd
+                return None
+
+            for f in pending:
+                vd = match_verdict(f["value"])
+                if vd:
+                    status = vd["status"]
+                    reason = vd.get("reason", "") or ""
+                else:
+                    status, reason = overall_status, overall_reason or ""
+                resolved[f["value"].lower()] = {
+                    "status": status, "reason": reason, "method": "sub-agent"}
+                yield {"type": "validation", "status": status,
+                       "finding": f["value"], "reason": reason,
+                       "method": "sub-agent"}
+
+        # ---- persist verdicts for final-answer tagging ------------------
+        self._verification_results = [{
+            "type": f["type"], "value": f["value"],
+            "status": (resolved.get(f["value"].lower()) or {}).get(
+                "status", V_UNVERIFIED),
+            "reason": (resolved.get(f["value"].lower()) or {}).get(
+                "reason", ""),
+            "method": (resolved.get(f["value"].lower()) or {}).get(
+                "method", "sub-agent"),
+        } for f in findings]
+
+        verified = sum(1 for r in self._verification_results
+                       if r["status"] == V_VERIFIED)
+        rejected = sum(1 for r in self._verification_results
+                       if r["status"] == V_REJECTED)
+        unverified = sum(1 for r in self._verification_results
+                         if r["status"] == V_UNVERIFIED)
+        summary = ("[VERIFICATION] %d finding(s) re-checked: %d verified "
+                   "true positives, %d false positives filtered, "
+                   "%d unverified (manual audit)."
                    % (len(findings), verified, rejected, unverified))
         yield {"type": "validation_done", "summary": summary,
                "verified": verified, "rejected": rejected,
                "unverified": unverified, "count": len(findings)}
+
+    def _apply_verification_tags(self, content):
+        """Tag the final answer with per-finding verification status.
+
+        Every finding occurrence found in the text gets its status tag
+        appended inline ([VERIFIED TRUE POSITIVE] / [UNVERIFIED / REQUIRES
+        MANUAL AUDIT] / [FALSE POSITIVE - FILTERED]); a structured
+        Verification Report block is appended so the tags are always present
+        even when the LLM paraphrased the claim. False positives are listed
+        separately as filtered.
+        """
+        results = getattr(self, "_verification_results", None)
+        if not results:
+            return content
+        content = content or ""
+        filtered = []
+        insertions = []  # (position_after_match, tag_text) applied back-to-front
+        done = set()
+        for r in results:
+            val = (r.get("value") or "").strip()
+            if not val:
+                continue
+            label = VERIFY_LABELS.get(r.get("status"), VERIFY_LABELS[V_UNVERIFIED])
+            if r.get("status") == V_REJECTED:
+                filtered.append(r)
+            key = val.lower()
+            if key in done:
+                continue
+            done.add(key)
+            pos = _find_finding_pos(content, val)
+            if pos != -1:
+                insertions.append((pos + len(val), " **%s**" % label))
+        tagged = content
+        for pos, tag_text in sorted(insertions, key=lambda x: x[0],
+                                    reverse=True):
+            tagged = tagged[:pos] + tag_text + tagged[pos:]
+        block = ["", "---", "", "## Verification Report", ""]
+        block.append("| Finding | Status | Method | Reason |")
+        block.append("|---------|--------|--------|--------|")
+        for r in results:
+            label = VERIFY_LABELS.get(r.get("status"), VERIFY_LABELS[V_UNVERIFIED])
+            method = r.get("method", "sub-agent")
+            reason = (r.get("reason") or "-").replace("|", "\\|")[:120]
+            block.append("| %s | %s | %s | %s |"
+                         % (r.get("value", "")[:80], label, method, reason))
+        block.append("")
+        if filtered:
+            block.append("**Filtered false positives** (excluded from the "
+                         "assessment):")
+            for r in filtered:
+                block.append("- ~~%s~~ - %s"
+                             % (r.get("value", ""), r.get("reason", "")))
+            block.append("")
+        return tagged + "\n".join(block)
 
     # ------------------------------------------------------------ sub-agents
 
