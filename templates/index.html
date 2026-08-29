@@ -126,8 +126,14 @@
           <input type="text" id="set-url" placeholder="https://api.openai.com/v1">
           <small>OpenAI / OpenRouter / Groq / Ollama (http://localhost:11434/v1) / LM Studio</small>
         </label>
+        <label class="check">
+          <input type="checkbox" id="set-auto"> ✨ Auto-Model Selector
+          <small>Smart router: cyber/uncensored → Dolphin/Inkling · coding/math → DeepSeek R1 · chat → fast default</small>
+        </label>
         <label>Model
-          <input type="text" id="set-model" placeholder="gpt-4o-mini">
+          <select id="set-model">
+            <option value="auto">✨ Auto Select (Smart Router)</option>
+          </select>
         </label>
         <label class="check">
           <input type="checkbox" id="set-mock"> Mock mode (built-in test LLM, no key needed)

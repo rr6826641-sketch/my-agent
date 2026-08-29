@@ -91,7 +91,7 @@ class OpenAIClient:
 
 
     def chat_stream(self, messages, tools=None, temperature=0.2,
-                    cancel_event=None):
+                    cancel_event=None, model=None):
         """Stream a completion: yields delta events, then a message event.
 
         Models are tried in order (primary + fallback_models) until one
@@ -101,8 +101,9 @@ class OpenAIClient:
 
         cancel_event: optional threading.Event. When set, the current call is
         aborted by raising RunCancelled.
+        model: optional per-call override (used by the Smart Auto-Router).
         """
-        models = [self.model] + list(self.fallback_models)
+        models = [model or self.model] + list(self.fallback_models)
         last_error = None
         for index, model in enumerate(models):
             if cancel_event is not None and cancel_event.is_set():
@@ -344,7 +345,7 @@ class MockClient:
                   "(Run with a real API key to unlock full reasoning.)")
         return {"role": "assistant", "content": answer}
     def chat_stream(self, messages, tools=None, temperature=0.2,
-                    cancel_event=None):
+                    cancel_event=None, model=None):
         """Mock streaming: simulate the delta -> message event sequence."""
         if cancel_event is not None and cancel_event.is_set():
             raise RunCancelled("generation cancelled by user")

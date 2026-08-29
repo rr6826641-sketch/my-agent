@@ -101,7 +101,7 @@ class Agent:
                 parts.append(event.get("content", ""))
         return "\n".join(p for p in parts if p) or "(empty reply)"
 
-    def run_stream(self, user_input, stop_event=None):
+    def run_stream(self, user_input, stop_event=None, model=None):
         """Same agent loop but yields events for live UI updates.
 
         Event types:
@@ -114,6 +114,7 @@ class Agent:
 
         stop_event: optional threading.Event. When set (Stop button), the
         loop aborts by raising RunCancelled so the caller can stop cleanly.
+        model: optional per-run LLM model override (Smart Auto-Router).
         """
         user_input = (user_input or "").strip()
         if not user_input:
@@ -133,7 +134,8 @@ class Agent:
             reply = None
             try:
                 for ev in self.llm.chat_stream(prompt, tools=tool_schemas,
-                                               cancel_event=stop_event):
+                                               cancel_event=stop_event,
+                                               model=model):
                     if ev["type"] == "delta":
                         yield {"type": "delta", "content": ev.get("content", "")}
                     elif ev["type"] == "message":

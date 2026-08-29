@@ -210,6 +210,14 @@ body {
 
 .typing { color: var(--muted); font-size: 12px; padding: 2px 0 10px 40px; }
 .typing .tdots::after { content: "…"; animation: dots 1.2s infinite; }
+.route-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 99px;
+  padding: 4px 12px; margin: 2px 0 8px 40px; font-size: 11px; color: var(--muted);
+}
+.route-chip .route-ico { font-size: 11px; }
+.route-chip .route-txt b { color: var(--accent); font-family: var(--mono); }
+.route-chip .route-reason { color: var(--muted); }
 @keyframes dots { 0% { content: ""; } 33% { content: "."; } 66% { content: ".."; } 100% { content: "..."; } }
 
 .composer {
@@ -301,6 +309,11 @@ body {
 }
 .settings-card label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 14px; }
 .settings-card input { margin-top: 6px; }
+.settings-card select {
+  width: 100%; margin-top: 6px; background: var(--bg3); border: 1px solid var(--border);
+  color: var(--fg); border-radius: 8px; padding: 10px 12px; font-size: 13px; outline: none;
+}
+.settings-card select:focus { border-color: var(--accent); box-shadow: 0 0 10px rgba(255,26,26,.3); }
 .settings-card small { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; }
 .settings-card .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg); }
 .settings-card .check input { margin: 0; width: auto; }

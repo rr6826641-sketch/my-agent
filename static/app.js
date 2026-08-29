@@ -272,6 +272,18 @@ function scrollDown() {
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
+function addRouteChip(label, reason) {
+  const div = document.createElement("div");
+  div.className = "route-chip";
+  div.innerHTML =
+    `<span class="route-ico">⚡</span><span class="route-txt"><b>${escapeHtml(label || "auto")}</b>` +
+    (reason ? ` <span class="route-reason">· ${escapeHtml(reason)}</span>` : "") +
+    `</span>`;
+  chatLog.appendChild(div);
+  scrollDown();
+  return div;
+}
+
 function addToolCard(name, args) {
   const div = document.createElement("div");
   div.className = "toolcard";
@@ -366,6 +378,12 @@ function sendMessage(text) {
   function handleEvent(e) {
     armWatchdog(); // any event counts as activity
     if (e.type === "start") return;
+
+    if (e.type === "route") {
+      // Smart Auto-Model Selector: show which model this answer uses
+      addRouteChip(e.label, e.reason);
+      return;
+    }
 
     if (e.type === "llm") {
       // full assistant content before tool calls -> render as markdown
@@ -591,14 +609,34 @@ $("#mem-add").addEventListener("click", async () => {
 });
 
 /* ---------------- settings ---------------- */
+function fillModelSelect(catalog) {
+  const sel = $("#set-model");
+  sel.innerHTML = "";
+  (catalog || []).forEach((m) => {
+    const opt = document.createElement("option");
+    opt.value = m.id;
+    opt.textContent = m.label;
+    if (m.tag === "recommended") opt.textContent += " ★";
+    sel.appendChild(opt);
+  });
+  return sel;
+}
+
 async function loadSettings() {
   const s = await fetchJSON("/api/settings");
   $("#set-key").value = s.api_key || "";
   $("#set-url").value = s.base_url || "";
-  $("#set-model").value = s.model || "";
+  fillModelSelect(s.catalog);
+  $("#set-model").value = s.auto ? "auto" : (s.model || "auto");
+  $("#set-auto").checked = !!s.auto;
   $("#set-mock").checked = !!s.mock;
   $("#set-iter").value = s.max_iterations || 12;
 }
+
+// the Auto-Model Selector checkbox drives the model select
+$("#set-auto").addEventListener("change", () => {
+  $("#set-model").value = $("#set-auto").checked ? "auto" : $("#set-model").value;
+});
 $("#set-save").addEventListener("click", async () => {
   const msg = $("#set-msg");
   msg.textContent = "saving…";
@@ -609,6 +647,7 @@ $("#set-save").addEventListener("click", async () => {
       api_key: $("#set-key").value.trim(),
       base_url: $("#set-url").value.trim(),
       model: $("#set-model").value.trim(),
+      auto: $("#set-auto").checked,
       mock: $("#set-mock").checked,
       max_iterations: parseInt($("#set-iter").value, 10) || 12,
     }),
@@ -637,10 +676,17 @@ async function refreshStatus() {
     const s = await fetchJSON("/api/status");
     const dot = $("#dot-mode");
     dot.className = "dot " + (s.mode === "live" ? "live" : "mock");
-    $("#status-mode").textContent = s.mode === "live" ? "live · " + s.model : "mock mode";
-    $("#status-model").textContent = s.mode === "live" ? s.base_url : "built-in test LLM";
-    $("#pill-mode").textContent = (s.mode === "live" ? "● LIVE · " : "◐ MOCK · ") + s.model;
-    $("#pill-mode").className = "pill " + s.mode;
+    if (s.mode === "auto") {
+      dot.className = "dot live";
+      $("#status-mode").textContent = "auto · smart router";
+      $("#status-model").textContent = s.base_url || "";
+      $("#pill-mode").textContent = "◐ AUTO · smart router";
+    } else {
+      $("#status-mode").textContent = s.mode === "live" ? "live · " + s.model : "mock mode";
+      $("#status-model").textContent = s.mode === "live" ? s.base_url : "built-in test LLM";
+      $("#pill-mode").textContent = (s.mode === "live" ? "● LIVE · " : "◐ MOCK · ") + s.model;
+    }
+    $("#pill-mode").className = "pill " + (s.mode === "mock" ? "mock" : "live");
     $("#badge-tools").textContent = s.tools;
   } catch { /* ignore */ }
 }

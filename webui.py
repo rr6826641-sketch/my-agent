@@ -41,6 +41,102 @@ _active_runs = {}  # run_id -> threading.Event
 
 app = Flask(__name__)
 
+
+# --------------------------------------------------------------------------
+# OpenRouter model catalog + Smart Auto-Model Router
+# --------------------------------------------------------------------------
+
+DEFAULT_FAST_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+
+MODEL_CATALOG = [
+    {"id": "auto", "label": "✨ Auto Select (Smart Router)",
+     "tag": "recommended",
+     "desc": "Routes every prompt to the best model automatically"},
+    {"id": "cognitivecomputations/dolphin-mistral-24b-venice-edition",
+     "label": "Dolphin Mistral 24B", "tag": "uncensored",
+     "desc": "Top uncensored — cyber security / recon / red-team tasks"},
+    {"id": "thinkingmachines/inkling:free",
+     "label": "Inkling (Free)", "tag": "free",
+     "desc": "Free uncensored model"},
+    {"id": "meta-llama/llama-3.3-70b-instruct",
+     "label": "Llama 3.3 70B Instruct", "tag": "general",
+     "desc": "Powerful open-source general-purpose model"},
+    {"id": "deepseek/deepseek-r1",
+     "label": "DeepSeek R1", "tag": "reasoning",
+     "desc": "Complex reasoning, math & coding"},
+    {"id": DEFAULT_FAST_MODEL,
+     "label": "Nemotron 120B (Fast Default)", "tag": "fast",
+     "desc": "Fast default model for everyday chat"},
+]
+
+MODEL_LABELS = {m["id"]: m["label"] for m in MODEL_CATALOG}
+
+# keyword groups used by the auto-router (case-insensitive substring match)
+_CYBER_WORDS = [
+    "scan", "port scan", "nmap", "recon", "subdomain", "osint", "whois",
+    "dns", "enumerate", "fingerprint", "fuzz", "sqlmap", "sql injection",
+    "xss", "csrf", "ssrf", "lfi", "rfi", "sqli", "cve", "exploit",
+    "payload", "shell", "reverse shell", "backdoor", "malware",
+    "ransomware", "phishing", "metasploit", "burp", "hydra", "hashcat",
+    "john the ripper", "brute", "bruteforce", "crack", "password",
+    "kerberoast", "mitm", "tcpdump", "wireshark", "vulnerability",
+    "pentest", "penetration", "hack", "hacking", "cyber", "security",
+    "dark web", "anonym", "proxy", "evasion", "privilege escalation",
+    "lateral movement", "persistence", "c2", "keylog", "spyware",
+    "trojan", "rootkit", "botnet", "ddos", "credential", "dump",
+    "smb", "rdp", "wifi", "aircrack", "deauth", "sniff", "arp",
+    "session hijack", "token", "idor", "auth bypass", "bypass", "0day",
+    "zeroday", "forensic", "malware analysis", "threat", "red team",
+    "blue team", "siem", "firewall", "ids", "ips", "network",
+    "endpoint", "active directory", "ad", "ldap", "kerberos", "nltest",
+    "bloodhound", "mimikatz", "pass-the-hash", "lateral", "domain",
+]
+_CODING_WORDS = [
+    "code", "python", "javascript", "typescript", "java", "c++", "c#",
+    "golang", "rust", "ruby", "php", "function", "class", "method",
+    "algorithm", "debug", "compile", "refactor", "regex", "sql query",
+    "api", "endpoint", "script", "html", "css", "react", "node",
+    "flask", "django", "docker", "kubernetes", "git", "linux", "bash",
+    "powershell", "math", "equation", "solve", "calculate", "compute",
+    "calculus", "algebra", "geometry", "probability", "statistics",
+    "logic", "proof", "theorem", "leetcode", "challenge", "data structure",
+    "binary", "sorting", "recursion", "dynamic programming", "optimization",
+    "syntax", "exception", "stack trace", "unit test", "pytest", "numpy",
+    "pandas", "machine learning", "neural network", "gradient", "tensor",
+    "matrix", "regression", "big-o", "time complexity", "design pattern",
+    "snippet", "function call", "implement", "write a program", "coding",
+]
+
+MODEL_ROUTES = {
+    "cyber": "cognitivecomputations/dolphin-mistral-24b-venice-edition",
+    "uncensored": "thinkingmachines/inkling:free",
+    "coding": "deepseek/deepseek-r1",
+}
+
+
+def route_model(prompt, cfg=None):
+    """Classify a prompt and return (model_id, reason).
+
+    Returns (None, None) when the Smart Auto-Router is off or no special
+    class matches (the default fast model is then used).
+    """
+    cfg = cfg or {}
+    auto = bool(cfg.get("auto")) or (cfg.get("model") == "auto")
+    if not auto or not prompt:
+        return None, None
+    text = (" " + prompt.lower() + " ")
+
+    for w in ("uncensored", "jailbreak", "nsfw", "adult"):
+        if w in text:
+            return MODEL_ROUTES["uncensored"], "uncensored / jailbreak prompt"
+    for w in _CYBER_WORDS:
+        if w in text:
+            return MODEL_ROUTES["cyber"], "cyber security / recon task"
+    for w in _CODING_WORDS:
+        if w in text:
+            return MODEL_ROUTES["coding"], "coding / math / logic task"
+    return None, None
+
 # --- encoding hardening: every response MUST be UTF-8 ---------------------
 # jsonify: emit raw UTF-8 instead of \uXXXX escapes (cleaner, smaller)
 try:
@@ -96,10 +192,15 @@ def _build_agent(cfg):
     if cfg.get("mock"):
         llm = MockClient()
     else:
+        # Smart Auto-Model Selector: in auto mode the configured model is a
+        # placeholder; the actual model is chosen per-request by the router.
+        model = cfg.get("model") or "gpt-4o-mini"
+        if cfg.get("auto") or model == "auto":
+            model = DEFAULT_FAST_MODEL
         llm = OpenAIClient(
             api_key=cfg.get("api_key") or "",
             base_url=cfg.get("base_url") or "https://api.openai.com/v1",
-            model=cfg.get("model") or "gpt-4o-mini",
+            model=model,
             fallback_models=cfg.get("fallback_models"),
         )
     agent = Agent(llm, memory=memory,
@@ -126,9 +227,16 @@ def _reload_state(mock_override=None):
 
 def _status():
     cfg = _current_cfg()
+    auto = bool(cfg.get("auto")) or (cfg.get("model") == "auto")
+    if cfg.get("mock"):
+        mode, model = "mock", "mock-1"
+    elif auto:
+        mode, model = "auto", "auto"
+    else:
+        mode, model = "live", cfg.get("model", "?")
     return {
-        "mode": "mock" if cfg.get("mock") else "live",
-        "model": "mock-1" if cfg.get("mock") else cfg.get("model", "?"),
+        "mode": mode,
+        "model": model,
         "base_url": "built-in" if cfg.get("mock") else cfg.get("base_url", "?"),
         "has_key": bool(cfg.get("api_key")),
         "tools": len(_state["agent"]._tool_list) if _state.get("agent") else 0,
@@ -276,11 +384,24 @@ def api_chat():
 
     q = queue.Queue(maxsize=64)
     agent = _state["agent"]
-    run_gen = agent.run_stream(message, stop_event=stop_event)
+    cfg = _current_cfg()
+    routed_model, route_reason = route_model(message, cfg)
+
+    def run_gen():
+        # Smart Auto-Model Selector: emit a route event before the stream so
+        # the UI can show which model this answer actually used.
+        if routed_model:
+            yield {"type": "route", "model": routed_model,
+                   "label": MODEL_LABELS.get(routed_model, routed_model),
+                   "reason": route_reason}
+        yield from agent.run_stream(message, stop_event=stop_event,
+                                    model=routed_model)
+
+    run_iter = run_gen()
 
     def worker():
         try:
-            for event in run_gen:
+            for event in run_iter:
                 try:
                     _record_event(sid, event)
                 except Exception:
@@ -290,7 +411,7 @@ def api_chat():
                 except queue.Full:
                     # client is gone: stop the run and unwind the generator
                     stop_event.set()
-                    run_gen.close()
+                    run_iter.close()
                     break
         except RunCancelled:
             pass  # user pressed Stop; clean shutdown below
@@ -505,10 +626,13 @@ def api_memory_del(key):
 @app.route("/api/settings")
 def api_settings():
     cfg = _current_cfg()
+    auto = bool(cfg.get("auto")) or (cfg.get("model") == "auto")
     return jsonify({
         "api_key": cfg.get("api_key", ""),
         "base_url": cfg.get("base_url", ""),
-        "model": cfg.get("model", ""),
+        "model": "auto" if auto else cfg.get("model", ""),
+        "auto": auto,
+        "catalog": MODEL_CATALOG,
         "mock": bool(cfg.get("mock")),
         "max_iterations": cfg.get("max_iterations", 60),
     })
@@ -520,16 +644,25 @@ def api_settings_save():
     api_key = (data.get("api_key") or "").strip()
     base_url = (data.get("base_url") or "").strip()
     model = (data.get("model") or "").strip()
+    auto = bool(data.get("auto")) or (model == "auto")
     mock = bool(data.get("mock"))
     mi = data.get("max_iterations")
 
-    patch = {"mock": mock}
+    patch = {"mock": mock, "auto": auto}
     if api_key:
         patch["api_key"] = api_key
     if base_url:
         patch["base_url"] = base_url
-    if model:
+    # auto mode stores "auto" as the model so it survives reloads.
+    # The auto flag is always written explicitly (True/False) so an old
+    # auto:true can never linger and silently keep the router on.
+    if auto:
+        patch["model"] = "auto"
+    elif model and model != "auto":
         patch["model"] = model
+    elif not model:
+        # cleared model with auto off -> fall back to the fast default
+        patch["model"] = DEFAULT_FAST_MODEL
     if isinstance(mi, int) and 1 <= mi <= 100:
         patch["max_iterations"] = mi
     _save_cfg(patch)
@@ -567,8 +700,13 @@ def main():
 
     _reload_state(mock_override=True if args.mock else None)
     cfg = _current_cfg()
-    mode = "mock (built-in test LLM)" if cfg.get("mock") else \
-        "live (%s @ %s)" % (cfg.get("model"), cfg.get("base_url"))
+    auto = bool(cfg.get("auto")) or (cfg.get("model") == "auto")
+    if cfg.get("mock"):
+        mode = "mock (built-in test LLM)"
+    elif auto:
+        mode = "auto (Smart Router -> %s)" % DEFAULT_FAST_MODEL
+    else:
+        mode = "live (%s @ %s)" % (cfg.get("model"), cfg.get("base_url"))
 
     print("=" * 58)
     print("  AI AGENT WEB UI")
