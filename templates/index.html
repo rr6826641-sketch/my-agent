@@ -75,7 +75,10 @@
 
       <div class="composer">
         <textarea id="input" rows="1" placeholder="Message the agent… (Enter to send, Shift+Enter for newline)"></textarea>
-        <button class="btn-send" id="send" title="Send">➤</button>
+        <button class="btn-send" id="send" title="Send" aria-label="Send">
+          <span class="send-ico">➤</span>
+          <span class="stop-ico">■</span>
+        </button>
       </div>
     </section>
 

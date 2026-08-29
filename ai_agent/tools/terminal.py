@@ -4,6 +4,8 @@ import locale
 import os
 import subprocess
 
+from .base import kill_proc_tree, register_proc, unregister_proc
+
 
 def _oem_codepage():
     """OEM code page (what cmd.exe writes to pipes), e.g. 437/850/936."""
@@ -54,22 +56,30 @@ def _decode_output(data):
 def tool_run_terminal(command, timeout=60, max_output=20000):
     if not command or not command.strip():
         return "Error: empty command"
+    proc = None
     try:
-        proc = subprocess.run(
-            command, shell=True, capture_output=True,
-            timeout=timeout,
+        proc = subprocess.Popen(
+            command, shell=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
-        stdout = _decode_output(proc.stdout)
-        stderr = _decode_output(proc.stderr)
-        parts = [stdout]
-        if stderr.strip():
-            parts.append("[stderr]\n" + stderr)
-        out = "\n".join(parts).strip() or "(no output)"
-        return "[exit code %s]\n%s" % (proc.returncode, out[:max_output])
+        register_proc(proc)
+        stdout, stderr = proc.communicate(timeout=timeout)
+        out = _decode_output(stdout)
+        err = _decode_output(stderr)
+        parts = [out]
+        if err.strip():
+            parts.append("[stderr]\n" + err)
+        text = "\n".join(parts).strip() or "(no output)"
+        return "[exit code %s]\n%s" % (proc.returncode, text[:max_output])
     except subprocess.TimeoutExpired:
+        if proc is not None:
+            kill_proc_tree(proc)
         return "[command timed out after %ss]" % timeout
     except Exception as exc:
         return "run_terminal error: %s" % exc
+    finally:
+        if proc is not None:
+            unregister_proc(proc)
 
 
 def tool_read_file(path, max_chars=60000):

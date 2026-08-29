@@ -11,6 +11,9 @@ let busy = false;
 let currentSessionId = null;
 let watchdogInactive = null;
 let watchdogTotal = null;
+let activeController = null; // AbortController of the in-flight /api/chat stream
+let activeRunId = null;      // run_id echoed by the server in the X-Run-Id header
+let stopRequested = false;   // true while a user-initiated Stop is unwinding
 
 /* ---------------- utf-8 fetch helpers ----------------
    Decode every API response explicitly as UTF-8 (TextDecoder) instead of
@@ -287,7 +290,20 @@ function addToolCard(name, args) {
   return div.querySelector(".result");
 }
 
-/* ---------------- send / SSE ---------------- */
+/* ---------------- send / SSE (fetch + AbortController) ---------------- */
+// EventSource has no abort() API, so the stream is fetched as a raw
+// ReadableStream and SSE frames are parsed by hand. That lets the Stop
+// button cancel the in-flight fetch in real time via AbortController and
+// report the exact run_id back to /api/chat/cancel so the backend unwinds
+// the running LLM call / tool subprocess instead of leaving it alive.
+function setStreaming(on) {
+  const btn = $("#send");
+  btn.classList.toggle("streaming", on);
+  btn.disabled = false; // while streaming the button stays clickable = Stop
+  btn.title = on ? "Stop" : "Send";
+  btn.setAttribute("aria-label", on ? "Stop" : "Send");
+}
+
 function sendMessage(text) {
   if (busy || !text.trim()) return;
   const message = text.trim();
@@ -296,27 +312,31 @@ function sendMessage(text) {
   addUserMsg(message);
   let typing = addTyping();
   busy = true;
-  $("#send").disabled = true;
+  stopRequested = false;
+  setStreaming(true); // send arrow -> square stop icon
   $("#chat-hint").textContent = "working…";
   armWatchdogTotal(); // hard cap on the whole request
   armWatchdog();      // inactivity watchdog, re-armed on every SSE event
 
-  const es = new EventSource("/api/chat?message=" + encodeURIComponent(message));
+  const controller = new AbortController();
+  activeController = controller;
   let finalAdded = false;
   let preview = null; // last "llm" bubble — upgraded to final instead of duplicating
 
-  // clean end of stream: clear "working…", reset busy so the next
-  // message can be sent (manual es.close() does NOT fire onerror).
-  // Idempotent — watchdog + error paths can race, so the "working…"
-  // state can never stay stuck after a request finishes.
+  // clean end of stream: clear "working…", reset busy so the next message
+  // can be sent immediately. Idempotent — watchdog + abort + error paths
+  // can race, so the "working…" state can never stay stuck.
   function finish(note) {
     if (!busy) return;
     clearTimeout(watchdogInactive);
     clearTimeout(watchdogTotal);
-    es.close();
+    activeController = null;
+    activeRunId = null;
+    stopRequested = false;
+    try { controller.abort(); } catch { /* already aborted */ }
     typing.remove();
     busy = false;
-    $("#send").disabled = false;
+    setStreaming(false); // stop square -> send arrow
     $("#chat-hint").textContent = "";
     if (note && !finalAdded) {
       addAssistantBubble(note);
@@ -341,9 +361,9 @@ function sendMessage(text) {
     }, 400000);
   }
 
-  es.onmessage = (ev) => {
-    let e;
-    try { e = JSON.parse(ev.data); } catch { return; }
+  // one decoded SSE "data:" payload -> identical rendering to the old
+  // EventSource onmessage handler.
+  function handleEvent(e) {
     armWatchdog(); // any event counts as activity
     if (e.type === "start") return;
 
@@ -406,15 +426,82 @@ function sendMessage(text) {
       finish(); // e.g. server [timed out] — must also release busy
     }
     scrollDown();
-  };
+  }
 
-  es.onerror = () => {
-    if (!finalAdded) {
-      addAssistantBubble("⚠️ connection closed");
-      finalAdded = true;
+  // fetch + ReadableStream instead of EventSource so the request can be
+  // aborted in real time (AbortController); EventSource has no abort.
+  (async () => {
+    let res;
+    try {
+      res = await fetch("/api/chat?message=" + encodeURIComponent(message),
+                        { signal: controller.signal });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      if (!res.body) throw new Error("stream unavailable");
+      activeRunId = res.headers.get("X-Run-Id") || null;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let sep;
+        while ((sep = buf.indexOf("\n\n")) !== -1) {
+          const block = buf.slice(0, sep);
+          buf = buf.slice(sep + 2);
+          let data = "";
+          block.split("\n").forEach((line) => {
+            if (line.startsWith("data:")) {
+              data += (data ? "\n" : "") + line.slice(5).trim();
+            }
+          });
+          if (!data) continue;
+          let e;
+          try { e = JSON.parse(data); } catch { continue; }
+          handleEvent(e);
+        }
+      }
+    } catch (err) {
+      if (err && err.name === "AbortError" && stopRequested) {
+        // user clicked Stop: /api/chat/cancel already told the backend to
+        // unwind the LLM call / tool run, so just show a short note.
+        if (!finalAdded) {
+          addAssistantBubble("⏹ stopped");
+          finalAdded = true;
+        }
+      } else if (!finalAdded) {
+        addAssistantBubble("⚠️ connection error: " + (err && err.message ? err.message : "stream aborted"));
+        finalAdded = true;
+      }
+    } finally {
+      // stop may have raced the reader's last chunk -> still mark the UI
+      // as stopped if nothing was rendered after the Stop click.
+      if (stopRequested && !finalAdded) {
+        addAssistantBubble("⏹ stopped");
+        finalAdded = true;
+      }
+      finish(); // always release busy so the user can send the next message
     }
-    finish(); // network drop — release busy so the user can retry
-  };
+  })();
+}
+
+function stopStream() {
+  if (!busy) return;
+  stopRequested = true;
+  const controller = activeController;
+  const runId = activeRunId;
+  activeController = null;
+  activeRunId = null;
+  try { if (controller) controller.abort(); } catch { /* ignore */ }
+  // belt-and-suspenders: even if the abort raced ahead of the response
+  // headers (no run_id yet), POSTing without a run_id cancels all active
+  // runs. The backend worker raises RunCancelled, kills tool subprocesses
+  // (kill_active_procs) and drops the run from _active_runs.
+  fetch("/api/chat/cancel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(runId ? { run_id: runId } : {}),
+  }).catch(() => { /* backend already unwinding via the aborted connection */ });
 }
 
 /* ---------------- composer ---------------- */
@@ -429,7 +516,10 @@ inputBox.addEventListener("keydown", (ev) => {
     sendMessage(inputBox.value);
   }
 });
-$("#send").addEventListener("click", () => sendMessage(inputBox.value));
+$("#send").addEventListener("click", () => {
+  if (busy) stopStream(); // streaming -> Stop button
+  else sendMessage(inputBox.value);
+});
 
 /* ---------------- tools ---------------- */
 let allTools = [];

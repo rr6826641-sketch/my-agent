@@ -1,7 +1,10 @@
 """Tool base class and shared helpers."""
 
 import json
+import os
+import subprocess
 import threading
+import time
 
 
 class Tool:
@@ -32,8 +35,52 @@ def truncate(text, limit=6000):
 
 TOOL_TIMEOUT = 120  # hard cap per tool call (seconds)
 
+_proc_lock = threading.Lock()
+_active_procs = set()
 
-def execute_tool(tool_by_name, tool_call, timeout=TOOL_TIMEOUT):
+
+def register_proc(proc):
+    with _proc_lock:
+        _active_procs.add(proc)
+
+
+def unregister_proc(proc):
+    with _proc_lock:
+        _active_procs.discard(proc)
+
+
+def kill_proc_tree(proc):
+    """Force-kill one subprocess (with its whole tree on Windows)."""
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=10)
+        else:
+            proc.kill()
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    try:
+        proc.wait(timeout=10)
+    except Exception:
+        pass
+
+
+def kill_active_procs():
+    """Kill every subprocess currently started by tools (Stop path)."""
+    with _proc_lock:
+        procs = list(_active_procs)
+    for proc in procs:
+        kill_proc_tree(proc)
+        unregister_proc(proc)
+
+
+
+def execute_tool(tool_by_name, tool_call, timeout=TOOL_TIMEOUT,
+                 cancel_event=None):
     """Run one tool call; returns the string result.
 
     The tool runs in a daemon thread so a hung tool can never block the
@@ -68,8 +115,15 @@ def execute_tool(tool_by_name, tool_call, timeout=TOOL_TIMEOUT):
 
     worker = threading.Thread(target=_run, daemon=True)
     worker.start()
-    worker.join(timeout=timeout)
-    if worker.is_alive():
-        return ("[%s timed out after %ds — it may still be running "
-                "in the background]" % (fn_name, timeout))
+    deadline = time.time() + timeout
+    while True:
+        if cancel_event is not None and cancel_event.is_set():
+            kill_active_procs()
+            return "[cancelled by user]"
+        worker.join(0.2)
+        if not worker.is_alive():
+            break
+        if time.time() >= deadline:
+            kill_active_procs()
+            return ("[%s timed out after %ds — killed]" % (fn_name, timeout))
     return box.get("out", "(no output)")

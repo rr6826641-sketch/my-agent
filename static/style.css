@@ -227,11 +227,29 @@ body {
 .btn-send {
   width: 42px; height: 42px; border-radius: 10px; border: none; cursor: pointer;
   background: linear-gradient(135deg, #ff1a1a, #cc0000); color: #fff; font-size: 16px;
+  display: flex; align-items: center; justify-content: center;
 }
 .btn-send:hover {
   filter: brightness(1.15); box-shadow: 0 0 12px rgba(255,26,26,.45);
 }
 .btn-send:disabled { opacity: .4; cursor: not-allowed; }
+
+/* streaming state: the send arrow turns into a square Stop button */
+.btn-send .stop-ico { display: none; }
+.btn-send.streaming .send-ico { display: none; }
+.btn-send.streaming .stop-ico { display: block; font-size: 14px; }
+.btn-send.streaming {
+  background: linear-gradient(135deg, #4a4a55, #2e2e36);
+  animation: stop-pulse 1.2s ease-in-out infinite;
+}
+.btn-send.streaming:hover {
+  filter: brightness(1.25);
+  box-shadow: 0 0 12px rgba(255,255,255,.2);
+}
+@keyframes stop-pulse {
+  0%, 100% { box-shadow: 0 0 0 rgba(255,255,255,0); }
+  50% { box-shadow: 0 0 12px rgba(255,255,255,.22); }
+}
 
 /* ---------------- tools view ---------------- */
 .tool-search { margin: 14px 0; }

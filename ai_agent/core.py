@@ -4,7 +4,7 @@ import json
 import os
 import threading
 
-from .llm import LLMError
+from .llm import LLMError, RunCancelled
 from .tools import create_tools, execute_tool
 
 SYSTEM_PROMPT = """You are {name}, a capable AI agent.
@@ -101,7 +101,7 @@ class Agent:
                 parts.append(event.get("content", ""))
         return "\n".join(p for p in parts if p) or "(empty reply)"
 
-    def run_stream(self, user_input):
+    def run_stream(self, user_input, stop_event=None):
         """Same agent loop but yields events for live UI updates.
 
         Event types:
@@ -111,6 +111,9 @@ class Agent:
           tool_result-> {name, content}
           final      -> the final answer (sent once per terminal reply)
           error      -> LLM/tool error
+
+        stop_event: optional threading.Event. When set (Stop button), the
+        loop aborts by raising RunCancelled so the caller can stop cleanly.
         """
         user_input = (user_input or "").strip()
         if not user_input:
@@ -123,11 +126,14 @@ class Agent:
         tool_schemas = [t.schema() for t in self._tool_list]
 
         for _ in range(self.max_iterations):
+            if stop_event is not None and stop_event.is_set():
+                raise RunCancelled("run cancelled by user")
             prompt = ([{"role": "system", "content": self._system_prompt()}]
                       + list(self.messages))
             reply = None
             try:
-                for ev in self.llm.chat_stream(prompt, tools=tool_schemas):
+                for ev in self.llm.chat_stream(prompt, tools=tool_schemas,
+                                               cancel_event=stop_event):
                     if ev["type"] == "delta":
                         yield {"type": "delta", "content": ev.get("content", "")}
                     elif ev["type"] == "message":
@@ -156,6 +162,8 @@ class Agent:
                 "tool_calls": tool_calls,
             })
             for call in tool_calls:
+                if stop_event is not None and stop_event.is_set():
+                    raise RunCancelled("run cancelled by user")
                 try:
                     name = call["function"]["name"]
                     args = call["function"].get("arguments") or "{}"
@@ -164,7 +172,8 @@ class Agent:
                 yield {"type": "tool_call", "name": name,
                        "arguments": args}
                 if self._check_tool_confirm(call):
-                    result = execute_tool(self._tools_by_name, call)
+                    result = execute_tool(self._tools_by_name, call,
+                                          cancel_event=stop_event)
                 else:
                     result = "[cancelled by user]"
                 self.messages.append({

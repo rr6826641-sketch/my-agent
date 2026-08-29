@@ -6,11 +6,17 @@ MockClient simulates an LLM for offline testing of the agent loop.
 import json
 import os
 import re
+import threading
 
 import requests
 
 
 class LLMError(Exception):
+    pass
+
+
+class RunCancelled(Exception):
+    """Raised when the user clicks Stop to cancel a running generation."""
     pass
 
 
@@ -84,20 +90,27 @@ class OpenAIClient:
             raise LLMError("Unexpected API response: %s" % str(data)[:500])
 
 
-    def chat_stream(self, messages, tools=None, temperature=0.2):
+    def chat_stream(self, messages, tools=None, temperature=0.2,
+                    cancel_event=None):
         """Stream a completion: yields delta events, then a message event.
 
         Models are tried in order (primary + fallback_models) until one
         actually produces content. A model that errors out before the first
         token (429, empty/whitespace body, invalid JSON, connection failure)
         is skipped and the next candidate is tried.
+
+        cancel_event: optional threading.Event. When set, the current call is
+        aborted by raising RunCancelled.
         """
         models = [self.model] + list(self.fallback_models)
         last_error = None
         for index, model in enumerate(models):
+            if cancel_event is not None and cancel_event.is_set():
+                raise RunCancelled("generation cancelled by user")
             try:
                 produced = False
-                for ev in self._stream_once(model, messages, tools, temperature):
+                for ev in self._stream_once(model, messages, tools, temperature,
+                                            cancel_event=cancel_event):
                     if ev["type"] == "delta":
                         produced = True
                     yield ev
@@ -110,7 +123,8 @@ class OpenAIClient:
                 continue
             break
         raise last_error
-    def _stream_once(self, model, messages, tools, temperature):
+    def _stream_once(self, model, messages, tools, temperature,
+                     cancel_event=None):
         payload = {
             "model": model,
             "messages": messages,
@@ -140,10 +154,29 @@ class OpenAIClient:
             resp.close()
             raise LLMError("API %s: %s" % (resp.status_code, body))
 
+        stop_watch = threading.Event()
+        if cancel_event is not None:
+
+            def _watch():
+                # Close the HTTP connection once the run is cancelled so the
+                # blocked iter_lines() loop unblocks promptly.
+                while not stop_watch.is_set():
+                    if cancel_event.is_set():
+                        try:
+                            resp.close()
+                        except Exception:
+                            pass
+                        return
+                    stop_watch.wait(0.2)
+
+            threading.Thread(target=_watch, daemon=True).start()
+
         content_parts = []
         tool_slots = {}
         try:
             for raw in resp.iter_lines(decode_unicode=True):
+                if cancel_event is not None and cancel_event.is_set():
+                    raise RunCancelled("generation cancelled by user")
                 if not raw:
                     continue
                 line = raw.strip()
@@ -183,10 +216,16 @@ class OpenAIClient:
                         slot["name"] += fn["name"]
                     if fn.get("arguments"):
                         slot["args"] += fn["arguments"]
+        except RunCancelled:
+            raise
         except requests.exceptions.RequestException:
             pass
         finally:
+            stop_watch.set()
             resp.close()
+
+        if cancel_event is not None and cancel_event.is_set():
+            raise RunCancelled("generation cancelled by user")
 
         tool_calls = []
         for idx in sorted(tool_slots):
@@ -304,12 +343,19 @@ class MockClient:
         answer = ("Mock LLM reply: understood your message. "
                   "(Run with a real API key to unlock full reasoning.)")
         return {"role": "assistant", "content": answer}
-    def chat_stream(self, messages, tools=None, temperature=0.2):
+    def chat_stream(self, messages, tools=None, temperature=0.2,
+                    cancel_event=None):
         """Mock streaming: simulate the delta -> message event sequence."""
+        if cancel_event is not None and cancel_event.is_set():
+            raise RunCancelled("generation cancelled by user")
         message = self.chat(messages, tools=tools, temperature=temperature)
         content = message.get("content") or ""
         words = content.split(" ")
         for i in range(0, len(words), 3):
+            if cancel_event is not None and cancel_event.is_set():
+                raise RunCancelled("generation cancelled by user")
             chunk = " ".join(words[i:i + 3])
             yield {"type": "delta", "content": chunk + " "}
+        if cancel_event is not None and cancel_event.is_set():
+            raise RunCancelled("generation cancelled by user")
         yield {"type": "message", "message": message}

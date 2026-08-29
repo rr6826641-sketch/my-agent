@@ -23,7 +23,7 @@ import uuid
 from flask import Flask, jsonify, render_template, request, Response, stream_with_context
 
 from ai_agent.config import PROJECT_DIR, load_config
-from ai_agent.core import Agent
+from ai_agent.core import Agent, RunCancelled
 from ai_agent.llm import MockClient, OpenAIClient
 from ai_agent.memory import MemoryStore
 from ai_agent.tools import create_tools
@@ -34,6 +34,10 @@ CHATS_PATH = os.path.join(PROJECT_DIR, "chats.json")
 
 # serializes all reads/writes of chats.json
 _chat_lock = threading.Lock()
+
+# one stop_event per active /api/chat run so the Stop button can cancel it
+_run_lock = threading.Lock()
+_active_runs = {}  # run_id -> threading.Event
 
 app = Flask(__name__)
 
@@ -265,21 +269,50 @@ def api_chat():
         session["updated"] = time.time()
         _write_chats_unlocked(data)
 
+    run_id = uuid.uuid4().hex
+    stop_event = threading.Event()
+    with _run_lock:
+        _active_runs[run_id] = stop_event
+
     q = queue.Queue(maxsize=64)
     agent = _state["agent"]
+    run_gen = agent.run_stream(message, stop_event=stop_event)
 
     def worker():
         try:
-            for event in agent.run_stream(message):
-                _record_event(sid, event)
-                q.put(event)
+            for event in run_gen:
+                try:
+                    _record_event(sid, event)
+                except Exception:
+                    pass  # history must never kill the stream
+                try:
+                    q.put_nowait(event)
+                except queue.Full:
+                    # client is gone: stop the run and unwind the generator
+                    stop_event.set()
+                    run_gen.close()
+                    break
+        except RunCancelled:
+            pass  # user pressed Stop; clean shutdown below
         except Exception as exc:
             msg_err = "%s: %s" % (type(exc).__name__, exc)
-            _record_event(sid, {"type": "error", "content": msg_err})
-            q.put({"type": "error", "content": msg_err})
+            try:
+                _record_event(sid, {"type": "error", "content": msg_err})
+            except Exception:
+                pass
+            try:
+                q.put_nowait({"type": "error", "content": msg_err})
+            except queue.Full:
+                pass
         finally:
-            _record_stream_done(sid, agent)
-            q.put(None)
+            try:
+                _record_stream_done(sid, agent)
+            except Exception:
+                pass
+            try:
+                q.put_nowait(None)
+            except queue.Full:
+                pass
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -288,20 +321,50 @@ def api_chat():
         # overall stream cap; individual tools are capped at 120s each
         # (TOOL_TIMEOUT in ai_agent/tools/base.py) so this only fires
         # when something is truly stuck — and the frontend releases busy.
-        while True:
-            try:
-                event = q.get(timeout=360)
-            except queue.Empty:
-                yield "data: {\"type\": \"error\", \"content\": \"[timed out]\"}\n\n"
-                break
-            if event is None:
-                break
-            yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+        try:
+            while True:
+                try:
+                    event = q.get(timeout=360)
+                except queue.Empty:
+                    yield "data: {\"type\": \"error\", \"content\": \"[timed out]\"}\n\n"
+                    break
+                if event is None:
+                    break
+                yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+        except GeneratorExit:
+            # client disconnected / Stop clicked: cancel the worker so it
+            # unwinds instead of running more LLM calls or tools
+            stop_event.set()
+            raise
+        except Exception:
+            stop_event.set()
+            raise
+        finally:
+            with _run_lock:
+                _active_runs.pop(run_id, None)
 
     return Response(stream_with_context(gen()),
                     content_type="text/event-stream; charset=utf-8",
                     headers={"Cache-Control": "no-cache",
-                             "X-Accel-Buffering": "no"})
+                             "X-Accel-Buffering": "no",
+                             "X-Run-Id": run_id})
+
+
+@app.route("/api/chat/cancel", methods=["POST"])
+def api_chat_cancel():
+    """Cancel active run(s). With a run_id it stops that specific run;
+    without one (client aborted before reading headers) it stops all."""
+    payload = request.get_json(silent=True) or {}
+    run_id = payload.get("run_id") or request.args.get("run_id") or ""
+    with _run_lock:
+        if run_id and run_id in _active_runs:
+            events = [_active_runs.pop(run_id)]
+        else:
+            events = list(_active_runs.values())
+            _active_runs.clear()
+    for ev in events:
+        ev.set()
+    return jsonify({"ok": True, "cancelled": len(events)})
 
 
 @app.route("/api/reset", methods=["POST"])
