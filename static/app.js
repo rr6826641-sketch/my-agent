@@ -163,7 +163,21 @@ async function openSession(id) {
 function renderSession(s) {
   chatLog.innerHTML = "";
   (s.messages || []).forEach((m) => {
-    if (m.role === "user") {
+    if (m.role === "assistant" && m.kind === "validation") {
+      addValidationCard(m.status, m.finding, m.reason);
+    } else if (m.role === "assistant" && m.kind === "validation_done") {
+      addValidationSummary(m.content, m.verified, m.rejected, m.unverified, m.count);
+    } else if (m.role === "tool" && m.validator) {
+      addValidationToolCard(m.name || "?", typeof m.arguments === "string" ? m.arguments : JSON.stringify(m.arguments || ""));
+      if (m.result != null) {
+        const cards = chatLog.querySelectorAll(".toolcard.val-tool");
+        const card = cards[cards.length - 1];
+        if (card) {
+          card.querySelector(".result").textContent = m.result;
+          if (/error|failed|not installed|timed out/i.test(m.result)) card.classList.add("err");
+        }
+      }
+    } else if (m.role === "user") {
       addUserMsg(m.content || "");
     } else if (m.role === "assistant") {
       const bubble = addAssistantBubble((m.kind === "error" ? "⚠️ " : "") + (m.content || ""));
@@ -301,6 +315,73 @@ function addToolCard(name, args) {
   chatLog.appendChild(div);
   scrollDown();
   return div.querySelector(".result");
+}
+
+/* ---------------- validation sub-agent cards ---------------- */
+function valLabel(status) {
+  const s = String(status || "unverified").toLowerCase();
+  if (s === "verified") return { cls: "val-ok", ico: "✔", label: "Finding Verified" };
+  if (s === "rejected") return { cls: "val-bad", ico: "✖", label: "False Positive Rejected" };
+  return { cls: "val-warn", ico: "?", label: "Unverified" };
+}
+
+function addValidationHeader(count) {
+  const div = document.createElement("div");
+  div.className = "validation-card val-start";
+  div.innerHTML =
+    `<span class="val-ico">🛡</span><span class="val-body"><b>[VALIDATION SUB-AGENT]</b>` +
+    ` re-verifying ${Number(count) || 0} finding(s)…</span>`;
+  chatLog.appendChild(div);
+  scrollDown();
+  return div;
+}
+
+function addValidationToolCard(name, args) {
+  const div = document.createElement("div");
+  div.className = "toolcard val-tool";
+  div.innerHTML = `
+    <div class="toolcard-head">
+      <span class="t-name">verify·${escapeHtml(name)}</span>
+      <span class="t-args">${escapeHtml(args || "{}")}</span>
+      <span class="chev">▾</span>
+    </div>
+    <div class="toolcard-body"><pre class="result">…</pre></div>`;
+  div.querySelector(".toolcard-head").addEventListener("click", () => {
+    div.classList.toggle("open");
+  });
+  chatLog.appendChild(div);
+  scrollDown();
+  return div.querySelector(".result");
+}
+
+function addValidationCard(status, finding, reason) {
+  const v = valLabel(status);
+  const div = document.createElement("div");
+  div.className = "validation-card " + v.cls;
+  div.innerHTML =
+    `<span class="val-ico">${v.ico}</span>` +
+    `<span class="val-body"><b>[VALIDATION SUB-AGENT]</b>` +
+    ` <span class="val-label">${v.label}</span>` +
+    (finding ? ` <span class="val-finding">${escapeHtml(finding)}</span>` : "") +
+    (reason ? ` <span class="val-reason">${escapeHtml(reason)}</span>` : "") +
+    `</span>`;
+  chatLog.appendChild(div);
+  scrollDown();
+  return div;
+}
+
+function addValidationSummary(summary, verified, rejected, unverified, count) {
+  const div = document.createElement("div");
+  div.className = "validation-card val-done";
+  div.innerHTML =
+    `<span class="val-ico">✓</span>` +
+    `<span class="val-body"><b>[VALIDATION SUB-AGENT]</b> ${escapeHtml(summary || "")}` +
+    ` <span class="val-counts"><span class="val-ok">${Number(verified) || 0} verified</span>` +
+    ` · <span class="val-bad">${Number(rejected) || 0} rejected</span>` +
+    ` · <span class="val-warn">${Number(unverified) || 0} unverified</span></span></span>`;
+  chatLog.appendChild(div);
+  scrollDown();
+  return div;
 }
 
 /* ---------------- send / SSE (fetch + AbortController) ---------------- */
@@ -443,6 +524,32 @@ function sendMessage(text) {
         finalAdded = true;
       }
       finish(); // e.g. server [timed out] — must also release busy
+    } else if (e.type === "validation_start") {
+      // validator child began re-checking; preview (main answer) must survive
+      typing.remove();
+      addValidationHeader(e.count || 0);
+    } else if (e.type === "validation_tool_call") {
+      // NOTE: preview is intentionally NOT cleared here (unlike tool_call) —
+      // the validator runs AFTER the main answer and the live final bubble
+      // must stay intact.
+      addValidationToolCard(e.name, typeof e.arguments === "string" ? e.arguments : JSON.stringify(e.arguments || "{}"));
+      typing = addTyping();
+    } else if (e.type === "validation_tool_result") {
+      const cards = chatLog.querySelectorAll(".toolcard.val-tool");
+      const card = cards[cards.length - 1];
+      if (card) {
+        card.querySelector(".result").textContent = e.content || "(no output)";
+        if (/error|failed|not installed|timed out/i.test(e.content || "")) {
+          card.classList.add("err");
+        }
+      }
+      typing = addTyping();
+    } else if (e.type === "validation") {
+      typing.remove();
+      addValidationCard(e.status, e.finding, e.reason);
+    } else if (e.type === "validation_done") {
+      typing.remove();
+      addValidationSummary(e.summary, e.verified, e.rejected, e.unverified, e.count);
     }
     scrollDown();
   }

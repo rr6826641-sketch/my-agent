@@ -4,6 +4,7 @@ import json
 import os
 import re
 import threading
+import time
 
 from .llm import LLMError, RunCancelled
 from .tools import create_tools, execute_tool
@@ -36,6 +37,121 @@ Formatting rules (very important):
 - Put a blank line between paragraphs, headings and lists - never cram text together.
 - Use **bold** only for key terms and *italics* sparingly.
 {memory_block}"""
+
+# ---------------------------------------------------------------------------
+# Verification sub-agent (Automated Verification Architecture)
+# ---------------------------------------------------------------------------
+# When the main agent's final answer contains security findings (open ports,
+# subdomains, CVEs, vulnerability keywords), an independent child sub-agent is
+# spawned that re-checks each claim with the real tools and rejects false
+# positives BEFORE the final report is delivered. See _verify_findings.
+VALIDATOR_PROMPT = """You are an independent security verification sub-agent (VALIDATION SUB-AGENT).
+
+The main agent reported these security findings:
+
+{findings}
+
+Your ONLY job: re-verify each finding yourself using the available tools.
+- Do NOT trust the main agent's report. Independently re-check the claims
+  (e.g. port_scan for open ports, subdomain_enum / dns_lookup for subdomains,
+  cve_lookup for CVE references, http_request / url_status for web claims).
+- If the evidence confirms a claim, mark it VERIFIED.
+- If the evidence contradicts a claim, mark it FALSE_POSITIVE.
+- If you cannot gather enough evidence, mark it UNVERIFIED.
+- Do NOT expand scope or attack anything new. Only re-check the listed findings.
+- Be concise and evidence-based. Do not write a report; just verify.
+
+Finish with a per-finding list, then the overall verdict. Format EXACTLY:
+FINDING VERDICTS:
+- VERIFIED: <finding text>
+- FALSE_POSITIVE: <finding text>
+- UNVERIFIED: <finding text>
+...
+VERDICT: VERIFIED|FALSE_POSITIVE|UNVERIFIED
+REASON: <one short line>
+"""
+
+# Finding-extraction regexes used to decide when verification should trigger.
+# Open ports appear in many phrasings, so several patterns are combined:
+#   - "port 80 is open" / "ports 22, 443 are open" (keyword trails)
+#   - "80/tcp open"                                    (slash notation)
+#   - "open ports: 80, 443" / "Open ports on HOST:"   (keyword leads)
+#   - "  80     http" table rows from port_scan       (bare table lines)
+#   - "host:80"                                        (host:port notation)
+_RE_PORT_OPEN_TRAIL = re.compile(
+    r"\bports?\b[^\n]{0,60}\b(?:open|listening|reachable)\b", re.I)
+_RE_PORT_SLASH_OPEN = re.compile(
+    r"\b(\d{1,5})/(?:tcp|udp)\s+(?:open|listening|filtered)\b", re.I)
+_RE_PORT_OPEN_LEAD = re.compile(
+    r"\b(?:open|listening)\s+ports?\b[^\n]{0,120}", re.I)
+_RE_PORT_TABLE_ROW = re.compile(
+    r"(?m)^[ \t]*(?:[-*+]|\||\d+\.)?[ \t]*(\d{1,5})\s*(?:/tcp|/udp)?\s*"
+    r"(?:open|listening|filtered)\b", re.I)
+_RE_PORT_TABLE_ROW_BARE = re.compile(
+    r"(?m)^(?:[ \t]*(?:[-*+]|\|)[ \t]*|[ \t]{2,})(\d{1,5})[ \t]+\|?[ \t]*"
+    r"(?:tcp|udp[ \t]+)?[a-z][a-z0-9_\-]*\b", re.I)
+_RE_HOST_PORT = re.compile(
+    r"\b(\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9][a-z0-9.-]*\.[a-z]{2,24}):(\d{1,5})\b",
+    re.I)
+# "on <host>" / "of <host>" / "at <host>" right after a port phrase, so
+# "port 80 open on 192.0.2.1" keeps its target host for re-verification.
+_RE_HOST_PHRASE = re.compile(
+    r"\b(?:on|of|at|from)\s+"
+    r"((?:\d{1,3}(?:\.\d{1,3}){3})|"
+    r"(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,24}))\b", re.I)
+# Subdomains only count as findings when the text actually reports discovery
+# (dns_lookup / subdomain_enum output, "found subdomain X", ...). A casual
+# domain mention like "see github.com" is not a finding, so this whole-text
+# gate keeps the validator from re-checking unrelated domains.
+_RE_SUB_CTX = re.compile(
+    r"\b(sub\s*domain\w*|enumerat\w*|discover\w*|found|resolved|resolve|"
+    r"dns|hostname|certificate|attack\s+surface|related\s+domain|records?|"
+    r"a\s+records?|domain)\b", re.I)
+_RE_SUBDOMAIN = re.compile(
+    r"\b(?<![\w.])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|net|org|io|dev|co|info|biz|me|xyz|tech|cloud|app|[a-z]{2})\b",
+    re.I)
+_RE_CVE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
+_RE_VULN = re.compile(
+    r"\b(SQL injection|XSS|SSRF|CSRF|RCE|command injection|path traversal|"
+    r"directory traversal|open redirect|deserialization|vulnerab\w+|"
+    r"expos(?:ed|ing)\s+(?:service|services|endpoint|endpoints|port|ports|"
+    r"interface|interfaces|admin|panel|dashboard|api|console|database|db|files?))\b",
+    re.I)
+
+
+def _valid_port(num, exclude_years=True):
+    """True when num is a plausible TCP/UDP port (years filtered out so prose
+    like 'in 2026' is never mistaken for a port)."""
+    try:
+        n = int(num)
+    except (TypeError, ValueError):
+        return False
+    if not (1 <= n <= 65535):
+        return False
+    if exclude_years and 1900 <= n <= 2100:
+        return False
+    return True
+
+
+def _ports_from_text(seg):
+    """Extract plausible port numbers from a phrase, stripping IPs, scan
+    counters (e.g. 'scanned 35') and parenthesised metadata first."""
+    seg = re.sub(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", " ", seg or "")
+    seg = re.sub(r"\([^)\n]*\d+[^)\n]*\)", " ", seg)
+    seg = re.sub(r"\bscanned\s+\d+\b", " ", seg, flags=re.I)
+    out = []
+    for pm in re.finditer(r"\b(\d{1,5})\b", seg):
+        if _valid_port(pm.group(1), exclude_years=True):
+            out.append(int(pm.group(1)))
+    return out
+
+# Verdict parsing for the validator child's output.
+_RE_PER_FINDING_VERDICT = re.compile(
+    r"^\s*[-*]\s*(VERIFIED|FALSE_POSITIVE|UNVERIFIED)\s*[:|]\s*(.+?)\s*$",
+    re.M | re.I)
+_RE_OVERALL_VERDICT = re.compile(
+    r"\bVERDICT\s*[:|]\s*(VERIFIED|FALSE_POSITIVE|UNVERIFIED)\b", re.I)
+_RE_REASON = re.compile(r"\bREASON\s*[:|]\s*(.+)$", re.I | re.M)
 
 # ---------------------------------------------------------------------------
 # RPG Game Master mode
@@ -183,7 +299,7 @@ class Agent:
                  confirm_terminal=False, spawn_fn=None,
                  spawn_depth=0, max_spawn_depth=3, allow_subagents=True,
                  spawn_timeout=900, game_master=False, world_state=None,
-                 lorebook=None, npc_persona=None):
+                 lorebook=None, npc_persona=None, auto_verify=True):
         self.llm = llm
         self.memory = memory
         self.name = name
@@ -198,6 +314,7 @@ class Agent:
         self.world_state = world_state
         self.lorebook = lorebook
         self.npc_persona = npc_persona
+        self.auto_verify = auto_verify
         self.messages = []
         self._tool_list = create_tools(
             memory, confirm_terminal=confirm_terminal,
@@ -309,6 +426,14 @@ class Agent:
           final      -> the final answer (sent once per terminal reply)
           error      -> LLM/tool error
 
+        Verification sub-agent events (only when the final answer contains
+        security findings and auto_verify is enabled):
+          validation_start           -> re-verification began (N findings)
+          validation_tool_call       -> validator child tool call
+          validation_tool_result     -> validator child tool result
+          validation                 -> {status, finding, reason} per finding
+          validation_done            -> {summary, verified, rejected, unverified}
+
         stop_event: optional threading.Event. When set (Stop button), the
         loop aborts by raising RunCancelled so the caller can stop cleanly.
         model: optional per-run LLM model override (Smart Auto-Router).
@@ -350,6 +475,22 @@ class Agent:
             if not tool_calls:
                 self.messages.append({"role": "assistant", "content": content})
                 yield {"type": "llm", "content": content}
+                if self.auto_verify:
+                    summary = ""
+                    try:
+                        for vev in self._verify_findings(
+                                content, stop_event=stop_event, model=model):
+                            yield vev
+                            if vev.get("type") == "validation_done":
+                                summary = vev.get("summary", "")
+                    except RunCancelled:
+                        raise
+                    except Exception as exc:
+                        yield {"type": "validation_done",
+                               "summary": ("[VALIDATION SUB-AGENT] verification "
+                                           "error: %s" % exc)}
+                    if summary:
+                        content = "%s\n\n---\n\n%s" % (content, summary)
                 yield {"type": "final", "content": content or "(empty reply)"}
                 return
 
@@ -441,6 +582,210 @@ class Agent:
                 })
         self.messages = keep
 
+    # ------------------------------------------------------------ verification sub-agent
+
+    def _extract_findings(self, text):
+        """Pull candidate security findings (open ports, subdomains, CVEs,
+        vulnerability keywords) out of a final answer. Deduped, capped at 10."""
+        text = (text or "")[:6000]
+        out = []
+        seen = set()
+
+        def add(ftype, value):
+            value = " ".join((value or "").split())
+            if not value or len(value) > 140:
+                return
+            key = (ftype, value.lower())
+            if key in seen:
+                return
+            seen.add(key)
+            out.append({"type": ftype, "value": value})
+
+        def add_port(port, host=None):
+            if not _valid_port(port):
+                return
+            if host:
+                add("open_port", "port %s open on %s" % (port, host))
+            else:
+                add("open_port", "port %s open" % port)
+
+        # host:port notation is the most specific -> includes the host.
+        for m in _RE_HOST_PORT.finditer(text):
+            add_port(m.group(2), m.group(1))
+
+        # keyword-trailing phrasings: "port 80 is open", "ports 22, 443 open".
+        # The host in "port 80 open on HOST" is kept for re-verification.
+        for m in _RE_PORT_OPEN_TRAIL.finditer(text):
+            hm = _RE_HOST_PHRASE.search(
+                text[m.start():m.end() + 80])
+            host = hm.group(1) if hm else None
+            for p in _ports_from_text(m.group(0)):
+                add_port(p, host)
+
+        # keyword-leading phrasings: "open ports: 80, 443",
+        # "Open ports on 1.2.3.4 (scanned 35):" (numbers only, no IP/counter).
+        for m in _RE_PORT_OPEN_LEAD.finditer(text):
+            hm = _RE_HOST_PHRASE.search(
+                text[m.start():m.end() + 40])
+            host = hm.group(1) if hm else None
+            for p in _ports_from_text(m.group(0)):
+                add_port(p, host)
+
+        # slash notation: "80/tcp open" (nmap style).
+        for m in _RE_PORT_SLASH_OPEN.finditer(text):
+            add_port(m.group(1))
+
+        # explicit table rows carrying an open/listening keyword.
+        for m in _RE_PORT_TABLE_ROW.finditer(text):
+            add_port(m.group(1))
+
+        # bare table rows from port_scan ("  80     http") only fire when the
+        # text is clearly a scan report, so prose can't inject false ports.
+        if re.search(r"\b(?:ports?|scan|nmap|masscan|open|listening|banner)\b",
+                     text, re.I):
+            for m in _RE_PORT_TABLE_ROW_BARE.finditer(text):
+                add_port(m.group(1))
+
+        # Subdomains need discovery context (see _RE_SUB_CTX).
+        if _RE_SUB_CTX.search(text):
+            for m in _RE_SUBDOMAIN.finditer(text):
+                add("subdomain", m.group(0).lower())
+        for m in _RE_CVE.finditer(text):
+            add("cve", m.group(0).upper())
+        for m in _RE_VULN.finditer(text):
+            add("vuln", m.group(0).lower())
+        return out[:10]
+
+    def _parse_validator_output(self, text):
+        """Parse the validator child's reply into verdict dicts.
+        Prefers per-finding 'FINDING VERDICTS:' lines; falls back to the
+        overall VERDICT line."""
+        text = (text or "")[:4000]
+        verdicts = []
+        for m in _RE_PER_FINDING_VERDICT.finditer(text):
+            status = m.group(1).strip().upper()
+            status = {"VERIFIED": "verified",
+                      "FALSE_POSITIVE": "rejected",
+                      "UNVERIFIED": "unverified"}.get(status, "unverified")
+            verdicts.append({"status": status,
+                             "finding": m.group(2).strip()[:160]})
+        if not verdicts:
+            om = _RE_OVERALL_VERDICT.search(text)
+            if om:
+                status = om.group(1).strip().upper()
+                status = {"VERIFIED": "verified",
+                          "FALSE_POSITIVE": "rejected",
+                          "UNVERIFIED": "unverified"}.get(status, "unverified")
+                reason = ""
+                rm = _RE_REASON.search(text)
+                if rm:
+                    reason = rm.group(1).strip()[:160]
+                verdicts = [{"status": status, "finding": "(overall)",
+                             "reason": reason}]
+        return verdicts
+
+    def _verify_findings(self, text, stop_event=None, model=None):
+        """Spawn an independent child sub-agent that re-checks the security
+        findings in `text` with real tools and rejects false positives.
+        Runs inline (blocking the final answer) with a time budget.
+
+        Yields UI events: validation_start -> validation_tool_call /
+        validation_tool_result -> validation (per finding) -> validation_done.
+        """
+        findings = self._extract_findings(text)
+        if not findings:
+            return
+        yield {"type": "validation_start", "count": len(findings),
+               "content": "[VALIDATION SUB-AGENT] Re-verifying %d finding(s)..."
+                           % len(findings)}
+        child = Agent(
+            llm=self.llm, memory=None,
+            name=self.name + "-validator",
+            max_iterations=min(self.max_iterations, 10),
+            max_messages=200, confirm_terminal=False,
+            spawn_depth=self.spawn_depth + 1,
+            max_spawn_depth=self.max_spawn_depth,
+            allow_subagents=False, auto_verify=False,
+            spawn_timeout=self.spawn_timeout,
+            game_master=False, world_state=None, lorebook=None,
+        )
+        lines = ["- [%s] %s" % (f["type"], f["value"]) for f in findings]
+        task = VALIDATOR_PROMPT.format(findings="\n".join(lines))
+        deadline = time.time() + min(max(self.spawn_timeout, 30), 180)
+        child_out, child_err = "", ""
+        try:
+            for ev in child.run_stream(task, stop_event=stop_event,
+                                       model=model):
+                if time.time() > deadline:
+                    break
+                t = ev.get("type")
+                if t == "tool_call":
+                    yield {"type": "validation_tool_call",
+                           "name": ev.get("name", "?"),
+                           "arguments": ev.get("arguments", "{}")}
+                elif t == "tool_result":
+                    yield {"type": "validation_tool_result",
+                           "name": ev.get("name", "?"),
+                           "content": (ev.get("content") or "")[:1500]}
+                elif t == "final":
+                    child_out = ev.get("content", "") or ""
+                elif t == "error":
+                    child_err = ev.get("content", "") or ""
+        except RunCancelled:
+            raise
+        except Exception as exc:
+            child_err = "%s: %s" % (type(exc).__name__, exc)
+
+        verdicts = self._parse_validator_output(child_out)
+        overall_status, overall_reason = None, ""
+        if verdicts:
+            for vd in verdicts:
+                if vd.get("finding") == "(overall)":
+                    overall_status = vd["status"]
+                    overall_reason = vd.get("reason", "")
+                    break
+            if overall_status is None:
+                overall_status = verdicts[0]["status"]
+                overall_reason = verdicts[0].get("reason", "")
+        if overall_status is None:
+            if child_err:
+                overall_status, overall_reason = "unverified", \
+                    "validator failed (%s)" % child_err[:140]
+            else:
+                overall_status, overall_reason = "unverified", "no verdict returned"
+
+        def match_verdict(value):
+            v = value.lower()
+            for vd in verdicts:
+                f = (vd.get("finding") or "").lower()
+                if f and f != "(overall)" and (v in f or f in v):
+                    return vd
+            return None
+
+        seen_findings = set()
+        for f in findings:
+            vd = match_verdict(f["value"])
+            if vd:
+                status, reason = vd["status"], vd.get("reason", "") or ""
+            else:
+                status, reason = overall_status, overall_reason or ""
+            key = (status, f["value"].lower())
+            if key in seen_findings:
+                continue
+            seen_findings.add(key)
+            yield {"type": "validation", "status": status,
+                   "finding": f["value"], "reason": reason}
+
+        verified = sum(1 for vd in verdicts if vd["status"] == "verified")
+        rejected = sum(1 for vd in verdicts if vd["status"] == "rejected")
+        unverified = sum(1 for vd in verdicts if vd["status"] == "unverified")
+        summary = ("[VALIDATION SUB-AGENT] %d finding(s) re-checked: "
+                   "%d verified, %d false positives rejected, %d unverified."
+                   % (len(findings), verified, rejected, unverified))
+        yield {"type": "validation_done", "summary": summary,
+               "verified": verified, "rejected": rejected,
+               "unverified": unverified, "count": len(findings)}
+
     # ------------------------------------------------------------ sub-agents
 
     def _spawn_impl(self, task, depth=0):
@@ -455,7 +800,7 @@ class Agent:
             allow_subagents=self.allow_subagents,
             npc_persona=persona,
             game_master=False, world_state=self.world_state,
-            lorebook=self.lorebook,
+            lorebook=self.lorebook, auto_verify=False,
         )
         box = {}
         def work():
@@ -512,7 +857,7 @@ class Agent:
                         spawn_timeout=self.spawn_timeout,
                         npc_persona=persona,
                         game_master=False, world_state=self.world_state,
-                        lorebook=self.lorebook,
+                        lorebook=self.lorebook, auto_verify=False,
                     )
                     boxes[idx]["out"] = child.run(rest)
                 except Exception as exc:

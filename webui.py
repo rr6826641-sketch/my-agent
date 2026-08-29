@@ -333,10 +333,25 @@ def _session_summary(s):
     }
 
 
+def _validation_card_text(ev):
+    """Build the [VALIDATION SUB-AGENT] line persisted for one finding."""
+    status = (ev.get("status") or "unverified").lower()
+    label = {"verified": "Finding Verified",
+             "rejected": "False Positive Rejected",
+             "unverified": "Unverified"}.get(status, "Unverified")
+    text = "[VALIDATION SUB-AGENT] %s" % label
+    finding = (ev.get("finding") or "").strip()
+    if finding:
+        text += ": %s" % finding
+    return text
+
+
 def _record_event(sid, ev):
     """Persist one streamed event into the session file."""
     etype = ev.get("type")
-    if etype not in ("llm", "tool_call", "tool_result", "final", "error"):
+    if etype not in ("llm", "tool_call", "tool_result", "final", "error",
+                     "validation_tool_call", "validation_tool_result",
+                     "validation", "validation_done"):
         return
     now = time.time()
     with _chat_lock:
@@ -354,7 +369,8 @@ def _record_event(sid, ev):
                          "result": None, "ts": now})
         elif etype == "tool_result":
             for m in reversed(msgs):
-                if m.get("role") == "tool" and m.get("result") is None:
+                if (m.get("role") == "tool" and not m.get("validator")
+                        and m.get("result") is None):
                     m["result"] = ev.get("content", "")
                     break
         elif etype == "final":
@@ -363,6 +379,30 @@ def _record_event(sid, ev):
         elif etype == "error":
             msgs.append({"role": "assistant", "kind": "error",
                          "content": ev.get("content", ""), "ts": now})
+        elif etype == "validation_tool_call":
+            msgs.append({"role": "tool", "validator": True,
+                         "name": ev.get("name", "?"),
+                         "arguments": ev.get("arguments", ""),
+                         "result": None, "ts": now})
+        elif etype == "validation_tool_result":
+            for m in reversed(msgs):
+                if (m.get("role") == "tool" and m.get("validator")
+                        and m.get("result") is None):
+                    m["result"] = ev.get("content", "")
+                    break
+        elif etype == "validation":
+            msgs.append({"role": "assistant", "kind": "validation",
+                         "status": ev.get("status", "unverified"),
+                         "finding": ev.get("finding", ""),
+                         "reason": ev.get("reason", "") or "",
+                         "content": _validation_card_text(ev), "ts": now})
+        elif etype == "validation_done":
+            msgs.append({"role": "assistant", "kind": "validation_done",
+                         "content": ev.get("summary", ""),
+                         "verified": ev.get("verified", 0),
+                         "rejected": ev.get("rejected", 0),
+                         "unverified": ev.get("unverified", 0),
+                         "count": ev.get("count", 0), "ts": now})
         session["updated"] = now
         _write_chats_unlocked(data)
 

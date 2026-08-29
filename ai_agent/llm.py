@@ -296,6 +296,61 @@ class MockClient:
                 }],
             }
 
+        # Verification sub-agent mode: when the conversation carries the
+        # VALIDATOR_PROMPT markers (the task is sent as the user message), the
+        # mock re-runs a fitting tool for evidence and returns a VERDICT, which
+        # drives the validation UI in mock mode.
+        is_validator = any(
+            ("FINDING VERDICTS" in (m.get("content") or "")
+             or "VERDICT:" in (m.get("content") or ""))
+            for m in messages)
+        if is_validator:
+            if last_tool is not None:
+                tcontent = last_tool.get("content", "") or ""
+                low = tcontent.lower()
+                if ("no open port" in low or "not found" in low
+                        or "failed" in low or "error" in low):
+                    status, reason = "FALSE_POSITIVE", (
+                        "re-check found no evidence; tool output contradicts "
+                        "the claim")
+                elif tcontent.strip():
+                    status, reason = "VERIFIED", (
+                        "re-run tool output confirms the finding")
+                else:
+                    status, reason = "UNVERIFIED", "no usable evidence returned"
+                return {"role": "assistant",
+                        "content": ("FINDING VERDICTS:\n- %s: reported finding\n"
+                                    "VERDICT: %s\nREASON: %s"
+                                    % (status, status, reason))}
+            low = text.lower()
+            if "subdomain" in low and "dns_lookup" in names:
+                dom = re.search(r"\b(?:[a-z0-9-]+\.)+[a-z]{2,24}\b",
+                                text, re.I)
+                if dom:
+                    return call("dns_lookup",
+                                '{"hostname": "%s", "record_type": "A"}'
+                                % dom.group(0))
+            if "cve-" in low and "cve_lookup" in names:
+                cve = re.search(r"\bCVE-\d{4}-\d{4,7}\b", text, re.I)
+                if cve:
+                    return call("cve_lookup", '{"query": "%s"}' % cve.group(0))
+            host = re.search(
+                r"\b(\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9][a-z0-9.-]+\.[a-z]{2,24})\b",
+                text)
+            ports = re.findall(r"\bport(?:s)?\s+(\d{1,5})\b", text, re.I)
+            if not ports:
+                ports = re.findall(r"\b(\d{1,5})\b", text)
+            if host and "port_scan" in names:
+                plist = ",".join(list(dict.fromkeys(ports))[:12]) \
+                    or "21,22,80,443,8080"
+                return call("port_scan",
+                            '{"host": "%s", "ports": "%s"}'
+                            % (host.group(1), plist))
+            return {"role": "assistant",
+                    "content": ("FINDING VERDICTS:\n- VERIFIED: reported finding\n"
+                                "VERDICT: VERIFIED\n"
+                                "REASON: mock validator confirmed the finding.")}
+
         if last_tool is not None:
             content = last_tool.get("content", "")
             excerpt = content[:300].replace("\n", " ")
