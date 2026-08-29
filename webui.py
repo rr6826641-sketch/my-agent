@@ -361,7 +361,8 @@ def _record_event(sid, ev):
     etype = ev.get("type")
     if etype not in ("llm", "tool_call", "tool_result", "final", "error",
                      "validation_tool_call", "validation_tool_result",
-                     "validation", "validation_done", "artifacts"):
+                     "validation", "validation_done", "artifacts",
+                     "tactical_reasoning"):
         return
     now = time.time()
     with _chat_lock:
@@ -417,6 +418,12 @@ def _record_event(sid, ev):
                          "count": ev.get("count", 0), "ts": now})
         elif etype == "artifacts":
             session["artifacts"] = ev.get("artifacts") or []
+        elif etype == "tactical_reasoning":
+            msgs.append({"role": "assistant", "kind": "tactical",
+                         "content": ev.get("reasoning", ""),
+                         "phase": ev.get("phase", ""),
+                         "objective": ev.get("objective", ""),
+                         "guard": bool(ev.get("guard")), "ts": now})
         session["updated"] = now
         _write_chats_unlocked(data)
 

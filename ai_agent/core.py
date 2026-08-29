@@ -95,6 +95,22 @@ surface. Follow these conditional chains:
 - When in doubt about what a result means, run one more targeted probe
   rather than guessing.
 
+# TACTICAL THOUGHT LOOP (dynamic reasoning engine)
+- While an assessment is active the reasoning engine tracks the objective,
+  current phase, completed steps, pending attack vectors, findings and the
+  satisfied flag. After every security tool result it emits a reasoning
+  block in this EXACT format:
+  FINDINGS SUMMARY / ATTACK SURFACE ANALYSIS / NEXT TACTICAL VECTOR /
+  COMPLETED STEPS / PENDING VECTORS
+- Chain tool use automatically: web ports found -> tech_detect /
+  check_headers / dir_fuzz; tech_detect -> cve_lookup / nuclei_scan;
+  dir_fuzz paths -> http_request on the found paths; http_request with
+  dynamic params -> the matching injection probes (sqli/xss/path
+  traversal/ssrf/cmdi/xxe/ssti); empty scan -> one alternative re-scan.
+- Do NOT stop with pending vectors while the objective is unsatisfied: the
+  TACTICAL GUARD block will nudge you to continue (max 2 nudges), then the
+  final answer proceeds.
+
 Rules:
 - Always reply in the same language the user writes in.
 - Prefer several small tool calls over one giant one.
@@ -190,11 +206,90 @@ _RE_SUBDOMAIN = re.compile(
     re.I)
 _RE_CVE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
 _RE_VULN = re.compile(
-    r"\b(SQL injection|XSS|SSRF|CSRF|RCE|command injection|path traversal|"
+    r"\b(SQL injection|XSS|SSRF|CSRF|RCE|command injection|command execution|path traversal|"
     r"directory traversal|open redirect|deserialization|vulnerab\w+|"
     r"expos(?:ed|ing)\s+(?:service|services|endpoint|endpoints|port|ports|"
     r"interface|interfaces|admin|panel|dashboard|api|console|database|db|files?))\b",
     re.I)
+
+# ---------------------------------------------------------------------------
+# Dynamic tactical reasoning engine: shared constants.
+# ---------------------------------------------------------------------------
+# Software + version fingerprint, e.g. "nginx/1.18.0", "WordPress 6.4.2",
+# "Apache/2.4.54 (Ubuntu)", "OpenSSH 9.0p1".
+_RE_VERSION = re.compile(
+    r"\b(?:wordpress|wp|joomla|drupal|nginx|apache|iis|php|python|nodejs|node|"
+    r"tomcat|jboss|grafana|jenkins|gitlab|jira|confluence|vbulletin|openssh|"
+    r"proftpd|vsftpd|postgresql|mysql|mariadb|redis|docker|kibana|elasticsearch)"
+    r"\s*/?\s*v?(\d+(?:\.\d+){1,3})\b",
+    re.I)
+# Security-relevant response headers from check_headers / http_request.
+_RE_HEADER_FINGERPRINT = re.compile(
+    r"\b(server|x-powered-by|x-generator|generator)\s*[:=]\s*([^\r\n|]+)",
+    re.I)
+# Query parameters embedded in a URL, e.g. "?id=5&debug=1".
+_RE_WEB_PARAM = re.compile(r"[\?&]([A-Za-z_][A-Za-z0-9_]*)=[^&\s]*")
+# Ports that hint at an HTTP(S) service worth fingerprinting.
+_WEB_PORTS = {"80", "443", "8080", "8000", "8443", "3000", "8888"}
+# Does the user message look like a security/assessment request at all?
+_SECURITY_INTENT = re.compile(
+    r"scan|nmap|masscan|port|enumerat|recon|fuzz|gobuster|dirb|subdomain|"
+    r"vulnerab|vuln|cve|exploit|pentest|penetration|hack|attack|assess|sqli|"
+    r"sql injection|xss|csrf|ssrf|lfi|rfi|idor|bypass|escalat|privesc|"
+    r"reverse shell|webshell|payload|smb|ldap|bruteforce|crack|hash|wpscan|"
+    r"nikto|nuclei|sqlmap|fingerprint|tech ?stack|headers?|directory|"
+    r"wordpress|joomla",
+    re.I)
+# Parameter names that hint at each injection class (chained probe mapping).
+_SQLI_PARAMS = ("id", "page", "pid", "uid", "cat", "user", "post",
+                "product", "item", "news", "file_id")
+_XSS_PARAMS = ("q", "search", "query", "name", "msg", "comment",
+               "searchterm")
+_PATH_PARAMS = ("file", "path", "dir", "download", "page_path", "template")
+_SSRF_PARAMS = ("url", "uri", "link", "redirect", "next", "callback",
+                "dest", "target", "host")
+_CMDI_PARAMS = ("cmd", "command", "exec", "ping", "hostname", "run")
+_XXE_PARAMS = ("xml", "data", "payload")
+_SSTI_PARAMS = ("template", "view", "tpl", "render")
+# Cap on chained probes queued from one request's parameters.
+_TACTICAL_MAX_PROBES = 3
+# Tool name -> pentest phase. Only tools in this map can activate the
+# tactical reasoning engine; the engine then tracks every tool while active.
+_TACTICAL_PHASE_OF = {
+    # Phase 1 - reconnaissance
+    "set_scope": "reconnaissance", "subdomain_enum": "reconnaissance",
+    "dns_lookup": "reconnaissance", "whois": "reconnaissance",
+    "geoip": "reconnaissance", "ssl_info": "reconnaissance",
+    "httpx_probe": "reconnaissance", "reverse_dns": "reconnaissance",
+    "ping_host": "reconnaissance", "subfinder_enum": "reconnaissance",
+    # Phase 2 - enumeration
+    "port_scan": "enumeration", "nmap_scan": "enumeration",
+    "dir_fuzz": "enumeration", "gobuster_dir": "enumeration",
+    "ffuf_fuzz": "enumeration", "tech_detect": "enumeration",
+    "check_headers": "enumeration", "http_request": "enumeration",
+    "curl_request": "enumeration", "robots_txt": "enumeration",
+    "extract_links": "enumeration", "http_methods": "enumeration",
+    # Phase 3 - vulnerability identification
+    "cve_lookup": "vuln-identification", "nuclei_scan": "vuln-identification",
+    "nikto_scan": "vuln-identification", "sqli_test": "vuln-identification",
+    "xss_test": "vuln-identification", "cmd_inject_test": "vuln-identification",
+    "path_traversal_test": "vuln-identification",
+    "ssrf_test": "vuln-identification", "xxe_test": "vuln-identification",
+    "ssti_test": "vuln-identification",
+    "header_inject_test": "vuln-identification",
+    "nosql_inject_test": "vuln-identification", "jwt_attack": "vuln-identification",
+    "graphql_check": "vuln-identification",
+    "deserialization_check": "vuln-identification",
+    "smuggling_detect": "vuln-identification", "oauth_check": "vuln-identification",
+    "cloud_meta_test": "vuln-identification",
+    "open_redirect_test": "vuln-identification", "lockfile_scan": "vuln-identification",
+    "ad_svc_probe": "vuln-identification",
+    # Phase 4 - safe verification
+    "sqlmap_check": "safe-verification", "add_finding": "safe-verification",
+    "update_finding": "safe-verification", "waf_detect": "safe-verification",
+    # Phase 5 - reporting
+    "write_report": "reporting", "list_findings": "reporting",
+}
 
 
 def _valid_port(num, exclude_years=True):
@@ -400,6 +495,338 @@ SYSTEM_PROMPT_FILE = os.path.join(
 
 
 
+class TacticalState:
+    """Runtime state for the dynamic tactical reasoning engine: objective,
+    current phase, completed steps, pending attack vectors, findings, and
+    whether the objective is satisfied."""
+
+    def __init__(self):
+        self.active = False
+        self.objective = ""
+        self.phase = "reconnaissance"
+        self.completed_steps = []   # list of "tool target" strings
+        self.pending_vectors = []   # list of {action, target, why}
+        self.findings = []          # list of {type, value}
+        self.satisfied_flag = False
+        self.premature_exit_attempts = 0
+        self.reasoning_count = 0
+        self._retried = set()       # (action,target) pairs already re-scanned
+
+    def mark_completed(self, step):
+        if step:
+            self.completed_steps.append(step)
+            if len(self.completed_steps) > 40:
+                del self.completed_steps[:-40]
+
+    def queue_vector(self, action, target, why):
+        key = self._norm("%s %s" % (action, target))
+        if any(self._norm("%s %s" % (v["action"], v["target"])) == key
+               for v in self.pending_vectors):
+            return
+        self.pending_vectors.append({"action": action, "target": target,
+                                     "why": why})
+
+    def drop_vector(self, action, target):
+        key = self._norm("%s %s" % (action, target))
+        self.pending_vectors = [v for v in self.pending_vectors
+                                if self._norm("%s %s" % (v["action"],
+                                                          v["target"])) != key]
+
+    @staticmethod
+    def _norm(s):
+        s = (s or "").strip().lower()
+        for pre in ("https://", "http://"):
+            if s.startswith(pre):
+                s = s[len(pre):]
+        return s.rstrip("/")
+
+    def add_finding(self, ftype, value):
+        if len(self.findings) >= 12:
+            return
+        value = (value or "").strip()[:160]
+        if not value:
+            return
+        key = value.lower()
+        if any(f["value"].lower() == key for f in self.findings):
+            return
+        self.findings.append({"type": ftype, "value": value})
+
+    def has_pending(self):
+        return bool(self.pending_vectors)
+
+    def snapshot(self):
+        return {
+            "active": self.active,
+            "objective": self.objective,
+            "phase": self.phase,
+            "completed": list(self.completed_steps[-8:]),
+            "pending": [v["action"] for v in self.pending_vectors[:8]],
+            "pending_count": len(self.pending_vectors),
+            "findings": list(self.findings),
+            "satisfied": self.satisfied_flag,
+            "reasoning_passes": self.reasoning_count,
+        }
+
+
+def _extract_result_findings(text):
+    """Pull structured hints (ports, subdomains, CVEs, vuln terms, software
+    versions, server headers) out of a tool result for tactical tracking.
+    These are leads for the reasoning engine, not verdicts."""
+    text = text or ""
+    out, seen = [], set()
+
+    def _add(ftype, value):
+        value = (value or "").strip()
+        if not value or len(out) >= 12:
+            return
+        key = (ftype, value.lower())
+        if key in seen:
+            return
+        seen.add(key)
+        out.append({"type": ftype, "value": value})
+
+    for m in _RE_PORT_OPEN_TRAIL.finditer(text):
+        for p in _ports_from_text(m.group(0)):
+            _add("open_port", str(p))
+    for m in _RE_PORT_SLASH_OPEN.finditer(text):
+        _add("open_port", m.group(1))
+    for m in _RE_PORT_TABLE_ROW.finditer(text):
+        _add("open_port", m.group(1))
+    for m in _RE_PORT_TABLE_ROW_BARE.finditer(text):
+        _add("open_port", m.group(1))
+    for m in _RE_HOST_PORT.finditer(text):
+        _add("open_port", "%s:%s" % (m.group(1), m.group(2)))
+    for m in _RE_CVE.finditer(text):
+        _add("cve", m.group(0))
+    for m in _RE_SUB_CTX.finditer(text):
+        win = text[m.start():m.end() + 200]
+        for sm in _RE_SUBDOMAIN.finditer(win):
+            _add("subdomain", sm.group(0))
+    for m in _RE_VULN.finditer(text):
+        _add("vuln", m.group(0))
+    for m in _RE_VERSION.finditer(text):
+        _add("software", m.group(0))
+    for m in _RE_HEADER_FINGERPRINT.finditer(text):
+        _add("header", "%s: %s" % (m.group(1), m.group(2).strip()))
+    return out
+
+
+def _extract_paths(text):
+    """Best-effort URL path extraction from fuzz / dir-bruteforce output."""
+    out = []
+    for m in re.finditer(
+            r"(?m)^\s*(/[A-Za-z0-9_./?=&\-]{1,120})\s*(?:\[|\s*Status|\d{3}|-->)?",
+            text or ""):
+        p = m.group(1).strip()
+        if len(p) >= 3 and p not in out:
+            out.append(p)
+        if len(out) >= 8:
+            break
+    return out
+
+
+def _fmt_findings(state):
+    if not state.findings:
+        return "none recorded yet"
+    return "; ".join("%s=%s" % (f["type"], f["value"])
+                      for f in state.findings[:4])
+
+
+def _fmt_surface(state):
+    step = state.completed_steps[-1] if state.completed_steps else "n/a"
+    return "last step: %s (phase: %s)" % (step, state.phase)
+
+
+def _fmt_next(state):
+    if not state.pending_vectors:
+        return "none - advance to next phase or finalize"
+    v = state.pending_vectors[0]
+    return "%s -> %s (%s)" % (v["action"], v["target"], v["why"])
+
+
+def _fmt_completed(state):
+    if not state.completed_steps:
+        return "none"
+    return ", ".join(state.completed_steps[-6:])
+
+
+def _fmt_pending(state):
+    if not state.pending_vectors:
+        return "none"
+    return "%d total: %s" % (len(state.pending_vectors),
+                             "; ".join(v["action"] for v in
+                                       state.pending_vectors[:5]))
+
+
+def _looks_empty(text):
+    """Heuristic: a scan result that reports nothing actionable."""
+    text = (text or "").strip()
+    if not text:
+        return True
+    return bool(re.search(
+        r"\b(?:no (?:findings?|vulnerabilit\w+|result|matches?)|nothing found|"
+        r"0 (?:vulnerabilities?|results?|matches?)|not vulnerable|not found|"
+        r"empty)\b", text, re.I))
+
+
+class TacticalReasoner:
+    """Drives the dynamic tactical loop: after every security tool result it
+    updates the objective/phase/step/finding state, queues the next tactical
+    vectors (chained tool use), and renders the standardized reasoning block
+    plus the early-exit guard."""
+
+    def __init__(self, state=None):
+        self.state = state or TacticalState()
+
+    def detect_objective(self, user_input):
+        user_input = (user_input or "").strip()
+        if _SECURITY_INTENT.search(user_input):
+            self.state.objective = user_input[:180]
+            self.state.active = True
+        elif re.search(r"\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.){1,}[a-z]{2,24}\b|"
+                       r"\b\d{1,3}(?:\.\d{1,3}){3}\b", user_input):
+            self.state.objective = user_input[:180]
+            self.state.active = True
+        return self.state.objective
+
+    def _target_of(self, args):
+        if isinstance(args, dict):
+            d = args
+        else:
+            try:
+                d = json.loads(args or "{}")
+            except Exception:
+                d = {}
+        if not isinstance(d, dict):
+            d = {}
+        for key in ("target", "host", "url", "domain", "ip", "hostname",
+                    "path", "asset"):
+            val = d.get(key)
+            if val and str(val).strip():
+                return str(val).strip()[:120]
+        return ""
+
+    def analyze(self, state, name, args, result):
+        state.reasoning_count += 1
+        phase = _TACTICAL_PHASE_OF.get(name)
+        if phase:
+            state.phase = phase
+        target = self._target_of(args)
+        state.mark_completed("%s %s" % (name, target) if target else name)
+        state.drop_vector(name, target)
+        for f in _extract_result_findings(result):
+            state.add_finding(f["type"], f["value"])
+        if name == "write_report":
+            state.satisfied_flag = True
+            state.pending_vectors = []
+            return
+        self._chain(state, name, target, result)
+
+    def _chain(self, state, name, target, result):
+        text = result or ""
+        base = target or ""
+        # 1. Port scan found web ports -> fingerprint the web layer.
+        if name in ("port_scan", "nmap_scan") and base:
+            for p in _extract_result_findings(text):
+                if p["type"] != "open_port":
+                    continue
+                port = p["value"].split(":")[-1]
+                if port not in _WEB_PORTS:
+                    continue
+                host = (p["value"].split(":")[0] if ":" in p["value"]
+                        else base)
+                url = "http%s://%s" % ("s" if port in ("443", "8443") else "",
+                                        host)
+                if port not in ("80", "443"):
+                    url += ":%s" % port
+                state.queue_vector("tech_detect", url,
+                                   "web port %s open on %s" % (port, host))
+                state.queue_vector("check_headers", url,
+                                   "headers of web service on %s" % host)
+                state.queue_vector("dir_fuzz", url,
+                                   "enumerate paths on web service")
+                break
+        # 2. tech_detect / fingerprint -> known-CVE lookup + template scan.
+        if name == "tech_detect" and base:
+            state.queue_vector("cve_lookup", base,
+                               "fingerprinted software on %s" % base)
+            state.queue_vector("nuclei_scan", base,
+                               "known CVEs / patterns for %s" % base)
+        # 3. dir_fuzz paths -> fetch the interesting paths (else re-fuzz).
+        if name == "dir_fuzz" and base:
+            paths = _extract_paths(text)
+            if paths:
+                for p in paths[:2]:
+                    state.queue_vector("http_request",
+                                       "%s%s" % (base.rstrip("/"), p),
+                                       "inspect fuzzed path %s" % p)
+            else:
+                state.queue_vector("ffuf_fuzz", base,
+                                   "dir_fuzz found nothing, try alternate fuzzer")
+        # 4. http_request with dynamic params -> mapped injection probes.
+        if name == "http_request":
+            params = [m.group(1) for m in _RE_WEB_PARAM.finditer(base)]
+            if not params:
+                params = [m.group(1) for m in _RE_WEB_PARAM.finditer(text)]
+            params = list(dict.fromkeys(params))
+            probes = []
+            for p in params:
+                pl = p.lower()
+                if pl in _SQLI_PARAMS:
+                    probes.append(("sqli_test", base,
+                                   "param %s looks like an id" % p))
+                elif pl in _XSS_PARAMS:
+                    probes.append(("xss_test", base,
+                                   "param %s reflects input" % p))
+                elif pl in _PATH_PARAMS:
+                    probes.append(("path_traversal_test", base,
+                                   "param %s takes a file path" % p))
+                elif pl in _SSRF_PARAMS:
+                    probes.append(("ssrf_test", base,
+                                   "param %s takes a URL" % p))
+                elif pl in _CMDI_PARAMS:
+                    probes.append(("cmd_inject_test", base,
+                                   "param %s runs commands" % p))
+                elif pl in _XXE_PARAMS:
+                    probes.append(("xxe_test", base,
+                                   "param %s parses XML" % p))
+                elif pl in _SSTI_PARAMS:
+                    probes.append(("ssti_test", base,
+                                   "param %s renders templates" % p))
+                if len(probes) >= _TACTICAL_MAX_PROBES:
+                    break
+            for action, tgt, why in probes:
+                state.queue_vector(action, tgt, why)
+        # 5. Empty / negative scan -> one alternative re-scan.
+        if name in ("nuclei_scan", "nikto_scan", "sqli_test", "xss_test",
+                    "cmd_inject_test", "path_traversal_test", "ssrf_test",
+                    "xxe_test", "ssti_test", "header_inject_test",
+                    "nosql_inject_test", "waf_detect") and base:
+            key = (name, state._norm(base))
+            if key not in state._retried and _looks_empty(text):
+                state._retried.add(key)
+                state.queue_vector(name, base,
+                                   "no findings detected, retry alternate payloads")
+
+    def reasoning_block(self, state, tool_name):
+        return (
+            "FINDINGS SUMMARY: %s\n"
+            "ATTACK SURFACE ANALYSIS: %s\n"
+            "NEXT TACTICAL VECTOR: %s\n"
+            "COMPLETED STEPS: %s\n"
+            "PENDING VECTORS: %s\n"
+            % (_fmt_findings(state), _fmt_surface(state), _fmt_next(state),
+               _fmt_completed(state), _fmt_pending(state)))
+
+    def exit_guard_block(self, state):
+        return (
+            "[TACTICAL GUARD] Objective '%s' is not yet satisfied and %d "
+            "tactical vector(s) remain pending (e.g. %s). Do not stop now: "
+            "execute the next tactical vector before producing a final answer."
+            % (state.objective[:120], len(state.pending_vectors),
+               ", ".join(v["action"] for v in state.pending_vectors[:3])))
+
+
 class Agent:
     def __init__(self, llm, memory=None, name="HackerAI",
                  max_iterations=60, max_messages=400,
@@ -407,7 +834,7 @@ class Agent:
                  spawn_depth=0, max_spawn_depth=3, allow_subagents=True,
                  spawn_timeout=900, game_master=False, world_state=None,
                  lorebook=None, npc_persona=None, auto_verify=True,
-                 knowledge=None):
+                 knowledge=None, reasoning_engine=True):
         self.llm = llm
         self.memory = memory
         self.name = name
@@ -424,6 +851,10 @@ class Agent:
         self.npc_persona = npc_persona
         self.auto_verify = auto_verify
         self.knowledge = knowledge
+        self.reasoning_engine = reasoning_engine
+        self._tactical = TacticalState()
+        self._reasoner = TacticalReasoner(self._tactical)
+        self._tactical_blocks = []
         self._kb_target = None
         self.messages = []
         self._tool_list = create_tools(
@@ -482,7 +913,58 @@ class Agent:
                                  knowledge_block=knowledge_block)
         if knowledge_block and "{knowledge_block}" not in template:
             prompt = "%s\n\n%s" % (prompt, knowledge_block)
+        if self.reasoning_engine:
+            ctx = self._render_tactical_context()
+            if ctx:
+                prompt = "%s\n\n%s" % (prompt, ctx)
         return prompt
+
+    # ------------------------------------------- tactical reasoning engine
+
+    def _is_security_tool(self, name):
+        return name in _TACTICAL_PHASE_OF
+
+    def _render_tactical_context(self):
+        """Tail block injected into the system prompt while a tactical
+        assessment is active: the last reasoning blocks plus a compact
+        TACTICAL STATE snapshot."""
+        if (not self.reasoning_engine or self.npc_persona or self.game_master
+                or not self._tactical.active or not self._tactical_blocks):
+            return ""
+        tail = ("\n\n[TACTICAL STATE] phase=%s|completed=%d|pending=%d|"
+                "findings=%d|satisfied=%s|objective=%s" % (
+                    self._tactical.phase,
+                    len(self._tactical.completed_steps),
+                    len(self._tactical.pending_vectors),
+                    len(self._tactical.findings),
+                    "yes" if self._tactical.satisfied_flag else "no",
+                    (self._tactical.objective or "")[:140]))
+        return "".join(self._tactical_blocks[-3:]) + tail
+
+    def _tactical_step(self, name, args, result):
+        """Update tactical state after a tool result and return a
+        tactical_reasoning event (or None when the engine is inactive)."""
+        if not self.reasoning_engine or self.npc_persona or self.game_master:
+            return None
+        if not self._tactical.active:
+            if not self._is_security_tool(name):
+                return None
+            self._tactical.active = True
+            if not self._tactical.objective:
+                self._tactical.objective = (
+                    "security assessment (inferred from tool usage)")
+        self._reasoner.analyze(self._tactical, name, args, result)
+        block = self._reasoner.reasoning_block(self._tactical, name)
+        self._tactical_blocks.append(block)
+        if len(self._tactical_blocks) > 4:
+            del self._tactical_blocks[:-4]
+        return {
+            "type": "tactical_reasoning",
+            "phase": self._tactical.phase,
+            "objective": self._tactical.objective,
+            "reasoning": block,
+            "state": self._tactical.snapshot(),
+        }
 
     def _npc_prompt(self):
         memory_block = ""
@@ -577,6 +1059,9 @@ class Agent:
         self.messages.append({"role": "user", "content": user_input})
         self._maybe_trim()
         yield {"type": "start", "content": user_input}
+        if (self.reasoning_engine and not self.npc_persona
+                and not self.game_master):
+            self._reasoner.detect_objective(user_input)
         final = ""
         tool_schemas = [t.schema() for t in self._tool_list]
 
@@ -607,6 +1092,26 @@ class Agent:
             if not tool_calls:
                 self.messages.append({"role": "assistant", "content": content})
                 yield {"type": "llm", "content": content}
+                if (self.reasoning_engine and not self.npc_persona
+                        and not self.game_master and self._tactical.active
+                        and not self._tactical.satisfied_flag
+                        and self._tactical.has_pending()
+                        and self._tactical.premature_exit_attempts < 2):
+                    # Early-exit guard: LLM wants to stop while attack
+                    # vectors remain and the objective is unsatisfied.
+                    self._tactical.premature_exit_attempts += 1
+                    guard = self._reasoner.exit_guard_block(self._tactical)
+                    self._tactical_blocks.append(guard)
+                    if len(self._tactical_blocks) > 4:
+                        del self._tactical_blocks[:-4]
+                    yield {"type": "tactical_reasoning",
+                           "phase": self._tactical.phase,
+                           "objective": self._tactical.objective,
+                           "reasoning": guard, "guard": True,
+                           "state": self._tactical.snapshot()}
+                    self.messages.append({"role": "user",
+                                          "content": guard})
+                    continue
                 if self.auto_verify:
                     summary = ""
                     try:
@@ -655,6 +1160,10 @@ class Agent:
                 })
                 yield {"type": "tool_result", "name": name,
                        "content": result}
+                if self.reasoning_engine:
+                    tev = self._tactical_step(name, args, result)
+                    if tev:
+                        yield tev
             self._maybe_trim()
 
         yield {"type": "final",
@@ -840,6 +1349,7 @@ class Agent:
             allow_subagents=False, auto_verify=False,
             spawn_timeout=self.spawn_timeout,
             game_master=False, world_state=None, lorebook=None,
+            reasoning_engine=False,
         )
         lines = ["- [%s] %s" % (f["type"], f["value"]) for f in findings]
         task = VALIDATOR_PROMPT.format(findings="\n".join(lines))

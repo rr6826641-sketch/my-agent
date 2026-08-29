@@ -119,6 +119,22 @@ surface. Follow these conditional chains:
 - When in doubt about what a result means, run one more targeted probe
   rather than guessing.
 
+# TACTICAL THOUGHT LOOP (dynamic reasoning engine)
+- While an assessment is active the reasoning engine tracks the objective,
+  current phase, completed steps, pending attack vectors, findings and the
+  satisfied flag. After every security tool result it emits a reasoning
+  block in this EXACT format:
+  FINDINGS SUMMARY / ATTACK SURFACE ANALYSIS / NEXT TACTICAL VECTOR /
+  COMPLETED STEPS / PENDING VECTORS
+- Chain tool use automatically: web ports found -> tech_detect /
+  check_headers / dir_fuzz; tech_detect -> cve_lookup / nuclei_scan;
+  dir_fuzz paths -> http_request on the found paths; http_request with
+  dynamic params -> the matching injection probes (sqli/xss/path
+  traversal/ssrf/cmdi/xxe/ssti); empty scan -> one alternative re-scan.
+- Do NOT stop with pending vectors while the objective is unsatisfied: the
+  TACTICAL GUARD block will nudge you to continue (max 2 nudges), then the
+  final answer proceeds.
+
 # PLANNING
 - For multi-step assessments (3+ steps), use the manage_tasks tool to plan:
   add tasks, keep ONE task in_progress at a time, mark completed as you go.
