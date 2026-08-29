@@ -141,6 +141,30 @@ surface. Follow these conditional chains:
   TACTICAL GUARD block will nudge you to continue (max 2 nudges), then the
   final answer proceeds.
 
+# DYNAMIC STRATEGY PLANNER (Tactical Action Plan - mandatory)
+- Before executing any complex request (3+ steps or multiple phases), emit
+  a structured TACTICAL ACTION PLAN with these three phases and follow it:
+  Phase 1: Discovery - map the attack surface (recon, ports, services,
+  paths, headers, tech stack).
+  Phase 2: Analysis - map findings to vulnerabilities, chain them, and
+  verify exploitability with safe probes.
+  Phase 3: Verification - safely prove impact (proof-of-concept) and
+  produce the remediation strategy.
+- The planning engine tracks each phase (pending / active / completed) and
+  shows it in the TACTICAL STATE tail. Do not skip to Analysis/exploits
+  while Discovery is incomplete, and do not keep probing once the plan's
+  phases are satisfied.
+
+# REAL-TIME STRATEGY ADAPTATION (post-tool pivot evaluation)
+- After EVERY tool result, evaluate whether the fresh evidence changes the
+  plan: a new finding type (vuln/CVE/port), an empty scan, a phase
+  transition, or a satisfied objective must trigger an explicit
+  [PLAN PIVOT] note stating what changed and how the next action differs
+  from the original plan.
+- Never keep executing an outdated plan: if evidence contradicts an earlier
+  assumption (no web service on a port, WAF present, unexpected tech stack,
+  dead subdomain), adapt the plan and continue on the corrected course.
+
 # DEEP ANALYSIS / MULTI-PERSPECTIVE EVALUATION (mandatory)
 - NEVER give surface-level answers. Before formulating any response to a
   complex question (architecture, exploit design, code analysis, security
@@ -451,6 +475,32 @@ CODE_QUALITY_RULES = (
     "security-checks", "resource-safety", "complete-working-code",
 )
 
+# Task 7: dynamic multi-step task planning engine.
+# The three mandatory Tactical Action Plan phases generated before complex
+# requests, aligned with the pentest framework phases above. Each entry is
+# (machine key, human label, phase goal).
+PLAN_PHASES = (
+    ("discovery", "Discovery",
+     "map the attack surface: recon, ports, services, paths, tech stack"),
+    ("analysis", "Analysis",
+     "map findings to vulnerabilities, chain them, verify exploitability"),
+    ("verification", "Verification",
+     "safely prove impact and produce the remediation strategy"),
+)
+
+# Machine tactical phase (reconnaissance, ...) -> planning phase
+# (discovery, analysis, verification) for real-time plan advancement.
+_PLAN_PHASE_OF = {
+    "reconnaissance": "discovery",
+    "enumeration": "discovery",
+    "vuln-identification": "analysis",
+    "safe-verification": "verification",
+    "reporting": "verification",
+}
+
+# Hard cap on recorded plan-pivot (strategy adaptation) events per run.
+_MAX_PLAN_PIVOTS = 6
+
 
 def _valid_port(num, exclude_years=True):
     """True when num is a plausible TCP/UDP port (years filtered out so prose
@@ -686,6 +736,92 @@ class TacticalState:
         self.premature_exit_attempts = 0
         self.reasoning_count = 0
         self._retried = set()       # (action,target) pairs already re-scanned
+        # Task 7: dynamic multi-step planning state.
+        self.plan = []              # [{key, label, goal, status}]
+        self.plan_built = False
+        self.plan_revisions = 0
+        self.adaptation_events = []  # [{event, reason, phase, at}]
+        self._last_plan_phase = None  # last plan phase seen by the pivoter
+
+    # ------------------------------------------------ Task 7: planner
+
+    def build_plan(self, objective=""):
+        """Generate the structured Tactical Action Plan (Discovery / Analysis
+        / Verification) before a complex request runs. Idempotent: the first
+        generated plan is kept and only the objective is refreshed."""
+        if not self.plan_built:
+            self.plan = [
+                {"key": key, "label": label, "goal": goal,
+                 "status": "pending"}
+                for key, label, goal in PLAN_PHASES
+            ]
+            self.plan_built = True
+            if self.plan:
+                self.plan[0]["status"] = "active"
+        if objective and objective.strip():
+            self.objective = (objective or "").strip()[:180]
+        elif not self.objective:
+            self.objective = "security assessment (tactical plan)"
+        return self.plan
+
+    def plan_phase_for(self, tactical_phase):
+        """Map a machine tactical phase (reconnaissance, ...) to its planning
+        phase key (discovery, analysis, verification)."""
+        return _PLAN_PHASE_OF.get(tactical_phase, "discovery")
+
+    def plan_index(self, key):
+        """Index of a plan phase by key, or -1 when unknown."""
+        for i, p in enumerate(self.plan):
+            if p["key"] == key:
+                return i
+        return -1
+
+    def _sync_plan_status(self, tactical_phase):
+        """Advance the Tactical Action Plan statuses from the current machine
+        tactical phase: every plan phase before the current one becomes
+        completed and the current one active. Never downgrades a completed
+        phase. Called after every analyzed tool result."""
+        if not self.plan:
+            return
+        idx = self.plan_index(self.plan_phase_for(tactical_phase))
+        if idx < 0:
+            return
+        for i, p in enumerate(self.plan):
+            if i < idx:
+                p["status"] = "completed"
+            elif i == idx and p["status"] == "pending":
+                p["status"] = "active"
+
+    def plan_status_line(self):
+        """Compact 'key:status' line for the TACTICAL STATE tail."""
+        if not self.plan:
+            return "not-built"
+        return "|".join("%s:%s" % (p["key"], p["status"])
+                         for p in self.plan)
+
+    def finalize_plan(self):
+        """Mark every plan phase completed (report written -> objective
+        done). No-op when the plan was never built."""
+        for p in self.plan:
+            p["status"] = "completed"
+
+    def record_adaptation(self, event, reason):
+        """Log a real-time strategy pivot (deduplicated, capped). Returns the
+        recorded event dict or None when suppressed."""
+        reason = (reason or "").strip()
+        if not reason:
+            return None
+        rkey = re.sub(r"\s+", " ", reason.lower())
+        if any(re.sub(r"\s+", " ", e["reason"].lower()) == rkey
+               and e["event"] == event for e in self.adaptation_events):
+            return None
+        self.plan_revisions += 1
+        ev = {"event": event, "reason": reason, "phase": self.phase,
+              "at": time.time()}
+        self.adaptation_events.append(ev)
+        if len(self.adaptation_events) > _MAX_PLAN_PIVOTS:
+            del self.adaptation_events[:-_MAX_PLAN_PIVOTS]
+        return ev
 
     def mark_completed(self, step):
         if step:
@@ -740,6 +876,10 @@ class TacticalState:
             "findings": list(self.findings),
             "satisfied": self.satisfied_flag,
             "reasoning_passes": self.reasoning_count,
+            "plan": [dict(p) for p in self.plan],
+            "plan_revisions": self.plan_revisions,
+            "adaptations": [{"event": e["event"], "reason": e["reason"]}
+                             for e in self.adaptation_events[-3:]],
         }
 
 
@@ -839,7 +979,7 @@ def _looks_empty(text):
     if not text:
         return True
     return bool(re.search(
-        r"\b(?:no (?:findings?|vulnerabilit\w+|result|matches?)|nothing found|"
+        r"\b(?:no (?:findings?|vulnerabilit\w+|result\w*|matches?)|nothing found|"
         r"0 (?:vulnerabilities?|results?|matches?)|not vulnerable|not found|"
         r"empty)\b", text, re.I))
 
@@ -862,6 +1002,10 @@ class TacticalReasoner:
                        r"\b\d{1,3}(?:\.\d{1,3}){3}\b", user_input):
             self.state.objective = user_input[:180]
             self.state.active = True
+        # Task 7: generate the Tactical Action Plan as soon as an objective
+        # is detected so complex requests start with a structured plan.
+        if self.state.active and not self.state.plan_built:
+            self.state.build_plan(self.state.objective)
         return self.state.objective
 
     def _target_of(self, args):
@@ -894,8 +1038,65 @@ class TacticalReasoner:
         if name == "write_report":
             state.satisfied_flag = True
             state.pending_vectors = []
+            state.finalize_plan()
+            state.record_adaptation(
+                "plan_completed",
+                "report written - all plan phases complete, objective "
+                "satisfied")
             return
         self._chain(state, name, target, result)
+        # Task 7: real-time strategy adaptation + plan advancement.
+        state._sync_plan_status(state.phase)
+        self._evaluate_pivot(state, name, target, result)
+
+    def _evaluate_pivot(self, state, name, target, result):
+        """Real-Time Strategy Adaptation: after every tool result, decide
+        whether fresh evidence invalidates or changes the active Tactical
+        Action Plan and record an explicit pivot note when it does."""
+        text = result or ""
+        findings = _extract_result_findings(text)
+        # 1. High-value vulnerability/CVE evidence -> focus shifts to the
+        #    Analysis phase even while enumeration vectors remain pending.
+        high = [f for f in findings if f["type"] in ("vuln", "cve")]
+        if high:
+            state.record_adaptation(
+                "new_vulnerability_evidence",
+                "%s reported on %s (%s) - plan shifts to Analysis" % (
+                    ", ".join(f["type"] for f in high[:2]),
+                    target or name,
+                    ", ".join(f["value"] for f in high[:2])))
+        # 2. Empty / unproductive scan -> the original sequence is stale;
+        #    plan must branch to an alternative approach.
+        elif _looks_empty(text) and name in _TACTICAL_PHASE_OF:
+            state.record_adaptation(
+                "empty_result",
+                "%s returned nothing actionable - pivoting to an "
+                "alternative approach" % name)
+        # 3. Plan-phase transition -> explicit advancement note.
+        plan_key = state.plan_phase_for(state.phase)
+        if state.plan and plan_key != state._last_plan_phase:
+            state._last_plan_phase = plan_key
+            idx = state.plan_index(plan_key)
+            label = (state.plan[idx]["label"] if idx >= 0 else plan_key)
+            state.record_adaptation(
+                "phase_advanced",
+                "plan advanced to %s phase (%s)" % (label, state.phase))
+
+    def plan_block(self, state):
+        """Render the current Tactical Action Plan status line, e.g.
+        'TACTICAL ACTION PLAN: Discovery[active], Analysis[pending],
+        Verification[pending] | REVISIONS: 0 | LAST PIVOT: ...'."""
+        if not state.plan:
+            return ""
+        statuses = ", ".join("%s[%s]" % (p["label"], p["status"])
+                              for p in state.plan)
+        pivot = ""
+        if state.adaptation_events:
+            last = state.adaptation_events[-1]
+            pivot = " | LAST PIVOT: %s - %s" % (
+                last["event"], last["reason"][:90])
+        return "TACTICAL ACTION PLAN: %s | REVISIONS: %d%s" % (
+            statuses, state.plan_revisions, pivot)
 
     def _chain(self, state, name, target, result):
         text = result or ""
@@ -1115,23 +1316,27 @@ class Agent:
     def _render_tactical_context(self):
         """Tail block injected into the system prompt while a tactical
         assessment is active: the last reasoning blocks plus a compact
-        TACTICAL STATE snapshot."""
+        TACTICAL STATE snapshot with the Tactical Action Plan status."""
         if (not self.reasoning_engine or self.npc_persona or self.game_master
                 or not self._tactical.active or not self._tactical_blocks):
             return ""
         tail = ("\n\n[TACTICAL STATE] phase=%s|completed=%d|pending=%d|"
-                "findings=%d|satisfied=%s|objective=%s" % (
+                "findings=%d|satisfied=%s|plan=%s|revisions=%d|objective=%s" % (
                     self._tactical.phase,
                     len(self._tactical.completed_steps),
                     len(self._tactical.pending_vectors),
                     len(self._tactical.findings),
                     "yes" if self._tactical.satisfied_flag else "no",
+                    self._tactical.plan_status_line(),
+                    self._tactical.plan_revisions,
                     (self._tactical.objective or "")[:140]))
         return "".join(self._tactical_blocks[-3:]) + tail
 
     def _tactical_step(self, name, args, result):
         """Update tactical state after a tool result and return a
-        tactical_reasoning event (or None when the engine is inactive)."""
+        tactical_reasoning event (or None when the engine is inactive). The
+        event carries the reasoning block plus the current Tactical Action
+        Plan status and the pivot (if this result changed the plan)."""
         if not self.reasoning_engine or self.npc_persona or self.game_master:
             return None
         if not self._tactical.active:
@@ -1141,11 +1346,19 @@ class Agent:
             if not self._tactical.objective:
                 self._tactical.objective = (
                     "security assessment (inferred from tool usage)")
+        n_adapt = len(self._tactical.adaptation_events)
         self._reasoner.analyze(self._tactical, name, args, result)
         block = self._reasoner.reasoning_block(self._tactical, name)
         self._tactical_blocks.append(block)
         if len(self._tactical_blocks) > 4:
             del self._tactical_blocks[:-4]
+        pivot = (self._tactical.adaptation_events[-1]
+                 if len(self._tactical.adaptation_events) > n_adapt else None)
+        pblock = self._reasoner.plan_block(self._tactical)
+        if pblock:
+            self._tactical_blocks.append(pblock)
+            if len(self._tactical_blocks) > 4:
+                del self._tactical_blocks[:-4]
         return {
             "type": "tactical_reasoning",
             "phase": self._tactical.phase,
@@ -1153,6 +1366,8 @@ class Agent:
                 self._tactical.phase, self._tactical.phase),
             "objective": self._tactical.objective,
             "reasoning": block,
+            "plan": pblock,
+            "pivot": pivot,
             "state": self._tactical.snapshot(),
         }
 
