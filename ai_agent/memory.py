@@ -394,6 +394,153 @@ class Lorebook:
 
 
 # ---------------------------------------------------------------------------
+# GlobalKnowledge: persistent cross-chat security knowledge base (SQLite)
+# ---------------------------------------------------------------------------
+
+
+class GlobalKnowledge:
+    """Persistent cross-chat knowledge base for security findings (SQLite).
+
+    Every row describes one finding/note about a target domain or IP
+    (table `global_knowledge`), so a brand-new chat about the same target
+    auto-loads what was already discovered in previous chats - see
+    get_target_summary() and the Agent._system_prompt auto-injection.
+    Thread-safe; TF-IDF recall reuses the MemoryStore machinery, so no
+    embeddings or numpy are required.
+    """
+
+    def __init__(self, db_path):
+        self.db_path = db_path
+        self._lock = threading.Lock()
+        os.makedirs(os.path.dirname(os.path.abspath(db_path)) or ".",
+                    exist_ok=True)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS global_knowledge ("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " target_domain TEXT NOT NULL,"
+            " finding_type TEXT NOT NULL DEFAULT 'note',"
+            " content TEXT NOT NULL,"
+            " tags TEXT NOT NULL DEFAULT '',"
+            " created_at TEXT NOT NULL)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_global_knowledge_target"
+            " ON global_knowledge (target_domain)")
+        self._conn.commit()
+
+    def _row_to_finding(self, row):
+        return {
+            "id": row["id"],
+            "target_domain": row["target_domain"],
+            "finding_type": row["finding_type"],
+            "content": row["content"],
+            "tags": [t for t in (row["tags"] or "").split(",") if t],
+            "created_at": row["created_at"],
+        }
+
+    def _norm_target(self, target_domain):
+        """Normalise a target to a bare lower-case domain/IP (no scheme,
+        path or port)."""
+        t = (target_domain or "").strip().lower()
+        t = re.sub(r"^https?://", "", t)
+        t = t.split("/")[0].split(":")[0]
+        return t[:255]
+
+    def save_finding(self, target_domain, finding_type="note", content="",
+                     tags=None):
+        """Insert one finding/note and return it as a dict."""
+        target = self._norm_target(target_domain)
+        ftype = (finding_type or "note").strip().lower()[:40]
+        content = (content or "").strip()
+        if not target or not content:
+            raise ValueError("target_domain and content are required")
+        tags = ",".join(_norm_tags(tags))[:400]
+        created_at = datetime.datetime.now().isoformat(timespec="seconds")
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO global_knowledge"
+                " (target_domain, finding_type, content, tags, created_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (target, ftype, content, tags, created_at))
+            self._conn.commit()
+            finding_id = cur.lastrowid
+        return self.get_finding(finding_id)
+
+    def get_finding(self, finding_id):
+        """Fetch a single finding by id (or None)."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM global_knowledge WHERE id = ?",
+                (int(finding_id),)).fetchone()
+        return self._row_to_finding(row) if row else None
+
+    def search_findings(self, target_domain=None, finding_type=None,
+                        query=None, top_k=10):
+        """Findings for a target, optionally filtered by type and ranked by
+        TF-IDF relevance to `query` (newest first when query is empty)."""
+        target = self._norm_target(target_domain) if target_domain else None
+        with self._lock:
+            sql = "SELECT * FROM global_knowledge"
+            conds, args = [], []
+            if target:
+                conds.append("target_domain = ?")
+                args.append(target)
+            if finding_type:
+                conds.append("finding_type = ?")
+                args.append((finding_type or "").strip().lower()[:40])
+            if conds:
+                sql += " WHERE " + " AND ".join(conds)
+            rows = self._conn.execute(sql, args).fetchall()
+        if not rows:
+            return []
+        findings = [self._row_to_finding(r) for r in rows]
+        query = (query or "").strip()
+        if not query:
+            findings.sort(key=lambda f: (f["created_at"], f["id"]),
+                          reverse=True)
+            return findings[: max(1, int(top_k or 10))]
+        texts = ["%s %s %s" % (f["content"], " ".join(f["tags"]),
+                               f["finding_type"]) for f in findings]
+        vectors, _idf = _tfidf_vectors(texts)
+        qv, _ = _tfidf_vectors([query])
+        qv = qv[0] if qv else {}
+        scored = [(f, _cosine(qv, vectors[i]))
+                  for i, f in enumerate(findings)]
+        scored.sort(key=lambda x: (x[1], x[0]["created_at"], x[0]["id"]),
+                    reverse=True)
+        return [f for f, s in scored if s > 0.0][: max(1, int(top_k or 10))]
+
+    def get_target_summary(self, target_domain, limit=3000):
+        """Render past findings for one target as a compact context block
+        ready for system-prompt auto-injection ('' when empty)."""
+        target = self._norm_target(target_domain)
+        rows = self.search_findings(target_domain=target, top_k=50)
+        if not rows:
+            return ""
+        lines = []
+        used = 0
+        for f in rows:
+            block = "- [%s] %s%s" % (
+                f["finding_type"],
+                " ".join(f["content"].split()),
+                " (tags: %s)" % ", ".join(f["tags"]) if f["tags"] else "")
+            if used + len(block) > limit:
+                break
+            lines.append(block)
+            used += len(block)
+        return "Past knowledge for %s (%d record(s)):\n%s" % (
+            target, len(rows), "\n".join(lines))
+
+    def count(self):
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM global_knowledge").fetchone()
+        return row["n"] if row else 0
+
+
+# ---------------------------------------------------------------------------
 # GameState: persistent world state (location, inventory, stats, quests...)
 # ---------------------------------------------------------------------------
 

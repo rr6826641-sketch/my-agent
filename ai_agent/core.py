@@ -36,7 +36,8 @@ Formatting rules (very important):
 - Wrap commands, code, logs and raw tool output in fenced code blocks (```).
 - Put a blank line between paragraphs, headings and lists - never cram text together.
 - Use **bold** only for key terms and *italics* sparingly.
-{memory_block}"""
+{memory_block}
+{knowledge_block}"""
 
 # ---------------------------------------------------------------------------
 # Verification sub-agent (Automated Verification Architecture)
@@ -152,6 +153,35 @@ _RE_PER_FINDING_VERDICT = re.compile(
 _RE_OVERALL_VERDICT = re.compile(
     r"\bVERDICT\s*[:|]\s*(VERIFIED|FALSE_POSITIVE|UNVERIFIED)\b", re.I)
 _RE_REASON = re.compile(r"\bREASON\s*[:|]\s*(.+)$", re.I | re.M)
+
+# ---------------------------------------------------------------------------
+# Cross-chat knowledge base: target detection for auto-injection
+# ---------------------------------------------------------------------------
+# When a user message names a target domain/IP, past findings from the
+# SQLite global_knowledge store are injected into the system prompt, so a
+# brand-new chat about the same target starts with the relevant context
+# already discovered in earlier chats (see Agent._system_prompt).
+_RE_KB_IP = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+_RE_KB_TARGET = re.compile(
+    r"(?<![a-zA-Z0-9.])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:"
+    r"com|net|org|io|dev|co|info|biz|me|xyz|tech|cloud|app|ai|gov|edu|mil|"
+    r"int|uk|us|in|de|fr|jp|cn|ru|br|au|ca|nl|se|no|fi|dk|pl|ch|at|be|es|"
+    r"it|pt|mx|ar|za|ng|kr|sg|my|id|hk|tw|th|vn|ph|nz|il|tr|sa|ae|eg|"
+    r"[a-z]{2})(?::\d{1,5})?(?![a-zA-Z0-9.])", re.I)
+
+
+def _detect_kb_target(text):
+    """Best-guess target domain/IP mentioned in a user message (else None)."""
+    text = text or ""
+    m = _RE_KB_IP.search(text)
+    if m:
+        return m.group(0)
+    m = _RE_KB_TARGET.search(text)
+    if m:
+        # strip scheme leftovers, port and path (e.g. example.com:8080/x)
+        return re.sub(r"[:/].*$", "", m.group(0)).lower()
+    return None
+
 
 # ---------------------------------------------------------------------------
 # RPG Game Master mode
@@ -299,7 +329,8 @@ class Agent:
                  confirm_terminal=False, spawn_fn=None,
                  spawn_depth=0, max_spawn_depth=3, allow_subagents=True,
                  spawn_timeout=900, game_master=False, world_state=None,
-                 lorebook=None, npc_persona=None, auto_verify=True):
+                 lorebook=None, npc_persona=None, auto_verify=True,
+                 knowledge=None):
         self.llm = llm
         self.memory = memory
         self.name = name
@@ -315,9 +346,12 @@ class Agent:
         self.lorebook = lorebook
         self.npc_persona = npc_persona
         self.auto_verify = auto_verify
+        self.knowledge = knowledge
+        self._kb_target = None
         self.messages = []
         self._tool_list = create_tools(
-            memory, confirm_terminal=confirm_terminal,
+            memory, knowledge=knowledge,
+            confirm_terminal=confirm_terminal,
             spawn_fn=(lambda task: self._spawn_impl(task, self.spawn_depth + 1))
             if allow_subagents else None,
             allow_spawn=allow_subagents,
@@ -343,6 +377,23 @@ class Agent:
                 memory_block = (
                     "\n\nSaved memory you should use when relevant:\n" + snap
                 )
+        # Cross-chat knowledge: if the chat names a target domain/IP, inject
+        # what past chats already found about it (SQLite global_knowledge).
+        knowledge_block = ""
+        if self.knowledge is not None:
+            target = self._kb_target
+            if target is None and self.messages:
+                first = self.messages[0].get("content") if isinstance(
+                    self.messages[0], dict) else None
+                target = _detect_kb_target(first)
+                self._kb_target = target
+            if target:
+                try:
+                    kb = self.knowledge.get_target_summary(target)
+                except Exception:
+                    kb = ""
+                if kb:
+                    knowledge_block = kb
         template = SYSTEM_PROMPT
         try:
             if os.path.exists(SYSTEM_PROMPT_FILE):
@@ -350,7 +401,11 @@ class Agent:
                     template = f.read()
         except Exception:
             pass  # fall back to the built-in prompt on any error
-        return template.format(name=self.name, memory_block=memory_block)
+        prompt = template.format(name=self.name, memory_block=memory_block,
+                                 knowledge_block=knowledge_block)
+        if knowledge_block and "{knowledge_block}" not in template:
+            prompt = "%s\n\n%s" % (prompt, knowledge_block)
+        return prompt
 
     def _npc_prompt(self):
         memory_block = ""
@@ -801,6 +856,7 @@ class Agent:
             npc_persona=persona,
             game_master=False, world_state=self.world_state,
             lorebook=self.lorebook, auto_verify=False,
+            knowledge=self.knowledge,
         )
         box = {}
         def work():
@@ -858,6 +914,7 @@ class Agent:
                         npc_persona=persona,
                         game_master=False, world_state=self.world_state,
                         lorebook=self.lorebook, auto_verify=False,
+                        knowledge=self.knowledge,
                     )
                     boxes[idx]["out"] = child.run(rest)
                 except Exception as exc:

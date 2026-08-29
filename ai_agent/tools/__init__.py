@@ -90,8 +90,9 @@ def _str_prop(desc, default=None, enum=None):
     return p
 
 
-def create_tools(memory, confirm_terminal=True, spawn_fn=None,
-                 allow_spawn=True, spawn_parallel_fn=None, rpg_ctx=None):
+def create_tools(memory, knowledge=None, confirm_terminal=True,
+                 spawn_fn=None, allow_spawn=True, spawn_parallel_fn=None,
+                 rpg_ctx=None):
     """Build the full tool list for an Agent.
 
     rpg_ctx: optional dict with 'world' (GameState) and 'lorebook'
@@ -132,6 +133,35 @@ def create_tools(memory, confirm_terminal=True, spawn_fn=None,
         return memory.index_documents(folder or os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(
                 os.path.abspath(__file__)))), "docs"))
+
+    def _knowledge_save(target_domain, finding_type, content, tags=""):
+        if knowledge is None:
+            return "Error: cross-chat knowledge base is not enabled."
+        try:
+            row = knowledge.save_finding(
+                target_domain, finding_type or "note", content,
+                [t.strip() for t in (tags or "").split(",") if t.strip()])
+        except (TypeError, ValueError) as exc:
+            return "Error: %s" % exc
+        return "Saved to knowledge base (id %s, target %s, type %s)." % (
+            row["id"], row["target_domain"], row["finding_type"])
+
+    def _knowledge_search(target_domain="", query="", top_k=5):
+        if knowledge is None:
+            return "Error: cross-chat knowledge base is not enabled."
+        hits = knowledge.search_findings(
+            target_domain=target_domain.strip() or None,
+            query=query.strip() or None,
+            top_k=int(top_k or 5))
+        if not hits:
+            return "(no matching knowledge)"
+        lines = []
+        for h in hits:
+            lines.append("- [%s] %s%s" % (
+                h["finding_type"],
+                " ".join(h["content"].split()),
+                " (tags: %s)" % ", ".join(h["tags"]) if h["tags"] else ""))
+        return "\n".join(lines)
 
     def _gm_world_update(patch=""):
         if world is None:
@@ -233,6 +263,37 @@ def create_tools(memory, confirm_terminal=True, spawn_fn=None,
               "properties": {"folder": _str_prop("folder path (optional)", "")},
               "required": []},
              lambda folder="": _rag_index(folder)),
+        Tool("knowledge_save",
+             "Persist a security finding/note to the cross-chat knowledge "
+             "base for a target domain or IP, so future chats about the same "
+             "target get it auto-injected into their system prompt.",
+             {"type": "object",
+              "properties": {
+                  "target_domain": _str_prop(
+                      "target domain or IP, e.g. example.com or 1.2.3.4"),
+                  "finding_type": _str_prop(
+                      "e.g. open_port, subdomain, cve, vulnerability, note",
+                      "note"),
+                  "content": _str_prop("the finding/note detail"),
+                  "tags": _str_prop("comma-separated tags (optional)", "")},
+              "required": ["target_domain", "content"]},
+             lambda target_domain="", finding_type="note", content="",
+                    tags="": _knowledge_save(target_domain, finding_type,
+                                               content, tags)),
+        Tool("knowledge_search",
+             "Search the cross-chat knowledge base for past findings, "
+             "optionally filtered to one target domain and ranked by "
+             "relevance to a query.",
+             {"type": "object",
+              "properties": {
+                  "target_domain": _str_prop(
+                      "target domain/IP filter (optional)", ""),
+                  "query": _str_prop(
+                      "natural-language relevance query (optional)", ""),
+                  "top_k": {"type": "integer", "default": 5}},
+              "required": []},
+             lambda target_domain="", query="", top_k=5:
+                 _knowledge_search(target_domain, query, top_k)),
         Tool("spawn_agent",
              "Create a sub-agent that independently works on a task and "
              "returns its final answer. Use for parallel/specialized work.",
