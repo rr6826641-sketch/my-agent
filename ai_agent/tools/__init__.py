@@ -91,8 +91,15 @@ def _str_prop(desc, default=None, enum=None):
 
 
 def create_tools(memory, confirm_terminal=True, spawn_fn=None,
-                 allow_spawn=True, spawn_parallel_fn=None):
-    """Build the full tool list for an Agent."""
+                 allow_spawn=True, spawn_parallel_fn=None, rpg_ctx=None):
+    """Build the full tool list for an Agent.
+
+    rpg_ctx: optional dict with 'world' (GameState) and 'lorebook'
+    (Lorebook) for Game-Master agents. When present, the gm_* tools are
+    registered.
+    """
+    world = (rpg_ctx or {}).get("world")
+    lorebook = (rpg_ctx or {}).get("lorebook")
 
     def tool_spawn_agent(task):
         if not allow_spawn or spawn_fn is None:
@@ -125,6 +132,36 @@ def create_tools(memory, confirm_terminal=True, spawn_fn=None,
         return memory.index_documents(folder or os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(
                 os.path.abspath(__file__)))), "docs"))
+
+    def _gm_world_update(patch=""):
+        if world is None:
+            return "Error: no world state in this context."
+        try:
+            data = json.loads(patch or "{}")
+        except ValueError:
+            return "Error: patch must be valid JSON."
+        return world.apply_patch(data)
+
+    def _gm_lore_add(category, title, content, tags=""):
+        if lorebook is None:
+            return "Error: no lorebook in this context."
+        tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()]
+        entry = lorebook.add(category or "general", title or "untitled",
+                             content or "", tag_list)
+        return "Lore saved (id %s): %s" % (entry["id"], title)
+
+    def _gm_lore_search(query="", top_k=5):
+        if lorebook is None:
+            return "Error: no lorebook in this context."
+        hits = lorebook.search(query or "", top_k=int(top_k or 5))
+        if not hits:
+            return "(no matching lore entries)"
+        lines = []
+        for h in hits:
+            lines.append("- [%s] %s\n  %s" % (
+                h.get("category", ""), h.get("title", ""),
+                h.get("content", "")))
+        return "\n".join(lines)
 
     REGISTRY = [
         # ---- core ----
@@ -984,6 +1021,47 @@ def create_tools(memory, confirm_terminal=True, spawn_fn=None,
               "required": ["host"]},
              lambda host="": tool_check_scope(host or "")),
     ]
+
+    if rpg_ctx:
+        REGISTRY += [
+            Tool("gm_world_update",
+                 "Game-Master world-state update. Apply changes to the game "
+                 "world: location, stats (hp/gold/xp), inventory, flags, "
+                 "quests, npcs, counters. Call BEFORE narrating when anything "
+                 "changed. Returns the full updated world state.",
+                 {"type": "object",
+                  "properties": {"patch": _str_prop(
+                      "JSON object with optional keys: location (string name), "
+                      "location_desc (string), stats (object), inventory "
+                      "(object of add/remove lists), flags (object of true/false "
+                      "or strings), quests (object), npcs (object), counters "
+                      "(object). Nested keys use dotted paths like "
+                      "'counters.gold'.")},
+                  "required": ["patch"]},
+             lambda patch="": _gm_world_update(patch)),
+            Tool("gm_lore_add",
+                 "Game-Master lorebook write. Record an important world fact "
+                 "(place, person, item, rumor, history, faction) so the "
+                 "campaign never forgets it.",
+                 {"type": "object",
+                  "properties": {"category": _str_prop(
+                      "people | places | items | factions | history | rules | general"),
+                      "title": _str_prop("short title"),
+                      "content": _str_prop("the fact, 1-3 sentences"),
+                      "tags": _str_prop("comma-separated tags", "")},
+                  "required": ["category", "title", "content"]},
+             lambda category="", title="", content="", tags="":
+                 _gm_lore_add(category, title, content, tags)),
+            Tool("gm_lore_search",
+                 "Game-Master lorebook recall. Semantic search over recorded "
+                 "lore. Use when a question touches history, people, places "
+                 "or items.",
+                 {"type": "object",
+                  "properties": {"query": _str_prop("what to look up"),
+                                  "top_k": {"type": "integer", "default": 5}},
+                  "required": ["query"]},
+             lambda query="", top_k=5: _gm_lore_search(query, top_k)),
+        ]
 
     global _REGISTRY
     _REGISTRY = REGISTRY

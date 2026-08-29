@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import threading
 
 from .llm import LLMError, RunCancelled
@@ -36,6 +37,138 @@ Formatting rules (very important):
 - Use **bold** only for key terms and *italics* sparingly.
 {memory_block}"""
 
+# ---------------------------------------------------------------------------
+# RPG Game Master mode
+# ---------------------------------------------------------------------------
+# Placeholders: {name} {story_log} {world_state} {lore_block} {memory_block}
+GAME_MASTER_PROMPT = """You are {name}, the all-powerful Game Master of an interactive text-adventure RPG. You narrate the world, control every NPC and creature, adjudicate the rules, and keep the story coherent. You are an evocative writer: paint scenes with all five senses, give every NPC a distinct voice and manner of speaking, and weave the player's choices into a coherent evolving campaign. Keep track of who the player is, where they are, and what they know. One player is at the keyboard; write to them in second person, present tense.
+
+# Your duties
+- Narrate vividly in second person present tense (\"You step into the lantern-lit inn...\"). Keep it rich but tight: 2-4 short paragraphs per turn covering the consequences of the player's last action, the current scene, and hooks to pull them forward.
+- Give every NPC a distinct voice. When a character speaks, quote their exact words in blockquote format:
+  > **The innkeeper:** "Welcome, traveler - you look like you've walked a long road tonight."
+  Keep each NPC's voice consistent turn after turn.
+- Manage dramatic tension: every turn should raise a question, deepen a mystery, or push the player toward a decision with real stakes. Pacing matters - let the scene breathe after big moments.
+- Stay consistent with the World State and the Lorebook below. Whenever something changes (moving, taking items, gaining gold, meeting NPCs, finishing quests) update the world with the gm_world_update tool BEFORE writing your reply.
+- Keep every NPC in character. When an NPC must speak or act on their own, bring them to life with the spawn_agent tool (see Tools below) and quote their words in the narrative.
+- Adjudicate fairly. If the player attempts something risky or contested, call for a roll: say \"Roll d20\" and ask them to reply with a number, then resolve using their stats. Respect their choices; failure should create drama, not dead ends.
+- The player can win or lose. Death is possible but should be a meaningful story beat. Clear endings are fine. Always leave room for the next turn.
+- NEVER break character. NEVER mention that you are an AI, a language model, an \"agent\" or a game system.
+
+# Recent Story (the last few turns of the campaign - continue from here, don't repeat)
+{story_log}
+
+# World State (current truth - always accurate)
+{world_state}
+
+# Lorebook (recorded facts - do not contradict them)
+{lore_block}
+
+# Choices
+End EVERY turn with exactly 3 distinct, meaningful choices for the player's next action. Format them EXACTLY like this as the final lines of your reply:
+[CHOICES]
+1. <choice text>
+2. <choice text>
+3. <choice text>
+Each choice must be a plausible next action in the current scene, and all three must lead to genuinely different outcomes. Make each choice concrete and directly actionable (a physical action, a question to an NPC, a place to investigate), keep each under a dozen words, and vary the flavour: at least one bold or risky option, one observant or investigative option, and one social or conversational option when the scene allows. Never leave the player without these three choices.
+
+# Tools
+- gm_world_update: update location / stats / inventory / flags / quests / npcs / counters after anything changes. Call it, then write your reply.
+- gm_lore_add: record important facts (names, places, rumors, item properties, faction politics) so the campaign never forgets them.
+- gm_lore_search: recall relevant lore before answering a question that touches on history, people, places or items.
+- spawn_agent: bring ONE NPC to life. Task format (put the persona in the [PERSONA] block):
+  [PERSONA]Full description: appearance, voice, personality, motives, secrets, speaking style, knowledge.\nThe adventurer asks: <their question or action>. Reply as this character in 2-4 sentences, in first person, with their spoken words.
+  Use the returned reply as that character's exact words/actions in the narrative. Include the relevant lore facts about the character, faction or place inside their [PERSONA] block so the reply stays consistent with the Lorebook.
+- spawn_agents: run several NPC reactions in PARALLEL (same [PERSONA] format per task, up to 8).
+- remember / recall / vector_search: long-term campaign notes and lore retrieval.
+- All other tools (run_terminal, web_search, ...): only if the story genuinely needs them (e.g. rendering a treasure map). Never use terminal/network/scanning tools for game content unless it is the actual point of the scene.
+
+# Turn structure (repeat every turn)
+1. Resolve the player's action; update the world with gm_world_update if anything changed.
+2. Narrate the consequences vividly, in second person, present tense.
+3. React as the NPCs would; advance the plot. When NPCs speak, quote them as > **Name:** "Their exact words."
+4. End with exactly 3 choices in the [CHOICES] block.
+{memory_block}"""
+
+# Placeholder: {persona} {world_context} {memory_block}
+NPC_PROMPT = """You are roleplaying as the following character. Stay in character for your ENTIRE reply.
+
+{PERSONA}
+
+# Scene context (what is happening around you right now)
+{world_context}
+
+Rules:
+- Reply only as this character: their spoken words, actions and inner thoughts.
+- NEVER mention that you are an AI, an agent, a language model or that this is a game.
+- Use the character's voice, dialect, catchphrases and knowledge. Do not invent facts that contradict the persona description.
+- Keep it short (2-6 sentences) unless the scene demands more.
+- Your reply is inserted into the Game Master's narrative verbatim, so end your sentences - no stage directions about the format.
+{memory_block}"""
+
+# Marker used by the GM to close a turn with choices, plus the regex that
+# strips the leading "1." numbering from each parsed choice line.
+CHOICES_MARKER = "[CHOICES]"
+_PERSONA_RE = re.compile(
+    r"\[PERSONA\](.*?)\[/PERSONA\]", re.IGNORECASE | re.DOTALL)
+_CHOICE_LINE_RE = re.compile(r"^\s*\d+[.)]\s*")
+
+
+def parse_choices(text):
+    """Split a GM reply into (narrative, choices).
+
+    Everything before the [CHOICES] marker is the narrative; the numbered
+    lines after it (up to 3) become the choice list. A reply without the
+    marker yields (text, []).
+    """
+    text = (text or "").strip()
+    if not text:
+        return "", []
+    marker = text.find(CHOICES_MARKER)
+    if marker == -1:
+        return text, []
+    narrative = text[:marker].strip()
+    block = text[marker + len(CHOICES_MARKER):]
+    choices = []
+    for line in block.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        clean = _CHOICE_LINE_RE.sub("", line).strip()
+        if clean:
+            choices.append(clean)
+        if len(choices) >= 3:
+            break
+    return narrative, choices
+
+
+def apply_choice_input(user_input, choices):
+    """Map a bare '1' / '2' / '3' (with optional '.' or ')') to the matching
+    choice text. Any other input is returned unchanged."""
+    s = (user_input or "").strip()
+    m = re.match(r"^([1-3])[.)]?\s*$", s)
+    if m and choices:
+        idx = int(m.group(1)) - 1
+        if 0 <= idx < len(choices):
+            return choices[idx]
+    return user_input
+
+
+def extract_persona(task):
+    """Pull a [PERSONA]...[/PERSONA] block out of a spawn task.
+
+    Returns (persona, remaining_task). If no persona block is present,
+    returns (None, task) so normal sub-agent calls behave as before.
+    """
+    task = task or ""
+    m = _PERSONA_RE.search(task)
+    if not m:
+        return None, task
+    persona = m.group(1).strip()
+    rest = (task[:m.start()] + " " + task[m.end():]).strip()
+    return persona, rest
+
+
 # Optional external system prompt override (project root).
 SYSTEM_PROMPT_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -49,7 +182,8 @@ class Agent:
                  max_iterations=60, max_messages=400,
                  confirm_terminal=False, spawn_fn=None,
                  spawn_depth=0, max_spawn_depth=3, allow_subagents=True,
-                 spawn_timeout=900):
+                 spawn_timeout=900, game_master=False, world_state=None,
+                 lorebook=None, npc_persona=None):
         self.llm = llm
         self.memory = memory
         self.name = name
@@ -60,6 +194,10 @@ class Agent:
         self.max_spawn_depth = max_spawn_depth
         self.allow_subagents = allow_subagents
         self.spawn_timeout = spawn_timeout
+        self.game_master = game_master
+        self.world_state = world_state
+        self.lorebook = lorebook
+        self.npc_persona = npc_persona
         self.messages = []
         self._tool_list = create_tools(
             memory, confirm_terminal=confirm_terminal,
@@ -69,12 +207,18 @@ class Agent:
             spawn_parallel_fn=(lambda tasks, timeout=spawn_timeout:
                                self._spawn_parallel_impl(tasks, timeout))
             if allow_subagents else None,
+            rpg_ctx=({"world": world_state, "lorebook": lorebook}
+                     if game_master else None),
         )
         self._tools_by_name = {t.name: t for t in self._tool_list}
 
     # ------------------------------------------------------------ prompt
 
     def _system_prompt(self):
+        if self.npc_persona:
+            return self._npc_prompt()
+        if self.game_master:
+            return self._gm_prompt()
         memory_block = ""
         if self.memory is not None:
             snap = self.memory.snapshot(limit=1500)
@@ -90,6 +234,59 @@ class Agent:
         except Exception:
             pass  # fall back to the built-in prompt on any error
         return template.format(name=self.name, memory_block=memory_block)
+
+    def _npc_prompt(self):
+        memory_block = ""
+        if self.memory is not None:
+            snap = self.memory.snapshot(limit=800)
+            if snap:
+                memory_block = "\n\nUseful memory for this character:\n" + snap
+        world_context = ""
+        if self.world_state is not None:
+            try:
+                world_context = self.world_state.to_context()
+                story = self.world_state.story_log(limit=3, max_chars=1200)
+                if story:
+                    world_context += "\n\nRecent scene:\n" + story
+            except Exception:
+                world_context = ""
+        return NPC_PROMPT.format(
+            PERSONA=self.npc_persona,
+            world_context=world_context or "(no scene context)",
+            memory_block=memory_block)
+
+    def _gm_prompt(self):
+        world_state = ""
+        if self.world_state is not None:
+            try:
+                world_state = self.world_state.to_context()
+            except Exception:
+                world_state = "(no world state available)"
+        lore_block = ""
+        if self.lorebook is not None:
+            try:
+                lore = self.lorebook.to_context(limit=4000)
+            except Exception:
+                lore = ""
+            lore_block = lore or "(lorebook empty - record new facts as they appear)"
+        memory_block = ""
+        if self.memory is not None:
+            try:
+                snap = self.memory.snapshot(limit=1200)
+            except Exception:
+                snap = ""
+            if snap:
+                memory_block = "\n\nLong-term campaign memory:\n" + snap
+        story_log = ""
+        if self.world_state is not None:
+            try:
+                story_log = self.world_state.story_log()
+            except Exception:
+                story_log = ""
+        return GAME_MASTER_PROMPT.format(
+            name=self.name, story_log=story_log or "(no turns yet - the story starts now)",
+            world_state=world_state,
+            lore_block=lore_block, memory_block=memory_block)
 
     # ------------------------------------------------------------ loop
 
@@ -249,17 +446,21 @@ class Agent:
     def _spawn_impl(self, task, depth=0):
         if not self.allow_subagents or depth >= self.max_spawn_depth:
             return "Error: sub-agent depth limit reached."
+        persona, rest = extract_persona(task)
         child = Agent(
             llm=self.llm, memory=self.memory,
             name=self.name + "-child", max_iterations=self.max_iterations,
             max_messages=self.max_messages, confirm_terminal=False,
             spawn_depth=depth, max_spawn_depth=self.max_spawn_depth,
             allow_subagents=self.allow_subagents,
+            npc_persona=persona,
+            game_master=False, world_state=self.world_state,
+            lorebook=self.lorebook,
         )
         box = {}
         def work():
             try:
-                box["out"] = child.run(task)
+                box["out"] = child.run(rest)
             except Exception as exc:
                 box["err"] = "%s: %s" % (type(exc).__name__, exc)
         thread = threading.Thread(target=work, daemon=True)
@@ -298,6 +499,7 @@ class Agent:
         for i, task in enumerate(tasks):
             def work(idx, t):
                 try:
+                    persona, rest = extract_persona(str(t))
                     child = Agent(
                         llm=self.llm, memory=self.memory,
                         name=self.name + "-child%d" % (idx + 1),
@@ -308,8 +510,11 @@ class Agent:
                         max_spawn_depth=self.max_spawn_depth,
                         allow_subagents=self.allow_subagents,
                         spawn_timeout=self.spawn_timeout,
+                        npc_persona=persona,
+                        game_master=False, world_state=self.world_state,
+                        lorebook=self.lorebook,
                     )
-                    boxes[idx]["out"] = child.run(t)
+                    boxes[idx]["out"] = child.run(rest)
                 except Exception as exc:
                     boxes[idx]["err"] = "%s: %s" % (type(exc).__name__, exc)
             th = threading.Thread(target=work, args=(i, str(task)), daemon=True)

@@ -42,6 +42,7 @@ document.querySelectorAll(".nav-item").forEach((btn) => {
     $("#view-" + btn.dataset.view).classList.add("active");
     if (btn.dataset.view === "tools") loadTools();
     if (btn.dataset.view === "memory") loadMemory();
+    if (btn.dataset.view === "rpg") loadRPGView();
     if (btn.dataset.view === "settings") loadSettings();
     if (btn.dataset.view === "system") loadSystem();
   });
@@ -693,6 +694,462 @@ async function refreshStatus() {
 
 refreshStatus();
 setInterval(refreshStatus, 10000);
+
+/* ---------------- RPG / Mythos Engine ---------------- */
+let rpgGames = [];
+let rpgCurrent = null;   // active game payload
+let rpgBusy = false;
+let rpgCtrl = null;      // AbortController of the in-flight turn stream
+let rpgChoices = [];     // last parsed choices
+
+function rpgScroll() {
+  const s = $("#rpg-story");
+  if (s) s.scrollTop = s.scrollHeight;
+}
+
+function rpgSetStreaming(on) {
+  const btn = $("#rpg-send");
+  btn.classList.toggle("streaming", on);
+  btn.title = on ? "Stop" : "Act";
+}
+
+function rpgTypewriter() {
+  const t = document.createElement("div");
+  t.className = "rpg-msg gm thinking";
+  t.id = "rpg-typing";
+  t.innerHTML = `<div class="rpg-avatar">🎭</div><div class="rpg-bubble">the storyteller is weaving…</div>`;
+  $("#rpg-story").appendChild(t);
+  rpgScroll();
+  return t;
+}
+
+function rpgAddPlayer(text) {
+  const story = $("#rpg-story");
+  const m = document.createElement("div");
+  m.className = "rpg-msg player";
+  m.innerHTML =
+    `<div class="rpg-avatar">🧝</div><div class="rpg-bubble">${escapeHtml(text)}</div>`;
+  story.appendChild(m);
+  rpgScroll();
+}
+
+function rpgAddSystem(text) {
+  const d = document.createElement("div");
+  d.className = "rpg-note";
+  d.textContent = text;
+  $("#rpg-story").appendChild(d);
+  rpgScroll();
+}
+
+function rpgNpcCard(name, text) {
+  const card = document.createElement("div");
+  card.className = "npc-card";
+  card.innerHTML = `
+    <div class="npc-avatar">🗣️</div>
+    <div class="npc-body">
+      <div class="npc-name">${escapeHtml(name)}</div>
+      <div class="npc-dialogue"></div>
+    </div>`;
+  mdToDom(text, card.querySelector(".npc-dialogue"));
+  return card;
+}
+
+function rpgRenderTurn(narrative, choices) {
+  const story = $("#rpg-story");
+  if (!story) return;
+  const paras = (narrative || "").split(/\n{1,}/).map((p) => p.trim()).filter(Boolean);
+  let pending = [];
+  const flush = () => {
+    if (!pending.length) return;
+    const bubble = document.createElement("div");
+    bubble.className = "rpg-msg gm";
+    bubble.innerHTML = `<div class="rpg-avatar">🎭</div><div class="rpg-bubble"></div>`;
+    mdToDom(pending.join("\n\n"), bubble.querySelector(".rpg-bubble"));
+    story.appendChild(bubble);
+    pending = [];
+  };
+  paras.forEach((p) => {
+    // NPC line: **Name:** dialogue  (also **Name** — dialogue)
+    const m = p.match(/^\*\*([^*]+?)\*\*\s*[:—]\s*(.+)$/);
+    if (m) {
+      flush();
+      story.appendChild(rpgNpcCard(m[1].trim(), m[2].trim()));
+    } else {
+      pending.push(p);
+    }
+  });
+  flush();
+  rpgRenderChoices(choices || []);
+  rpgScroll();
+}
+
+function rpgRenderChoices(choices) {
+  const old = $("#rpg-choices");
+  if (old) old.remove();
+  const box = document.createElement("div");
+  box.className = "rpg-choices";
+  box.id = "rpg-choices";
+  rpgChoices = choices || [];
+  if (!rpgChoices.length) {
+    box.innerHTML = `<div class="rpg-freeplay">✍️ kuch bhi type karein — yaada action is allowed.</div>`;
+    $("#rpg-story").appendChild(box);
+    return;
+  }
+  rpgChoices.forEach((c, i) => {
+    const b = document.createElement("button");
+    b.className = "choice-btn";
+    b.innerHTML = `<span class="choice-num">${i + 1}</span><span class="choice-text">${escapeHtml(c)}</span>`;
+    b.addEventListener("click", () => rpgPlay(c));
+    box.appendChild(b);
+  });
+  $("#rpg-story").appendChild(box);
+  rpgScroll();
+}
+
+function rpgRenderState(state) {
+  const box = $("#rpg-state-box");
+  if (!box || !state) return;
+  const p = state.player || {};
+  const st = p.stats || {};
+  const hp = st.hp != null ? st.hp : "—";
+  const hpMax = st.hp_max || hp;
+  const hpPct = hpMax ? Math.max(0, Math.min(100, (hp / hpMax) * 100)) : 0;
+  const loc = state.location || {};
+  let inv = (state.inventory || []).map((i) => escapeHtml(i)).join(", ") || "empty";
+  const npcs = Object.keys(state.npcs || {});
+  let html = `
+    <div class="stat-row"><span>⚔️ ${escapeHtml(p.name || "?")}</span><span>Lv ${st.level || 1}</span></div>
+    <div class="hpbar"><div class="hpfill" style="width:${hpPct}%"></div></div>
+    <div class="stat-row"><span>❤️ HP</span><span>${hp}/${hpMax}</span></div>
+    <div class="stat-row"><span>🪙 Gold</span><span>${st.gold || 0}</span></div>
+    <div class="stat-row"><span>✨ XP</span><span>${st.xp || 0}</span></div>
+    <div class="stat-row"><span>📍 ${escapeHtml(loc.name || "?")}</span></div>
+    <div class="stat-note">${escapeHtml(loc.description || "")}</div>
+    <div class="stat-row"><span>🎒 ${inv}</span></div>`;
+  if (npcs.length) {
+    html += `<div class="stat-row"><span>🗣️ ${escapeHtml(npcs.join(", "))}</span></div>`;
+  }
+  box.innerHTML = html;
+  if (state.game_id) {
+    rpgCurrent = Object.assign({}, rpgCurrent, { turn: state.turn, updated: state.updated });
+    const sels = $("#rpg-game-select");
+    if (sels && state.game_id) sels.value = state.game_id;
+  }
+}
+
+function rpgHandleEvent(e) {
+  const story = $("#rpg-story");
+  if (e.type === "start") return;
+  if (e.type === "delta") {
+    let t = $("#rpg-typing");
+    if (!t) t = rpgTypewriter();
+    const b = t.querySelector(".rpg-bubble");
+    const txt = (b.dataset.acc || "") + (e.content || "");
+    b.dataset.acc = txt;
+    b.textContent = txt;
+    rpgScroll();
+    return;
+  }
+  if (e.type === "llm") {
+    let t = $("#rpg-typing");
+    if (!t) t = rpgTypewriter();
+    const b = t.querySelector(".rpg-bubble");
+    b.dataset.acc = e.content || "";
+    b.textContent = e.content || "";
+    rpgScroll();
+    return;
+  }
+  if (e.type === "tool_call" || e.type === "tool_result") return; // GM keeps internal tool noise hidden
+  if (e.type === "player_choice") return;
+  if (e.type === "narrative") {
+    const t = $("#rpg-typing");
+    if (t) t.remove();
+    rpgRenderTurn(e.content || "", e.choices || []);
+    return;
+  }
+  if (e.type === "state") {
+    rpgRenderState(e.content);
+    return;
+  }
+  if (e.type === "final") return; // narrative event already rendered the turn
+  if (e.type === "error") {
+    const t = $("#rpg-typing");
+    if (t) t.remove();
+    rpgAddSystem("⚠️ " + (e.content || "error"));
+    rpgRenderChoices(rpgChoices); // keep last choices usable
+  }
+}
+
+async function rpgPlay(input) {
+  if (rpgBusy) return;
+  if (!rpgCurrent || !rpgCurrent.game_id) {
+    rpgAddSystem("⚠️ pehle ek campaign load karein.");
+    return;
+  }
+  const message = (input || "").trim();
+  rpgAddPlayer(message || "*(the tale begins)*");
+  rpgBusy = true;
+  rpgSetStreaming(true);
+  const ctrl = new AbortController();
+  rpgCtrl = ctrl;
+  try {
+    const res = await fetch("/api/rpg/games/" + encodeURIComponent(rpgCurrent.game_id) + "/play", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input: message }),
+      signal: ctrl.signal,
+    });
+    if (res.status === 409) {
+      const d = await res.json().catch(() => ({}));
+      rpgAddSystem("⏳ ek turn pehle se chal raha hai" + (d.error ? " — " + d.error : ""));
+      rpgBusy = false;
+      rpgSetStreaming(false);
+      return;
+    }
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    if (!res.body) throw new Error("stream unavailable");
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let sep;
+      while ((sep = buf.indexOf("\n\n")) !== -1) {
+        const block = buf.slice(0, sep);
+        buf = buf.slice(sep + 2);
+        let data = "";
+        block.split("\n").forEach((line) => {
+          if (line.startsWith("data:")) data += (data ? "\n" : "") + line.slice(5).trim();
+        });
+        if (!data) continue;
+        let ev;
+        try { ev = JSON.parse(data); } catch { continue; }
+        rpgHandleEvent(ev);
+      }
+    }
+  } catch (err) {
+    if (!(err && err.name === "AbortError")) {
+      rpgAddSystem("⚠️ connection error: " + (err && err.message ? err.message : "stream aborted"));
+    }
+  } finally {
+    rpgBusy = false;
+    rpgCtrl = null;
+    rpgSetStreaming(false);
+    rpgScroll();
+    rpgLoadLore();
+  }
+}
+
+function rpgStop() {
+  if (!rpgBusy) return;
+  const ctrl = rpgCtrl;
+  rpgCtrl = null;
+  try { if (ctrl) ctrl.abort(); } catch { /* ignore */ }
+  fetch("/api/rpg/games/" + encodeURIComponent(rpgCurrent.game_id) + "/cancel",
+        { method: "POST" }).catch(() => {});
+}
+
+/* ---------- campaign management ---------- */
+async function rpgRefreshGames() {
+  try {
+    const st = await fetchJSON("/api/rpg");
+    rpgGames = st.games || [];
+    $("#badge-rpg").textContent = rpgGames.length;
+    const sel = $("#rpg-game-select");
+    sel.innerHTML = "";
+    if (!rpgGames.length) {
+      const o = document.createElement("option");
+      o.value = "";
+      o.textContent = "— no campaigns —";
+      sel.appendChild(o);
+    }
+    rpgGames.forEach((g) => {
+      const o = document.createElement("option");
+      o.value = g.game_id;
+      o.textContent = `${g.title || g.game_id} · ${g.genre || "?"} · turn ${g.turn || 0}`;
+      sel.appendChild(o);
+    });
+    if (rpgCurrent && rpgCurrent.game_id) sel.value = rpgCurrent.game_id;
+  } catch { /* ignore */ }
+}
+
+async function loadRPGView() {
+  await rpgRefreshGames();
+  rpgLoadLore();
+  const sel = $("#rpg-game-select");
+  if (sel && sel.value) await rpgLoadGame(sel.value);
+}
+
+async function rpgLoadGame(id) {
+  if (!id) return;
+  try {
+    const d = await fetchJSON("/api/rpg/games/" + encodeURIComponent(id) + "/load", { method: "POST" });
+    rpgCurrent = d;
+    const story = $("#rpg-story");
+    const w = $("#rpg-welcome");
+    if (w) w.remove();
+    if (!story.querySelector(".rpg-msg, .rpg-note, .rpg-choices")) {
+      const head = document.createElement("div");
+      head.className = "rpg-msg gm";
+      head.innerHTML = `<div class="rpg-avatar">🎭</div><div class="rpg-bubble"><b>${escapeHtml(d.title || "Adventure")}</b><br>${escapeHtml(d.player.name)} — ${escapeHtml(d.genre || "")}. Tumhari kahani yahin se shuru hoti hai.</div>`;
+      story.appendChild(head);
+    }
+    rpgRenderState(d);
+    rpgRefreshGames();
+    rpgLoadLore();
+    rpgScroll();
+  } catch { rpgAddSystem("⚠️ campaign load nahi hua."); }
+}
+
+function rpgNewGame() {
+  if (rpgBusy) return;
+  $("#rpg-new-title").value = "";
+  $("#rpg-new-player").value = "";
+  $("#rpg-new-setup").value = "";
+  $("#rpg-modal").hidden = false;
+}
+
+async function rpgStartGame() {
+  const title = $("#rpg-new-title").value.trim();
+  const genre = $("#rpg-new-genre").value;
+  const player = $("#rpg-new-player").value.trim() || "Adventurer";
+  const setup = $("#rpg-new-setup").value.trim();
+  try {
+    const d = await fetchJSON("/api/rpg/games", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, genre, player_name: player, setup }),
+    });
+    $("#rpg-modal").hidden = true;
+    const story = $("#rpg-story");
+    const w = $("#rpg-welcome");
+    if (w) w.remove();
+    story.innerHTML = "";
+    rpgCurrent = d;
+    rpgRenderState(d);
+    await rpgRefreshGames();
+    rpgLoadLore();
+    rpgPlay(setup || "");
+  } catch (err) {
+    rpgAddSystem("⚠️ campaign banane mein error: " + (err && err.message || "unknown"));
+  }
+}
+
+async function rpgDeleteGame() {
+  const id = $("#rpg-game-select").value;
+  if (!id) return;
+  if (!confirm("Is campaign ko delete karein? (permanent)")) return;
+  await fetch("/api/rpg/games/" + encodeURIComponent(id), { method: "DELETE" }).catch(() => {});
+  rpgCurrent = null;
+  const story = $("#rpg-story");
+  story.innerHTML = "";
+  const w = document.createElement("div");
+  w.className = "rpg-welcome";
+  w.innerHTML = `<div class="welcome-icon">🐉</div><h3>Mythos Engine ready</h3><p>Nayi campaign banayein ya purani load karein.</p>`;
+  story.appendChild(w);
+  $("#rpg-state-box").innerHTML = `<p class="muted">no active campaign</p>`;
+  rpgRefreshGames();
+  rpgLoadLore();
+}
+
+/* ---------- lore ---------- */
+async function rpgLoadLore() {
+  const list = $("#rpg-lore-list");
+  if (!list) return;
+  try {
+    const rows = await fetchJSON("/api/rpg/lore?limit=50");
+    if (!rows.length) {
+      list.innerHTML = `<p class="muted">lorebook khali hai</p>`;
+      return;
+    }
+    list.innerHTML = "";
+    rows.forEach((r) => {
+      const item = document.createElement("div");
+      item.className = "lore-item";
+      item.innerHTML = `
+        <div class="lore-head">
+          <span class="lore-cat">${escapeHtml(r.category || "general")}</span>
+          <b>${escapeHtml(r.title || "")}</b>
+          <button class="del" title="delete">✕</button>
+        </div>
+        <div class="lore-body">${escapeHtml(r.content || "")}</div>`;
+      item.querySelector(".del").addEventListener("click", async () => {
+        await fetch("/api/rpg/lore/" + r.id, { method: "DELETE" }).catch(() => {});
+        rpgLoadLore();
+      });
+      list.appendChild(item);
+    });
+  } catch { /* ignore */ }
+}
+
+let rpgLoreTimer = null;
+$("#rpg-lore-q").addEventListener("input", (e) => {
+  clearTimeout(rpgLoreTimer);
+  const q = e.target.value.trim();
+  rpgLoreTimer = setTimeout(async () => {
+    const list = $("#rpg-lore-list");
+    if (!q) return rpgLoadLore();
+    try {
+      const rows = await fetchJSON("/api/rpg/lore/search?q=" + encodeURIComponent(q));
+      list.innerHTML = "";
+      rows.forEach((r) => {
+        const item = document.createElement("div");
+        item.className = "lore-item hit";
+        item.innerHTML = `
+          <div class="lore-head"><span class="lore-cat">${escapeHtml(r.category || "")}</span><b>${escapeHtml(r.title || "")}</b></div>
+          <div class="lore-body">${escapeHtml(r.content || "")}</div>`;
+        list.appendChild(item);
+      });
+    } catch { /* ignore */ }
+  }, 350);
+});
+
+$("#rpg-lore-new").addEventListener("keydown", async (ev) => {
+  if (ev.key !== "Enter") return;
+  const val = $("#rpg-lore-new").value.trim();
+  if (!val) return;
+  // format: "category: title — content"  (fallback: title only)
+  let category = "general", title = val, content = "";
+  const m = val.match(/^([\w-]+):\s*(.+)$/);
+  if (m) { category = m[1]; title = m[2]; }
+  const dash = title.indexOf("—");
+  if (dash !== -1) { content = title.slice(dash + 1).trim(); title = title.slice(0, dash).trim(); }
+  await fetch("/api/rpg/lore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ category, title, content, tags: [category] }),
+  }).catch(() => {});
+  $("#rpg-lore-new").value = "";
+  rpgLoadLore();
+});
+
+/* ---------- RPG event wiring ---------- */
+$("#rpg-new").addEventListener("click", rpgNewGame);
+$("#rpg-new-go").addEventListener("click", rpgStartGame);
+$("#rpg-new-cancel").addEventListener("click", () => { $("#rpg-modal").hidden = true; });
+$("#rpg-modal").addEventListener("click", (e) => { if (e.target === $("#rpg-modal")) $("#rpg-modal").hidden = true; });
+$("#rpg-load").addEventListener("click", () => rpgLoadGame($("#rpg-game-select").value));
+$("#rpg-delete").addEventListener("click", rpgDeleteGame);
+$("#rpg-send").addEventListener("click", () => { if (rpgBusy) rpgStop(); else rpgPlay($("#rpg-input").value); });
+$("#rpg-input").addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" && !ev.shiftKey) {
+    ev.preventDefault();
+    if (rpgBusy) rpgStop(); else rpgPlay($("#rpg-input").value);
+  }
+});
+$("#rpg-input").addEventListener("input", () => {
+  const el = $("#rpg-input");
+  el.style.height = "auto";
+  el.style.height = Math.min(el.scrollHeight, 160) + "px";
+});
+document.addEventListener("click", (e) => {
+  if (e.target.classList && e.target.classList.contains("chip") && e.target.dataset.genre) {
+    $("#rpg-new-genre").value = e.target.dataset.genre;
+    rpgNewGame();
+  }
+});
 
 /* ---------------- boot: load saved chats ---------------- */
 (async () => {

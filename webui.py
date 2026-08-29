@@ -26,6 +26,7 @@ from ai_agent.config import PROJECT_DIR, load_config
 from ai_agent.core import Agent, RunCancelled
 from ai_agent.llm import MockClient, OpenAIClient
 from ai_agent.memory import MemoryStore
+from ai_agent.rpg import RPGEngine
 from ai_agent.tools import create_tools
 
 CONFIG_PATH = os.path.join(PROJECT_DIR, "config.json")
@@ -38,6 +39,10 @@ _chat_lock = threading.Lock()
 # one stop_event per active /api/chat run so the Stop button can cancel it
 _run_lock = threading.Lock()
 _active_runs = {}  # run_id -> threading.Event
+
+# one active RPG turn per game: game_id -> (run_id, stop_event)
+_rpg_lock = threading.Lock()
+_rpg_runs = {}  # game_id -> (run_id, threading.Event)
 
 app = Flask(__name__)
 
@@ -187,22 +192,26 @@ def _save_cfg(patch):
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 
+def _build_llm(cfg):
+    """Create the LLM client from the current config (mock or live)."""
+    if cfg.get("mock"):
+        return MockClient()
+    # Smart Auto-Model Selector: in auto mode the configured model is a
+    # placeholder; the actual model is chosen per-request by the router.
+    model = cfg.get("model") or "gpt-4o-mini"
+    if cfg.get("auto") or model == "auto":
+        model = DEFAULT_FAST_MODEL
+    return OpenAIClient(
+        api_key=cfg.get("api_key") or "",
+        base_url=cfg.get("base_url") or "https://api.openai.com/v1",
+        model=model,
+        fallback_models=cfg.get("fallback_models"),
+    )
+
+
 def _build_agent(cfg):
     memory = MemoryStore(cfg["memory_file"] or MEMORY_PATH)
-    if cfg.get("mock"):
-        llm = MockClient()
-    else:
-        # Smart Auto-Model Selector: in auto mode the configured model is a
-        # placeholder; the actual model is chosen per-request by the router.
-        model = cfg.get("model") or "gpt-4o-mini"
-        if cfg.get("auto") or model == "auto":
-            model = DEFAULT_FAST_MODEL
-        llm = OpenAIClient(
-            api_key=cfg.get("api_key") or "",
-            base_url=cfg.get("base_url") or "https://api.openai.com/v1",
-            model=model,
-            fallback_models=cfg.get("fallback_models"),
-        )
+    llm = _build_llm(cfg)
     agent = Agent(llm, memory=memory,
                   max_iterations=cfg.get("max_iterations") or 60,
                   max_messages=cfg.get("max_messages") or 400,
@@ -221,8 +230,24 @@ def _reload_state(mock_override=None):
         cfg["mock"] = True  # no key configured -> fall back to mock
     agent, memory = _build_agent(cfg)
     with _lock:
-        _state.update({"agent": agent, "memory": memory, "cfg": cfg})
+        _state.update({"agent": agent, "memory": memory, "cfg": cfg,
+                       "rpg": None, "rpg_game_id": None})
     return cfg
+
+
+RPG_DIR = os.path.join(PROJECT_DIR, "rpg")
+
+
+def _get_rpg_engine():
+    """Lazily build the shared RPG engine (uses the same LLM as chat)."""
+    with _lock:
+        eng = _state.get("rpg")
+        if eng is None:
+            agent = _state.get("agent")
+            llm = agent.llm if agent else _build_llm(_current_cfg())
+            eng = RPGEngine(RPG_DIR, llm, memory=_state.get("memory"))
+            _state["rpg"] = eng
+        return eng
 
 
 def _status():
@@ -669,6 +694,216 @@ def api_settings_save():
 
     _reload_state(mock_override=mock)
     return jsonify(_status())
+
+
+# --------------------------------------------------------------------------
+# RPG (interactive campaigns)
+# --------------------------------------------------------------------------
+
+@app.route("/api/rpg")
+def api_rpg_status():
+    eng = _get_rpg_engine()
+    with _lock:
+        current = _state.get("rpg_game_id")
+    return jsonify(dict(eng.status(), current=current))
+
+
+@app.route("/api/rpg/games", methods=["GET"])
+def api_rpg_games_list():
+    return jsonify(_get_rpg_engine().list_games())
+
+
+@app.route("/api/rpg/games", methods=["POST"])
+def api_rpg_games_new():
+    data = request.get_json(silent=True) or {}
+    eng = _get_rpg_engine()
+    payload = eng.new_game(
+        game_id=(data.get("game_id") or "").strip() or None,
+        title=(data.get("title") or "").strip(),
+        genre=(data.get("genre") or "fantasy").strip(),
+        player_name=(data.get("player_name") or "Adventurer").strip(),
+        setup=(data.get("setup") or "").strip(),
+        seed=bool(data.get("seed", True)),
+    )
+    with _lock:
+        _state["rpg_game_id"] = payload["game_id"]
+    return jsonify(payload)
+
+
+@app.route("/api/rpg/games/<game_id>", methods=["GET"])
+def api_rpg_game_get(game_id):
+    eng = _get_rpg_engine()
+    payload = eng.get_state_payload(game_id)
+    if payload is None:
+        return jsonify({"error": "game not found"}), 404
+    return jsonify(payload)
+
+
+@app.route("/api/rpg/games/<game_id>", methods=["DELETE"])
+def api_rpg_game_delete(game_id):
+    eng = _get_rpg_engine()
+    if not eng.delete_game(game_id):
+        return jsonify({"error": "game not found"}), 404
+    with _lock:
+        if _state.get("rpg_game_id") == game_id:
+            _state["rpg_game_id"] = None
+    return jsonify({"ok": True})
+
+
+@app.route("/api/rpg/games/<game_id>/load", methods=["POST"])
+def api_rpg_game_load(game_id):
+    eng = _get_rpg_engine()
+    payload = eng.load_game(game_id)
+    if payload is None:
+        return jsonify({"error": "game not found"}), 404
+    with _lock:
+        _state["rpg_game_id"] = game_id
+    return jsonify(payload)
+
+
+@app.route("/api/rpg/games/<game_id>/play", methods=["POST"])
+def api_rpg_game_play(game_id):
+    eng = _get_rpg_engine()
+    if eng.get_state_payload(game_id) is None:
+        return jsonify({"error": "game not found"}), 404
+
+    run_id = uuid.uuid4().hex
+    stop_event = threading.Event()
+    with _rpg_lock:
+        if game_id in _rpg_runs:
+            return jsonify({"error": "a turn is already running for this game",
+                            "run_id": _rpg_runs[game_id][0]}), 409
+        _rpg_runs[game_id] = (run_id, stop_event)
+
+    data = request.get_json(silent=True) or {}
+    player_input = (data.get("input") or "").strip()
+
+    q = queue.Queue(maxsize=64)
+    run_iter = eng.act_stream(game_id, player_input, stop_event=stop_event)
+
+    def worker():
+        try:
+            for event in run_iter:
+                try:
+                    q.put_nowait(event)
+                except queue.Full:
+                    # client is gone: stop the run and unwind the generator
+                    stop_event.set()
+                    run_iter.close()
+                    break
+        except RunCancelled:
+            pass  # user pressed Stop; clean shutdown below
+        except Exception as exc:
+            msg_err = "%s: %s" % (type(exc).__name__, exc)
+            try:
+                q.put_nowait({"type": "error", "content": msg_err})
+            except queue.Full:
+                pass
+        finally:
+            try:
+                q.put_nowait(None)
+            except queue.Full:
+                pass
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    def gen():
+        yield "retry: 1500\n\n"
+        try:
+            while True:
+                try:
+                    event = q.get(timeout=360)
+                except queue.Empty:
+                    yield "data: {\"type\": \"error\", \"content\": \"[timed out]\"}\n\n"
+                    break
+                if event is None:
+                    break
+                yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+        except GeneratorExit:
+            # client disconnected / Stop clicked: cancel the worker
+            stop_event.set()
+            raise
+        except Exception:
+            stop_event.set()
+            raise
+        finally:
+            with _rpg_lock:
+                _rpg_runs.pop(game_id, None)
+
+    return Response(stream_with_context(gen()),
+                    content_type="text/event-stream; charset=utf-8",
+                    headers={"Cache-Control": "no-cache",
+                             "X-Accel-Buffering": "no",
+                             "X-Run-Id": run_id})
+
+
+@app.route("/api/rpg/games/<game_id>/cancel", methods=["POST"])
+def api_rpg_game_cancel(game_id):
+    """Cancel the active turn of a game, if any."""
+    with _rpg_lock:
+        entry = _rpg_runs.pop(game_id, None)
+    if entry is not None:
+        entry[1].set()
+    return jsonify({"ok": True, "cancelled": entry is not None})
+
+
+# ---- lorebook ----------------------------------------------------------
+
+@app.route("/api/rpg/lore", methods=["GET"])
+def api_rpg_lore_list():
+    category = request.args.get("category") or None
+    limit = request.args.get("limit", type=int) or 100
+    return jsonify(_get_rpg_engine().lore_list(category=category, limit=limit))
+
+
+@app.route("/api/rpg/lore", methods=["POST"])
+def api_rpg_lore_add():
+    data = request.get_json(silent=True) or {}
+    category = (data.get("category") or "general").strip()
+    title = (data.get("title") or "").strip()
+    content = (data.get("content") or "").strip()
+    tags = data.get("tags") or []
+    if not title or not content:
+        return jsonify({"error": "title and content required"}), 400
+    entry = _get_rpg_engine().lore_add(category, title, content, tags)
+    return jsonify(entry)
+
+
+@app.route("/api/rpg/lore/search")
+def api_rpg_lore_search():
+    q = (request.args.get("q") or "").strip()
+    if not q:
+        return jsonify([])
+    return jsonify(_get_rpg_engine().lore_search(q))
+
+
+@app.route("/api/rpg/lore/seed", methods=["POST"])
+def api_rpg_lore_seed():
+    data = request.get_json(silent=True) or {}
+    genre = (data.get("genre") or "fantasy").strip()
+    ok = _get_rpg_engine().seed_lore(genre)
+    return jsonify({"ok": ok})
+
+
+@app.route("/api/rpg/lore/<int:entry_id>", methods=["PUT"])
+def api_rpg_lore_update(entry_id):
+    data = request.get_json(silent=True) or {}
+    fields = {}
+    for key in ("category", "title", "content", "tags"):
+        if key in data:
+            fields[key] = data[key]
+    if not fields:
+        return jsonify({"error": "nothing to update"}), 400
+    entry = _get_rpg_engine().lore_update(entry_id, **fields)
+    if entry is None:
+        return jsonify({"error": "lore entry not found"}), 404
+    return jsonify(entry)
+
+
+@app.route("/api/rpg/lore/<int:entry_id>", methods=["DELETE"])
+def api_rpg_lore_delete(entry_id):
+    ok = _get_rpg_engine().lore_delete(entry_id)
+    return jsonify({"ok": ok})
 
 
 # --------------------------------------------------------------------------

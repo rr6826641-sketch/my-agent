@@ -30,6 +30,7 @@
       <button class="nav-item active" data-view="chat">💬 Chat</button>
       <button class="nav-item" data-view="tools">🛠️ Tools <span class="badge" id="badge-tools">0</span></button>
       <button class="nav-item" data-view="memory">🧠 Memory <span class="badge" id="badge-memory">0</span></button>
+      <button class="nav-item" data-view="rpg">🎮 RPG <span class="badge" id="badge-rpg">0</span></button>
       <button class="nav-item" data-view="settings">⚙️ Settings</button>
       <button class="nav-item" data-view="system">🖥️ System</button>
     </nav>
@@ -148,6 +149,70 @@
       </div>
     </section>
 
+    <!-- ---------- RPG VIEW (Mythos Engine) ---------- -->
+    <section class="view" id="view-rpg">
+      <div class="chat-header">
+        <div>
+          <h2>🎮 Mythos Engine</h2>
+          <p id="rpg-hint">Autonomous narrative engine — world state, NPCs aur lore har turn yaad rakhte hain.</p>
+        </div>
+        <div class="header-actions">
+          <button class="btn-primary" id="rpg-new">＋ New Campaign</button>
+        </div>
+      </div>
+      <div class="rpg-layout">
+        <div class="rpg-main">
+          <div class="rpg-select-bar">
+            <select id="rpg-game-select" title="Campaigns"></select>
+            <button class="btn-ghost" id="rpg-load">▶ Load</button>
+            <button class="btn-ghost danger" id="rpg-delete" title="Delete campaign">🗑</button>
+          </div>
+          <div class="rpg-story" id="rpg-story">
+            <div class="rpg-welcome" id="rpg-welcome">
+              <div class="welcome-icon">🐉</div>
+              <h3>Mythos Engine ready</h3>
+              <p>Nayi campaign banayein ya purani load karein. Game Master har event, NPC aur world-state ka hisaab rakhta hai — choices ke saath immersive storyteller turns.</p>
+              <div class="rpg-genre-pick">
+                <button class="chip" data-genre="fantasy">⚔️ Fantasy</button>
+                <button class="chip" data-genre="scifi">🚀 Sci-Fi</button>
+                <button class="chip" data-genre="horror">🦇 Horror</button>
+                <button class="chip" data-genre="cyberpunk">🤖 Cyberpunk</button>
+                <button class="chip" data-genre="mystery">🔍 Mystery</button>
+                <button class="chip" data-genre="custom">✨ Custom</button>
+              </div>
+            </div>
+          </div>
+          <div class="composer">
+            <textarea id="rpg-input" rows="1" placeholder="What do you do?… (Enter to act) — ya sirf 1 / 2 / 3 likh kar choice chunein"></textarea>
+            <button class="btn-send" id="rpg-send" title="Act" aria-label="Act">
+              <span class="send-ico">➤</span>
+              <span class="stop-ico">■</span>
+            </button>
+          </div>
+        </div>
+        <div class="rpg-side">
+          <div class="rpg-panel">
+            <h4>🧭 World State</h4>
+            <div class="rpg-state" id="rpg-state-box">
+              <p class="muted">no active campaign</p>
+            </div>
+          </div>
+          <div class="rpg-panel">
+            <h4>📜 Lorebook</h4>
+            <div class="rpg-lore-search">
+              <input type="text" id="rpg-lore-q" placeholder="search lore…">
+            </div>
+            <div class="rpg-lore-add">
+              <input type="text" id="rpg-lore-new" placeholder="add lore entry (category: title — text)">
+            </div>
+            <div class="rpg-lore-list" id="rpg-lore-list">
+              <p class="muted">no entries</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ---------- SYSTEM VIEW ---------- -->
     <section class="view" id="view-system">
       <div class="chat-header">
@@ -161,6 +226,36 @@
     </section>
 
   </main>
+</div>
+
+<!-- ---------- New Campaign modal ---------- -->
+<div class="modal" id="rpg-modal" hidden>
+  <div class="modal-card">
+    <h3>🐉 New Campaign</h3>
+    <label>Title
+      <input type="text" id="rpg-new-title" placeholder="The Fallen Crown">
+    </label>
+    <label>Genre
+      <select id="rpg-new-genre">
+        <option value="fantasy">⚔️ Fantasy</option>
+        <option value="scifi">🚀 Sci-Fi</option>
+        <option value="horror">🦇 Horror</option>
+        <option value="cyberpunk">🤖 Cyberpunk</option>
+        <option value="mystery">🔍 Mystery</option>
+        <option value="custom">✨ Custom</option>
+      </select>
+    </label>
+    <label>Player Name
+      <input type="text" id="rpg-new-player" placeholder="Adventurer">
+    </label>
+    <label>Opening (optional)
+      <input type="text" id="rpg-new-setup" placeholder="Set the scene…">
+    </label>
+    <div class="row">
+      <button class="btn-primary" id="rpg-new-go">Start Adventure</button>
+      <button class="btn-ghost" id="rpg-new-cancel">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <script src="/static/marked.min.js"></script>

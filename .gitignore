@@ -22,3 +22,6 @@ tasks.json
 # Runtime chat/log data
 chats.json
 webui.log
+
+# RPG runtime data (lorebook db + saved games)
+rpg/
