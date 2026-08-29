@@ -625,7 +625,9 @@ function fillModelSelect(catalog) {
 
 async function loadSettings() {
   const s = await fetchJSON("/api/settings");
-  $("#set-key").value = s.api_key || "";
+  // The key itself is never sent back - only whether it exists in .env.
+  $("#set-key").value = "";
+  $("#set-key").placeholder = s.has_key ? "✓ API key is saved in .env (leave blank to keep it)" : "sk-…  (no key set — will be saved to .env)";
   $("#set-url").value = s.base_url || "";
   fillModelSelect(s.catalog);
   $("#set-model").value = s.auto ? "auto" : (s.model || "auto");
@@ -675,6 +677,15 @@ $("#sys-refresh").addEventListener("click", loadSystem);
 async function refreshStatus() {
   try {
     const s = await fetchJSON("/api/status");
+    const warn = $("#env-warn");
+    if (warn) {
+      if (s.key_error) {
+        warn.textContent = "⚠️ " + s.key_error;
+        warn.classList.remove("hidden");
+      } else {
+        warn.classList.add("hidden");
+      }
+    }
     const dot = $("#dot-mode");
     dot.className = "dot " + (s.mode === "live" ? "live" : "mock");
     if (s.mode === "auto") {

@@ -7,7 +7,9 @@ Run:
     py -3 webui.py --mock     # force mock mode even if an API key is set
 
 The UI is local-only (binds to 127.0.0.1). Configure the LLM from the
-Settings tab: API key, base URL and model are saved to config.json.
+Settings tab: base URL, model and toggles are saved to config.json; the
+API key is saved ONLY to .env (never config.json). If .env is missing or
+AGENT_API_KEY is empty, the UI shows a safe fallback error banner.
 """
 
 import argparse
@@ -22,7 +24,7 @@ import uuid
 
 from flask import Flask, jsonify, render_template, request, Response, stream_with_context
 
-from ai_agent.config import PROJECT_DIR, load_config
+from ai_agent.config import (PROJECT_DIR, load_config, config_status, save_env_key)
 from ai_agent.core import Agent, RunCancelled
 from ai_agent.llm import MockClient, OpenAIClient
 from ai_agent.memory import MemoryStore
@@ -171,6 +173,7 @@ _state = {
     "agent": None,
     "memory": None,
     "cfg": None,
+    "key_error": "",
 }
 
 
@@ -180,7 +183,11 @@ def _current_cfg():
 
 
 def _save_cfg(patch):
-    """Merge patch into config.json (load_config reads this file first)."""
+    """Merge patch into config.json (non-secret settings only).
+
+    API keys are NEVER written here - they go to .env (save_env_key).
+    """
+    patch = {k: v for k, v in patch.items() if k != "api_key"}
     cfg = {}
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -226,12 +233,17 @@ def _reload_state(mock_override=None):
     cfg = load_config()
     if mock_override is not None:
         cfg["mock"] = mock_override
+    # Safe fallback: if the key is missing, stay usable via the built-in mock
+    # LLM and surface a clear error banner in the UI (never silently leak or
+    # half-work with an empty key).
+    key_status = config_status()
+    key_error = "" if (cfg.get("mock") or key_status["ok"]) else key_status["error"]
     if not cfg.get("mock") and not cfg.get("api_key"):
-        cfg["mock"] = True  # no key configured -> fall back to mock
+        cfg["mock"] = True
     agent, memory = _build_agent(cfg)
     with _lock:
         _state.update({"agent": agent, "memory": memory, "cfg": cfg,
-                       "rpg": None, "rpg_game_id": None})
+                       "key_error": key_error, "rpg": None, "rpg_game_id": None})
     return cfg
 
 
@@ -264,6 +276,7 @@ def _status():
         "model": model,
         "base_url": "built-in" if cfg.get("mock") else cfg.get("base_url", "?"),
         "has_key": bool(cfg.get("api_key")),
+        "key_error": _state.get("key_error", ""),
         "tools": len(_state["agent"]._tool_list) if _state.get("agent") else 0,
         "memory_entries": len(_state["memory"]._data.get("notes", {})) if _state.get("memory") else 0,
     }
@@ -652,13 +665,15 @@ def api_memory_del(key):
 def api_settings():
     cfg = _current_cfg()
     auto = bool(cfg.get("auto")) or (cfg.get("model") == "auto")
+    # The key itself is never sent back to the UI - only whether it exists.
     return jsonify({
-        "api_key": cfg.get("api_key", ""),
+        "has_key": bool(cfg.get("api_key")),
         "base_url": cfg.get("base_url", ""),
         "model": "auto" if auto else cfg.get("model", ""),
         "auto": auto,
         "catalog": MODEL_CATALOG,
         "mock": bool(cfg.get("mock")),
+        "key_error": _state.get("key_error", ""),
         "max_iterations": cfg.get("max_iterations", 60),
     })
 
@@ -675,7 +690,10 @@ def api_settings_save():
 
     patch = {"mock": mock, "auto": auto}
     if api_key:
-        patch["api_key"] = api_key
+        # Security: API keys go ONLY into .env, never config.json.
+        ok, msg = save_env_key(api_key)
+        if not ok:
+            return jsonify({"ok": False, "error": msg}), 500
     if base_url:
         patch["base_url"] = base_url
     # auto mode stores "auto" as the model so it survives reloads.

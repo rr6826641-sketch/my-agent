@@ -54,8 +54,8 @@ def main():
             fallback_models=cfg.get("fallback_models"),
         )
         if not cfg["api_key"] and cfg["base_url"].startswith("https://api.openai.com"):
-            print("[warning] no API key set - add it via --api-key, "
-                  "config.json, or AGENT_API_KEY env var")
+            print("[warning] no API key set - add AGENT_API_KEY to .env "
+                  "or pass --api-key (keys are never read from config.json)")
 
     memory = MemoryStore(cfg["memory_file"])
     interactive = sys.stdin.isatty() and not cfg["once"]

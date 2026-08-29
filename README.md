@@ -68,7 +68,7 @@ Web UI features:
 - **Chat** — SSE streaming, har tool call live dikhta hai (start → tool_call → tool_result → final)
 - **Tools** — saare 100 tools ki catalog + parameters
 - **Memory** — persistent memory add/delete karo
-- **Settings** — API key/base_url/model/mock mode browser se save karo (config.json mein)
+- **Settings** — base URL/model/mock mode config.json mein save hote hain; **API key sirf `.env` mein** (config.json kabhi nahi — secret isolation)
 - **System** — OS, IPs, disk info
 
 ### Mock mode (test ke liye — koi API key nahi chahiye)
@@ -108,14 +108,14 @@ copy .env.example .env
 # phir .env mein apni values daalo
 ```
 
-**Tareeqa 3 — `config.json`:**
+**Tareeqa 3 — `config.json` (sirf non-secret settings):**
 ```json
 {
-  "api_key": "sk-xxx",
   "base_url": "https://api.openai.com/v1",
   "model": "gpt-4o"
 }
 ```
+> ⚠️ Security: API keys **kabhi** config.json mein nahi daalte — wahan rakha gaya `api_key` load-time par ignore kar diya jata hai. Key ka ek hi zariya hai: `.env` (ya CLI flag).
 
 ### Free/local options
 
@@ -339,7 +339,7 @@ my-agent/
 │   ├── core.py                 # Agent class + think→act→observe loop
 │   ├── llm.py                  # OpenAI-compatible client + Mock client
 │   ├── memory.py               # Persistent memory (JSON) + RAG (TF-IDF vector search)
-│   ├── config.py               # .env / config.json / flags loading
+│   ├── config.py               # keys sirf .env se; config.json non-secret settings + flags
 │   └── tools/
 │       ├── __init__.py         # 100-tool registry + create_tools()
 │       ├── base.py             # Tool class + execute_tool()
