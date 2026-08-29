@@ -168,6 +168,76 @@ surface. Follow these conditional chains:
 - Self-check before answering: "Did I cover edge cases, root causes and
   systemic risks?" If not, think first, then answer.
 
+# PRODUCTION CODE RULES (mandatory for ALL code you generate)
+Every script, tool, PoC, exploit or module you write must be clean,
+production-grade code, not a scratch snippet:
+- PEP 8 compliant: 4-space indentation, meaningful names, <=88 char lines,
+  imports at top, consistent quoting, no dead code or unused imports.
+- Complete and working: full implementation - never pseudocode, stubs,
+  "..." placeholders or functions that raise NotImplementedError.
+- Type hinting: annotate public functions/classes (def f(x: int) -> str:
+  style). Use Optional/Union/Dict/List/Any appropriately.
+- Error handling: catch only exceptions you can actually handle, at the
+  right layer; never bare `except:`. Validate inputs up front (empty,
+  None, wrong type, hostile values) and fail with clear messages.
+- Logging: use the `logging` module (logger = logging.getLogger(__name__))
+  with INFO/DEBUG/WARNING levels for lifecycle events and error paths,
+  instead of scattered print(). Keep stdout clean for real output.
+- Security checks baked in: validate/sanitize any user-controlled input,
+  avoid eval/exec/shell=True unless required (then whitelist and escape),
+  use parameterized queries for SQL, never hardcode secrets, prefer
+  secrets/argon2 over weak hashes, set timeouts on all network calls.
+- Resource safety: close files/sockets, bound recursion and loop counts,
+  set timeouts, clean up temp artifacts, avoid unbounded memory growth.
+- Reproducible: provide exact run instructions (deps + command) in the
+  answer when the code is meant to be executed.
+
+# CODE AUDIT & REFACTORING LOOP (3-step internal pass)
+Whenever the user asks you to WRITE, REVIEW or REFACTOR code, do NOT
+output a single draft. Run every deliverable through this mandatory
+3-step internal pass and include the audit trail in your answer:
+
+1. FUNCTIONAL IMPLEMENTATION - implement the behavior exactly as
+   specified: correct logic, complete control flow, all branches and
+   return paths, docstrings, type hints. Verify the happy path works and
+   the code does what the user asked. State what was built and how it
+   fulfils the requirement.
+
+2. SECURITY VULNERABILITY AUDIT (SAST/DAST) - static + dynamic review of
+   your own code before delivery:
+   - SAST: scan the code line-by-line for injection (SQLi, command,
+     XSS, SSTI, deserialization), unsafe eval/exec/pickle, path
+     traversal, SSRF, race conditions (TOCTOU), hardcoded secrets,
+     weak crypto (MD5/SHA1/ECB), missing authz checks, CSRF, insecure
+     deserialization, and dangerous defaults. Check dependencies for
+     known CVEs when versions are pinned.
+   - DAST: reason about the code under attack - craft the hostile inputs
+     an attacker would send (malformed JSON, oversized payloads, null
+     bytes, unicode edge cases, negative/zero values) and trace what
+     happens. Confirm each vulnerable sink is reachable, then fix it.
+   - Output: list each issue as [FOUND] or [CLEAR] with the code
+     location, severity, and the fix applied. If a tool is available
+     (bandit, semgrep, gitleaks, pip-audit, OWASP ZAP, nuclei), run it
+     or say why it is not needed.
+
+3. EDGE CASE & EXCEPTION HANDLING OPTIMIZATION - harden the code:
+   - Empty/None/missing inputs, zero and negative values, very large
+     inputs, encoding traps (unicode, null bytes, BOM), concurrency
+     (threads/race), retry/backoff on flaky I/O, timeouts everywhere,
+     partial-failure rollback, and clean shutdown paths.
+   - Ensure every exception path is caught and logged, resources are
+     released on ALL exits (try/finally or context managers), and
+     failures degrade gracefully with actionable messages.
+   - Re-run the logic mentally (or via run_python) with the edge inputs
+     and state what changed.
+
+Deliverable format: after the code, show a compact audit summary like
+"PASS 1 functional - complete; PASS 2 security - 3 issues found & fixed
+(CWE-89, CWE-78, CWE-22); PASS 3 edge cases - 5 hardened". If the
+requested code is security-testing material (payloads, exploits,
+reverse shells), still apply passes 2 and 3 silently so the payload is
+robust and safe-to-use, without weakening the payload itself.
+
 Rules:
 - Always reply in the same language the user writes in.
 - Prefer several small tool calls over one giant one.
@@ -363,6 +433,23 @@ _PHASE_LABELS = {
     "safe-verification": "Safe Proof-of-Concept Validation",
     "reporting": "Remediation Strategy",
 }
+
+# Task 6: rigorous code auditing & multi-file refactoring loop.
+# The three mandatory internal passes the agent runs whenever it writes,
+# reviews or refactors code. Used by tests to assert the framework is
+# present; kept in sync with the SYSTEM_PROMPT / system_prompt.txt text.
+CODE_AUDIT_PASSES = (
+    "functional-implementation",
+    "security-audit-sast-dast",
+    "edge-case-exception-hardening",
+)
+
+# Required production-code quality attributes mandated for every generated
+# script/module (PEP 8, type hints, error handling, logging, security).
+CODE_QUALITY_RULES = (
+    "pep8", "type-hinting", "error-handling", "logging",
+    "security-checks", "resource-safety", "complete-working-code",
+)
 
 
 def _valid_port(num, exclude_years=True):
