@@ -22,11 +22,13 @@ import threading
 import time
 import uuid
 
-from flask import Flask, jsonify, render_template, request, Response, stream_with_context
+from flask import (Flask, jsonify, render_template, request, Response,
+                   send_file, stream_with_context)
 
 from ai_agent.config import (PROJECT_DIR, load_config, config_status, save_env_key)
 from ai_agent.core import Agent, RunCancelled
 from ai_agent.llm import MockClient, OpenAIClient
+from ai_agent.artifacts import ArtifactManager
 from ai_agent.memory import GlobalKnowledge, MemoryStore
 from ai_agent.rpg import RPGEngine
 from ai_agent.tools import create_tools
@@ -34,6 +36,10 @@ from ai_agent.tools import create_tools
 CONFIG_PATH = os.path.join(PROJECT_DIR, "config.json")
 MEMORY_PATH = os.path.join(PROJECT_DIR, "memory.json")
 CHATS_PATH = os.path.join(PROJECT_DIR, "chats.json")
+
+# structured scan/generation outputs: artifacts/{chat_id}/{tool}_{ts}.{ext}
+ARTIFACTS_DIR = os.path.join(PROJECT_DIR, "artifacts")
+artifacts = ArtifactManager(ARTIFACTS_DIR)
 
 # serializes all reads/writes of chats.json
 _chat_lock = threading.Lock()
@@ -355,7 +361,7 @@ def _record_event(sid, ev):
     etype = ev.get("type")
     if etype not in ("llm", "tool_call", "tool_result", "final", "error",
                      "validation_tool_call", "validation_tool_result",
-                     "validation", "validation_done"):
+                     "validation", "validation_done", "artifacts"):
         return
     now = time.time()
     with _chat_lock:
@@ -376,6 +382,8 @@ def _record_event(sid, ev):
                 if (m.get("role") == "tool" and not m.get("validator")
                         and m.get("result") is None):
                     m["result"] = ev.get("content", "")
+                    if ev.get("artifact"):
+                        m["artifact"] = ev["artifact"]
                     break
         elif etype == "final":
             msgs.append({"role": "assistant", "kind": "final",
@@ -407,6 +415,8 @@ def _record_event(sid, ev):
                          "rejected": ev.get("rejected", 0),
                          "unverified": ev.get("unverified", 0),
                          "count": ev.get("count", 0), "ts": now})
+        elif etype == "artifacts":
+            session["artifacts"] = ev.get("artifacts") or []
         session["updated"] = now
         _write_chats_unlocked(data)
 
@@ -482,8 +492,39 @@ def api_chat():
     run_iter = run_gen()
 
     def worker():
+        pending_tool = {"name": None, "args": "{}"}
+        turn_artifacts = []
         try:
             for event in run_iter:
+                etype = event.get("type")
+                if etype == "tool_call":
+                    pending_tool["name"] = event.get("name")
+                    pending_tool["args"] = event.get("arguments") or "{}"
+                elif etype == "tool_result":
+                    # persist scan/generation outputs as structured artifacts
+                    if artifacts.worth_capturing(
+                            pending_tool["name"], pending_tool["args"]):
+                        saved = artifacts.save(
+                            sid, pending_tool["name"],
+                            event.get("content") or "",
+                            args=pending_tool["args"])
+                        if saved:
+                            turn_artifacts.append(saved)
+                            event = dict(event)
+                            event["artifact"] = saved
+                elif etype == "final" and turn_artifacts:
+                    # end-of-turn offer: badge panel + markdown report button
+                    artifact_event = {"type": "artifacts",
+                                      "chat_id": sid,
+                                      "artifacts": list(turn_artifacts)}
+                    try:
+                        _record_event(sid, artifact_event)
+                    except Exception:
+                        pass
+                    try:
+                        q.put_nowait(artifact_event)
+                    except queue.Full:
+                        pass
                 try:
                     _record_event(sid, event)
                 except Exception:
@@ -645,12 +686,91 @@ def api_sessions_del(sid):
         if removed:
             _write_chats_unlocked(data)
     if removed:
+        # keep the artifacts folder in sync with the deleted chat
+        try:
+            artifacts.delete_chat(sid)
+        except Exception:
+            pass
         with _lock:
             if _state.get("session_id") == sid:
                 _state["session_id"] = None
                 if _state.get("agent"):
                     _state["agent"].reset()
     return jsonify({"ok": bool(removed)})
+
+
+# --------------------------------------------------------------------------
+# Artifacts API (downloadable scan outputs)
+# --------------------------------------------------------------------------
+
+_MIME_BY_EXT = {
+    "json": "application/json",
+    "txt": "text/plain",
+    "md": "text/markdown",
+    "html": "text/html",
+    "csv": "text/csv",
+    "xml": "application/xml",
+    "log": "text/plain",
+}
+
+
+@app.route("/api/artifacts")
+@app.route("/api/artifacts/<chat_id>")
+def api_artifacts_list(chat_id=None):
+    """Artifacts for one chat (or every chat when no chat id is given)."""
+    if chat_id is not None:
+        return jsonify(artifacts.list_chat(chat_id))
+    out = []
+    try:
+        chats = sorted(os.listdir(artifacts.root))
+    except OSError:
+        chats = []
+    for c in chats:
+        rows = artifacts.list_chat(c)
+        if rows:
+            out.append({"chat_id": c, "count": len(rows),
+                        "artifacts": rows})
+    return jsonify(out)
+
+
+@app.route("/api/download/<artifact_id>")
+def api_artifacts_download(artifact_id):
+    """Stream one artifact as a download. resolve() only accepts a strict
+    filename id, so traversal (../, encoded separators, absolute paths) is
+    impossible."""
+    path = artifacts.resolve(artifact_id)
+    if path is None:
+        return jsonify({"error": "artifact not found"}), 404
+    ext = os.path.splitext(path)[1].lstrip(".").lower()
+    return send_file(
+        path, as_attachment=True,
+        download_name=os.path.basename(path),
+        mimetype=_MIME_BY_EXT.get(ext, "application/octet-stream"))
+
+
+@app.route("/api/artifacts/<chat_id>/report")
+def api_artifacts_report(chat_id):
+    """Markdown report for a chat: last final message + artifact index."""
+    final_text = ""
+    with _chat_lock:
+        data = _read_chats_unlocked()
+        s = data.get("sessions", {}).get(chat_id)
+        if s:
+            for m in reversed(s.get("messages") or []):
+                if (m.get("role") == "assistant"
+                        and m.get("kind") == "final"
+                        and m.get("content")):
+                    final_text = m["content"]
+                    break
+    md = artifacts.report(chat_id, final_text=final_text)
+    if request.args.get("download"):
+        from io import BytesIO
+        return send_file(
+            BytesIO(md.encode("utf-8")),
+            as_attachment=True,
+            download_name="report_%s.md" % chat_id,
+            mimetype="text/markdown")
+    return Response(md, mimetype="text/markdown; charset=utf-8")
 
 
 # --------------------------------------------------------------------------

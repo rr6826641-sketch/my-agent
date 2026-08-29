@@ -184,16 +184,24 @@ function renderSession(s) {
       if (m.kind === "thinking") bubble.classList.add("thinking");
     } else if (m.role === "tool") {
       addToolCard(m.name || "?", typeof m.arguments === "string" ? m.arguments : JSON.stringify(m.arguments || ""));
-      if (m.result != null) {
-        const cards = chatLog.querySelectorAll(".toolcard");
-        const card = cards[cards.length - 1];
-        if (card) {
+      const cards = chatLog.querySelectorAll(".toolcard");
+      const card = cards[cards.length - 1];
+      if (card) {
+        if (m.result != null) {
           card.querySelector(".result").textContent = m.result;
           if (/error|failed|not installed|timed out/i.test(m.result)) card.classList.add("err");
         }
+        if (m.artifact) addArtifactBadge(card, m.artifact);
       }
     }
   });
+  // rebuild the end-of-turn artifact panel from saved session state
+  const seen = new Map();
+  (s.artifacts || []).forEach((a) => seen.set(a.id || a.filename, a));
+  (s.messages || []).forEach((m) => {
+    if (m.artifact) seen.set(m.artifact.id || m.artifact.filename, m.artifact);
+  });
+  if (seen.size) renderArtifactsPanel([...seen.values()], s.id || currentSessionId);
   scrollDown();
 }
 
@@ -315,6 +323,45 @@ function addToolCard(name, args) {
   chatLog.appendChild(div);
   scrollDown();
   return div.querySelector(".result");
+}
+
+/* ---------------- structured artifact badges ---------------- */
+function artifactBadgeHTML(a) {
+  const id = (a && (a.id || a.filename)) || "";
+  if (!id) return "";
+  const tool = escapeHtml(a.tool || (id.split("_")[0] || "file"));
+  const size = a.size_h ? ` <span class="artifact-size">${escapeHtml(a.size_h)}</span>` : "";
+  return `<a class="artifact-badge" href="/api/download/${encodeURIComponent(id)}" download title="Download ${escapeHtml(id)}">📄 ${tool}${size}</a>`;
+}
+
+function addArtifactBadge(container, a) {
+  const html = artifactBadgeHTML(a);
+  if (!html) return null;
+  const wrap = document.createElement("div");
+  wrap.className = "artifact-zone";
+  wrap.innerHTML = html;
+  (container || chatLog).appendChild(wrap);
+  scrollDown();
+  return wrap;
+}
+
+function renderArtifactsPanel(list, chatId) {
+  const items = (list || []).filter((a) => a && (a.id || a.filename));
+  if (!items.length) return null;
+  const div = document.createElement("div");
+  div.className = "artifact-panel";
+  const rows = items.map((a) =>
+    `<div class="artifact-row">${artifactBadgeHTML(a)}</div>`).join("");
+  const report = chatId
+    ? `<a class="artifact-report" href="/api/artifacts/${encodeURIComponent(chatId)}/report?download=1">⬇ Download Markdown Report</a>`
+    : "";
+  div.innerHTML = `
+    <div class="artifact-head">📦 ${items.length} artifact${items.length === 1 ? "" : "s"} saved</div>
+    <div class="artifact-list">${rows}</div>
+    ${report}`;
+  chatLog.appendChild(div);
+  scrollDown();
+  return div;
 }
 
 /* ---------------- validation sub-agent cards ---------------- */
@@ -501,6 +548,7 @@ function sendMessage(text) {
         if (/error|failed|not installed|timed out/i.test(e.content || "")) {
           card.classList.add("err");
         }
+        if (e.artifact) addArtifactBadge(card, e.artifact);
       }
       typing = addTyping();
     } else if (e.type === "final") {
@@ -524,6 +572,10 @@ function sendMessage(text) {
         finalAdded = true;
       }
       finish(); // e.g. server [timed out] — must also release busy
+    } else if (e.type === "artifacts") {
+      // end-of-turn panel: saved scan outputs + markdown report button
+      typing.remove();
+      renderArtifactsPanel(e.artifacts, e.chat_id);
     } else if (e.type === "validation_start") {
       // validator child began re-checking; preview (main answer) must survive
       typing.remove();

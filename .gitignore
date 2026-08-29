@@ -40,5 +40,8 @@ _review_dump.txt
 # Runtime data dir
 data/
 
+# Runtime scan/generation artifacts
+artifacts/
+
 # Runtime assessment scope state
 scope.json

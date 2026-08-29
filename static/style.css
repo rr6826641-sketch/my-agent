@@ -208,6 +208,35 @@ body {
 .toolcard.err { border-color: #cc0000; }
 .toolcard.err .t-name { color: var(--red); }
 
+/* ---------------- structured artifacts ---------------- */
+.artifact-zone { padding: 6px 12px 10px; }
+.artifact-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #0e2f24; border: 1px solid #1f7a4d; color: #7ee2a8;
+  border-radius: 99px; padding: 3px 10px; font-size: 11px;
+  font-family: var(--mono); text-decoration: none;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.artifact-badge:hover { background: #17503d; color: #a5f0c4; }
+.artifact-size { color: var(--muted); font-size: 10px; }
+.artifact-panel {
+  border: 1px solid #1f7a4d; border-radius: 10px; background: #0d2b21;
+  margin: 12px 0 4px; padding: 10px 14px; max-width: 640px;
+  font-size: 12.5px; animation: pop .18s ease;
+}
+.artifact-panel .artifact-head {
+  font-weight: 700; color: #7ee2a8; margin-bottom: 8px; font-size: 12px;
+  letter-spacing: .3px;
+}
+.artifact-panel .artifact-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.artifact-panel .artifact-row { display: flex; min-width: 0; }
+.artifact-report {
+  display: inline-block; margin-top: 10px;
+  background: var(--accent); color: #1a0505; font-weight: 700;
+  border-radius: 8px; padding: 6px 12px; font-size: 12px; text-decoration: none;
+}
+.artifact-report:hover { filter: brightness(1.15); }
+
 .typing { color: var(--muted); font-size: 12px; padding: 2px 0 10px 40px; }
 .typing .tdots::after { content: "…"; animation: dots 1.2s infinite; }
 .route-chip {
