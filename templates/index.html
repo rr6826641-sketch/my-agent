@@ -30,6 +30,7 @@
       <button class="nav-item active" data-view="chat">💬 Chat</button>
       <button class="nav-item" data-view="tools">🛠️ Tools <span class="badge" id="badge-tools">0</span></button>
       <button class="nav-item" data-view="memory">🧠 Memory <span class="badge" id="badge-memory">0</span></button>
+      <button class="nav-item" data-view="reports">📋 Reports <span class="badge" id="badge-reports">0</span></button>
       <button class="nav-item" data-view="rpg">🎮 RPG <span class="badge" id="badge-rpg">0</span></button>
       <button class="nav-item" data-view="settings">⚙️ Settings</button>
       <button class="nav-item" data-view="system">🖥️ System</button>
@@ -110,6 +111,22 @@
         <button class="btn-send" id="mem-add" title="Save">＋</button>
       </div>
       <div class="memory-list" id="memory-list"></div>
+    </section>
+
+    <!-- ---------- REPORTS VIEW (Executive Summary) ---------- -->
+    <section class="view" id="view-reports">
+      <div class="chat-header">
+        <div>
+          <h2>📋 Executive Report Summary</h2>
+          <p>Markdown summary cards for every target assessment — severity, tools, artifacts aur direct download links.</p>
+        </div>
+        <div class="header-actions">
+          <button class="btn-primary" id="reports-refresh">⟳ Refresh</button>
+        </div>
+      </div>
+      <div class="report-grid" id="report-grid">
+        <p class="muted report-empty">No reports yet — chat karein aur koi assessment chala kar pehla report banayein.</p>
+      </div>
     </section>
 
     <!-- ---------- SETTINGS VIEW ---------- -->

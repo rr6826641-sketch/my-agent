@@ -13,6 +13,7 @@ AGENT_API_KEY is empty, the UI shows a safe fallback error banner.
 """
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -37,7 +38,7 @@ CONFIG_PATH = os.path.join(PROJECT_DIR, "config.json")
 MEMORY_PATH = os.path.join(PROJECT_DIR, "memory.json")
 CHATS_PATH = os.path.join(PROJECT_DIR, "chats.json")
 
-# structured scan/generation outputs: artifacts/{chat_id}/{tool}_{ts}.{ext}
+# structured scan/generation outputs: artifacts/{chat_id}/{timestamp}/{tool}_{ts}.{ext}
 ARTIFACTS_DIR = os.path.join(PROJECT_DIR, "artifacts")
 artifacts = ArtifactManager(ARTIFACTS_DIR)
 
@@ -527,6 +528,10 @@ def api_chat():
     def worker():
         pending_tool = {"name": None, "args": "{}"}
         turn_artifacts = []
+        # one timestamp folder per assessment turn:
+        # artifacts/{chat_id}/{run_ts}/{tool}_{ts}_{suffix}.{ext}
+        run_ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
         try:
             for event in run_iter:
                 etype = event.get("type")
@@ -540,7 +545,8 @@ def api_chat():
                         saved = artifacts.save(
                             sid, pending_tool["name"],
                             event.get("content") or "",
-                            args=pending_tool["args"])
+                            args=pending_tool["args"],
+                            run_ts=run_ts)
                         if saved:
                             turn_artifacts.append(saved)
                             event = dict(event)
@@ -766,14 +772,8 @@ def api_artifacts_list(chat_id=None):
     return jsonify(out)
 
 
-@app.route("/api/download/<artifact_id>")
-def api_artifacts_download(artifact_id):
-    """Stream one artifact as a download. resolve() only accepts a strict
-    filename id, so traversal (../, encoded separators, absolute paths) is
-    impossible."""
-    path = artifacts.resolve(artifact_id)
-    if path is None:
-        return jsonify({"error": "artifact not found"}), 404
+def _send_artifact(path):
+    """Stream one resolved artifact file as an attachment download."""
     ext = os.path.splitext(path)[1].lstrip(".").lower()
     return send_file(
         path, as_attachment=True,
@@ -781,21 +781,62 @@ def api_artifacts_download(artifact_id):
         mimetype=_MIME_BY_EXT.get(ext, "application/octet-stream"))
 
 
+@app.route("/api/download/<chat_id>/<timestamp>/<filename>")
+def api_artifacts_download_path(chat_id, timestamp, filename):
+    """Stream one artifact from artifacts/<chat_id>/<timestamp>/<filename>.
+
+    Every path component is validated with a strict whitelist regex inside
+    resolve(), so traversal (../, encoded separators, absolute paths) is
+    impossible."""
+    path = artifacts.resolve("%s/%s/%s" % (chat_id, timestamp, filename))
+    if path is None:
+        return jsonify({"error": "artifact not found"}), 404
+    return _send_artifact(path)
+
+
+@app.route("/api/download/<artifact_id>")
+def api_artifacts_download(artifact_id):
+    """Legacy lookup by plain filename (also accepts the full
+    <chat_id>/<timestamp>/<filename> path). resolve() validates every
+    component, so traversal (../, encoded separators, absolute paths) is
+    impossible."""
+    path = artifacts.resolve(artifact_id)
+    if path is None:
+        return jsonify({"error": "artifact not found"}), 404
+    return _send_artifact(path)
+
+
+@app.route("/api/artifacts/<chat_id>/archive")
+def api_artifacts_archive(chat_id):
+    """One ZIP with every artifact of a chat (new <timestamp>/ layout and
+    legacy flat files), so the whole assessment is downloadable at once."""
+    data = artifacts.archive(chat_id)
+    if data is None:
+        return jsonify({"error": "no artifacts"}), 404
+    from io import BytesIO
+    return send_file(
+        BytesIO(data), as_attachment=True,
+        download_name="artifacts_%s.zip" % chat_id,
+        mimetype="application/zip")
+
+
 @app.route("/api/artifacts/<chat_id>/report")
 def api_artifacts_report(chat_id):
-    """Markdown report for a chat: last final message + artifact index."""
-    final_text = ""
+    """Markdown report for a chat: title + last final message + artifact
+    index with per-file download links."""
+    final_text, title = "", ""
     with _chat_lock:
         data = _read_chats_unlocked()
         s = data.get("sessions", {}).get(chat_id)
         if s:
+            title = (s.get("title") or "").strip()
             for m in reversed(s.get("messages") or []):
                 if (m.get("role") == "assistant"
-                        and m.get("kind") == "final"
+                        and m.get("kind") in ("final", "error")
                         and m.get("content")):
                     final_text = m["content"]
                     break
-    md = artifacts.report(chat_id, final_text=final_text)
+    md = artifacts.report(chat_id, final_text=final_text, title=title)
     if request.args.get("download"):
         from io import BytesIO
         return send_file(
@@ -804,6 +845,113 @@ def api_artifacts_report(chat_id):
             download_name="report_%s.md" % chat_id,
             mimetype="text/markdown")
     return Response(md, mimetype="text/markdown; charset=utf-8")
+
+
+# --------------------------------------------------------------------------
+# Executive Report Summary (markdown cards for every target assessment)
+# --------------------------------------------------------------------------
+
+_TARGET_RE = re.compile(
+    r"(?:https?://)?(?:[a-z0-9-]+\.)+[a-z0-9-]{2,}"
+    r"|\b\d{1,3}(?:\.\d{1,3}){3}\b", re.I)
+
+_SEV_RULES = [
+    ("critical", re.compile(
+        r"\b(critical|rce|remote code execution|root shell|system shell|"
+        r"sql shell|database dump|full compromise|pwned|domain admin)"
+        r"\b", re.I)),
+    ("high", re.compile(
+        r"\b(high|exploit(?:ed|able)?|shell|bypass|privilege escalation|"
+        r"lateral movement|exfiltrat|sensitive data|admin takeover|"
+        r"credential dump|unauthenticated)"
+        r"\b", re.I)),
+    ("medium", re.compile(
+        r"\b(medium|moderate|cve-\d{4}|vulnerab|misconfig|"
+        r"weak (?:auth|password)|csrf|idor|open redirect)"
+        r"\b", re.I)),
+    ("low", re.compile(
+        r"\b(low|minor|informational|best practice|harden|notice)"
+        r"\b", re.I)),
+]
+
+
+def _last_final_text(s):
+    for m in reversed(s.get("messages") or []):
+        if (m.get("role") == "assistant"
+                and m.get("kind") in ("final", "error")
+                and (m.get("content") or "").strip()):
+            return m["content"]
+    return ""
+
+
+def _extract_target(msgs):
+    """Best-guess target (domain / IP) from the first user message."""
+    for m in msgs:
+        if m.get("role") == "user":
+            hit = _TARGET_RE.search(m.get("content") or "")
+            if hit:
+                return hit.group(0).strip().rstrip(".")
+    return ""
+
+
+def _severity_of(text):
+    """Keyword heuristic for the report card badge (best effort, not a
+    real CVSS score)."""
+    for level, rx in _SEV_RULES:
+        if rx.search(text or ""):
+            return level
+    return "info"
+
+
+def _fmt_size_h(n):
+    if n >= 1 << 20:
+        return "%.1f MB" % (n / (1 << 20))
+    if n >= 1 << 10:
+        return "%.1f KB" % (n / (1 << 10))
+    return "%d B" % n
+
+
+@app.route("/api/reports")
+def api_reports():
+    """Executive summary cards for every target assessment (chat): title,
+    target, severity hint, artifact stats, tools used, final summary and
+    direct download links for the markdown report / ZIP archive."""
+    with _chat_lock:
+        data = _read_chats_unlocked()
+        sessions = sorted(data.get("sessions", {}).values(),
+                          key=lambda s: s.get("updated", 0), reverse=True)
+        sessions = json.loads(json.dumps(sessions))  # detach from lock data
+    out = []
+    for s in sessions:
+        sid = s.get("id") or ""
+        msgs = s.get("messages") or []
+        final_text = _last_final_text(s)
+        arts = artifacts.list_chat(sid) if sid else []
+        if not msgs and not arts:
+            continue
+        tools = sorted({r["tool"] for r in arts})
+        total = sum(r.get("size") or 0 for r in arts)
+        updated = s.get("updated") or s.get("created") or 0
+        out.append({
+            "chat_id": sid,
+            "title": (s.get("title") or "").strip()[:80] or "New chat",
+            "target": _extract_target(msgs),
+            "updated": datetime.datetime.fromtimestamp(
+                updated).isoformat(timespec="seconds") if updated else "",
+            "created": datetime.datetime.fromtimestamp(
+                s.get("created") or updated or 0).isoformat(
+                timespec="seconds"),
+            "message_count": len(msgs),
+            "artifacts": len(arts),
+            "total_size": _fmt_size_h(total),
+            "tools": tools,
+            "severity": _severity_of(final_text),
+            "summary": (final_text or "")[:600],
+            "report_url": "/api/artifacts/%s/report" % sid,
+            "report_download_url": "/api/artifacts/%s/report?download=1" % sid,
+            "archive_url": "/api/artifacts/%s/archive" % sid if arts else "",
+        })
+    return jsonify({"count": len(out), "reports": out})
 
 
 # --------------------------------------------------------------------------

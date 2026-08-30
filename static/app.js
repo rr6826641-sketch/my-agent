@@ -34,18 +34,23 @@ async function fetchJSON(url, opts) {
 }
 
 /* ---------------- view switching ---------------- */
+function switchView(name) {
+  document.querySelectorAll(".nav-item").forEach((b) => b.classList.remove("active"));
+  document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
+  const navBtn = document.querySelector(`.nav-item[data-view="${name}"]`);
+  if (navBtn) navBtn.classList.add("active");
+  const view = $("#view-" + name);
+  if (view) view.classList.add("active");
+  if (name === "tools") loadTools();
+  if (name === "memory") loadMemory();
+  if (name === "reports") loadReports();
+  if (name === "rpg") loadRPGView();
+  if (name === "settings") loadSettings();
+  if (name === "system") loadSystem();
+}
+
 document.querySelectorAll(".nav-item").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".nav-item").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
-    $("#view-" + btn.dataset.view).classList.add("active");
-    if (btn.dataset.view === "tools") loadTools();
-    if (btn.dataset.view === "memory") loadMemory();
-    if (btn.dataset.view === "rpg") loadRPGView();
-    if (btn.dataset.view === "settings") loadSettings();
-    if (btn.dataset.view === "system") loadSystem();
-  });
+  btn.addEventListener("click", () => switchView(btn.dataset.view));
 });
 
 $("#btn-new").addEventListener("click", () => {
@@ -333,7 +338,10 @@ function artifactBadgeHTML(a) {
   if (!id) return "";
   const tool = escapeHtml(a.tool || (id.split("_")[0] || "file"));
   const size = a.size_h ? ` <span class="artifact-size">${escapeHtml(a.size_h)}</span>` : "";
-  return `<a class="artifact-badge" href="/api/download/${encodeURIComponent(id)}" download title="Download ${escapeHtml(id)}">📄 ${tool}${size}</a>`;
+  // prefer the structured <chat>/<timestamp>/<file> url, fall back to the
+  // legacy plain-filename route for backward compatibility
+  const href = a.url ? String(a.url) : "/api/download/" + encodeURIComponent(id);
+  return `<a class="artifact-badge" href="${href}" download title="Download ${escapeHtml(id)}">📄 ${tool}${size}</a>`;
 }
 
 function addArtifactBadge(container, a) {
@@ -355,15 +363,90 @@ function renderArtifactsPanel(list, chatId) {
   const rows = items.map((a) =>
     `<div class="artifact-row">${artifactBadgeHTML(a)}</div>`).join("");
   const report = chatId
-    ? `<a class="artifact-report" href="/api/artifacts/${encodeURIComponent(chatId)}/report?download=1">⬇ Download Markdown Report</a>`
+    ? `<a class="artifact-report" href="/api/artifacts/${encodeURIComponent(chatId)}/report?download=1">⬇ Markdown Report</a>`
+    : "";
+  const archive = chatId
+    ? `<a class="artifact-report" href="/api/artifacts/${encodeURIComponent(chatId)}/archive" title="Download all artifacts as one ZIP">🗜 All Artifacts (.zip)</a>`
     : "";
   div.innerHTML = `
     <div class="artifact-head">📦 ${items.length} artifact${items.length === 1 ? "" : "s"} saved</div>
     <div class="artifact-list">${rows}</div>
-    ${report}`;
+    <div class="artifact-actions">${report}${archive}</div>`;
   chatLog.appendChild(div);
   scrollDown();
   return div;
+}
+
+/* ---------------- executive report summary cards ---------------- */
+async function loadReports() {
+  const grid = $("#report-grid");
+  if (!grid) return;
+  grid.innerHTML = `<p class="muted report-empty">loading reports…</p>`;
+  try {
+    const data = await fetchJSON("/api/reports");
+    const reports = data.reports || [];
+    const badge = $("#badge-reports");
+    if (badge) badge.textContent = reports.length;
+    renderReports(reports);
+  } catch {
+    grid.innerHTML = `<p class="muted report-empty">⚠️ Reports load nahi hue — server check karein.</p>`;
+  }
+}
+
+function renderReports(reports) {
+  const grid = $("#report-grid");
+  if (!grid) return;
+  if (!reports.length) {
+    grid.innerHTML = `<p class="muted report-empty">No reports yet — chat karein aur koi assessment chala kar pehla report banayein.</p>`;
+    return;
+  }
+  grid.innerHTML = reports.map(reportCardHTML).join("");
+  grid.querySelectorAll(".report-card").forEach((card) => {
+    const box = card.querySelector(".report-summary");
+    if (box && card.dataset.summary) mdToDom(card.dataset.summary, box);
+  });
+}
+
+const REPORT_SEV = {
+  critical: { cls: "sev-critical", label: "CRITICAL" },
+  high:     { cls: "sev-high",     label: "HIGH" },
+  medium:   { cls: "sev-medium",   label: "MEDIUM" },
+  low:      { cls: "sev-low",      label: "LOW" },
+  info:     { cls: "sev-info",     label: "INFO" },
+};
+
+function reportCardHTML(r) {
+  const sev = REPORT_SEV[r.severity] || REPORT_SEV.info;
+  const target = r.target
+    ? `<span class="report-chip report-target" title="Target">🎯 ${escapeHtml(r.target)}</span>`
+    : "";
+  const meta = [
+    r.updated ? `🕒 ${escapeHtml(r.updated)}` : "",
+    `${r.artifacts} artifact${r.artifacts === 1 ? "" : "s"}`,
+    `${r.message_count} msg`,
+    r.total_size ? `📦 ${escapeHtml(r.total_size)}` : "",
+  ].filter(Boolean).map((m) => `<span class="report-chip">${m}</span>`).join("");
+  const tools = (r.tools || []).slice(0, 8).map((t) =>
+    `<span class="report-chip report-tool" title="Tool used">🔧 ${escapeHtml(t)}</span>`).join("");
+  const actions = [
+    r.report_download_url
+      ? `<a class="btn-primary report-btn" href="${r.report_download_url}" download>⬇ Markdown Report</a>`
+      : "",
+    r.archive_url
+      ? `<a class="btn-ghost report-btn" href="${r.archive_url}" download title="All artifacts as one ZIP">🗜 Artifacts (.zip)</a>`
+      : "",
+    `<button class="btn-ghost report-btn" data-open="${r.chat_id}" title="Open this chat">💬 Open Chat</button>`,
+  ].join("");
+  return `<article class="report-card" data-summary="${escapeHtml(r.summary || "")}">
+    <div class="report-head">
+      <span class="report-sev ${sev.cls}">${sev.label}</span>
+      <h3 class="report-title">${escapeHtml(r.title || "New chat")}</h3>
+    </div>
+    <div class="report-chips">${target}${meta}</div>
+    <div class="report-summary"></div>
+    ${tools ? `<div class="report-chips report-tools">${tools}</div>` : ""}
+    <div class="report-actions">${actions}</div>
+  </article>`;
 }
 
 /* ---------------- validation sub-agent cards ---------------- */
@@ -1312,6 +1395,15 @@ $("#rpg-lore-new").addEventListener("keydown", async (ev) => {
   }).catch(() => {});
   $("#rpg-lore-new").value = "";
   rpgLoadLore();
+});
+
+/* ---------------- reports wiring ---------------- */
+$("#reports-refresh").addEventListener("click", loadReports);
+$("#report-grid").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-open]");
+  if (!btn) return;
+  switchView("chat");
+  openSession(btn.dataset.open);
 });
 
 /* ---------- RPG event wiring ---------- */
