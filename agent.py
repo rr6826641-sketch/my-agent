@@ -8,12 +8,13 @@ Examples:
 """
 
 import argparse
+import os
 import sys
 
-from ai_agent.config import load_config
+from ai_agent.config import PROJECT_DIR, load_config
 from ai_agent.core import Agent
 from ai_agent.llm import MockClient, OpenAIClient
-from ai_agent.memory import MemoryStore
+from ai_agent.memory import InstitutionalMemory, MemoryStore
 
 BANNER = """
 ============================================================
@@ -59,9 +60,12 @@ def main():
                   "or pass --api-key (keys are never read from config.json)")
 
     memory = MemoryStore(cfg["memory_file"])
+    institutional = InstitutionalMemory(
+        cfg.get("institutional_db") or
+        os.path.join(PROJECT_DIR, "institutional_notes.db"))
     interactive = sys.stdin.isatty() and not cfg["once"]
     agent = Agent(
-        llm, memory=memory,
+        llm, memory=memory, institutional=institutional,
         max_iterations=cfg["max_iterations"] or 60,
         max_messages=cfg.get("max_messages") or 400,
         spawn_timeout=cfg.get("spawn_timeout") or 900,

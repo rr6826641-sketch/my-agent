@@ -97,14 +97,16 @@ def _str_prop(desc, default=None, enum=None):
     return p
 
 
-def create_tools(memory, knowledge=None, confirm_terminal=True,
-                 spawn_fn=None, allow_spawn=True, spawn_parallel_fn=None,
-                 rpg_ctx=None, workspace_index=None):
+def create_tools(memory, knowledge=None, institutional=None,
+                 confirm_terminal=True, spawn_fn=None, allow_spawn=True,
+                 spawn_parallel_fn=None, rpg_ctx=None, workspace_index=None):
     """Build the full tool list for an Agent.
 
     rpg_ctx: optional dict with 'world' (GameState) and 'lorebook'
     (Lorebook) for Game-Master agents. When present, the gm_* tools are
     registered.
+    institutional: optional InstitutionalMemory - enables the notes_* tools
+    implementing the cross-conversation institutional memory doctrine.
     """
     world = (rpg_ctx or {}).get("world")
     lorebook = (rpg_ctx or {}).get("lorebook")
@@ -169,6 +171,62 @@ def create_tools(memory, knowledge=None, confirm_terminal=True,
                 " ".join(h["content"].split()),
                 " (tags: %s)" % ", ".join(h["tags"]) if h["tags"] else ""))
         return "\n".join(lines)
+
+    def _notes_add(category, title, content, target="", tags=""):
+        if institutional is None:
+            return "Error: institutional memory is not enabled."
+        try:
+            row = institutional.add_note(
+                category or "findings", title, content,
+                target=target, tags=[t.strip() for t in (tags or "").split(",")
+                                     if t.strip()])
+        except (TypeError, ValueError) as exc:
+            return "Error: %s" % exc
+        return ("Logged institutional note (id %s, category %s, target %s)."
+                " Future chats about this target will see it automatically."
+                % (row["id"], row["category"], row["target"] or "global"))
+
+    def _notes_search(query="", category="", target="", top_k=5):
+        if institutional is None:
+            return "Error: institutional memory is not enabled."
+        hits = institutional.search_notes(
+            query.strip() or None,
+            category=category.strip() or None,
+            target=target.strip() or None,
+            top_k=int(top_k or 5))
+        if not hits:
+            return "(no matching institutional notes)"
+        lines = []
+        for n in hits:
+            lines.append("- [%s] %s: %s%s" % (
+                n["category"], n["title"],
+                " ".join(n["content"].split()),
+                " (target: %s)" % n["target"] if n["target"] else ""))
+        return "\n".join(lines)
+
+    def _notes_list(category="", target="", limit=50):
+        if institutional is None:
+            return "Error: institutional memory is not enabled."
+        notes = institutional.list_notes(
+            category=category.strip() or None,
+            target=target.strip() or None,
+            limit=int(limit or 50))
+        if not notes:
+            return "(no institutional notes)"
+        lines = []
+        for n in notes:
+            lines.append("- [#%s][%s] %s: %s%s" % (
+                n["id"], n["category"], n["title"],
+                " ".join(n["content"].split()),
+                " (target: %s)" % n["target"] if n["target"] else ""))
+        return "\n".join(lines)
+
+    def _notes_delete(note_id):
+        if institutional is None:
+            return "Error: institutional memory is not enabled."
+        ok = institutional.delete_note(note_id)
+        return "Deleted note %s." % note_id if ok else \
+            "Note %s not found." % note_id
 
     def _gm_world_update(patch=""):
         if world is None:
@@ -385,6 +443,72 @@ def create_tools(memory, knowledge=None, confirm_terminal=True,
               "required": []},
              lambda target_domain="", query="", top_k=5:
                  _knowledge_search(target_domain, query, top_k)),
+
+        # ---- cross-conversation institutional memory (notes_*) ----
+        Tool("notes_add",
+             "Log an institutional note to the GLOBAL cross-chat memory "
+             "(SQLite, shared by every chat session). Categories: "
+             "findings | methodology | active_plans | target_context. "
+             "ABSOLUTE RULE: immediately after discovering a key finding, "
+             "credential, token, endpoint, open port, subdomain, CVE or "
+             "confirmed technique, call this in the SAME turn - do not wait "
+             "for the final report. Future chats about the same target get "
+             "these notes auto-injected.",
+             {"type": "object",
+              "properties": {
+                  "category": _str_prop(
+                      "findings | methodology | active_plans | target_context",
+                      "findings"),
+                  "title": _str_prop("short title"),
+                  "content": _str_prop("the note detail (1-5 sentences)"),
+                  "target": _str_prop(
+                      "target domain/IP this note belongs to (optional)", ""),
+                  "tags": _str_prop("comma-separated tags (optional)", "")},
+              "required": ["title", "content"]},
+             lambda category="findings", title="", content="", target="",
+                    tags="": _notes_add(category, title, content, target,
+                                         tags)),
+        Tool("notes_search",
+             "Consult the cross-chat institutional memory (mandatory before "
+             "planning or answering): semantic search over historical notes "
+             "about the current target - prior findings, credentials, "
+             "endpoints, methodology and active plans. Optionally filter by "
+             "category and/or target.",
+             {"type": "object",
+              "properties": {
+                  "query": _str_prop(
+                      "natural-language query (target name, endpoint, "
+                      "technique)"),
+                  "category": _str_prop(
+                      "filter: findings | methodology | active_plans | "
+                      "target_context", ""),
+                  "target": _str_prop(
+                      "filter to one target domain/IP (optional)", ""),
+                  "top_k": {"type": "integer", "default": 5}},
+              "required": ["query"]},
+             lambda query="", category="", target="", top_k=5:
+                 _notes_search(query, category, target, top_k)),
+        Tool("notes_list",
+             "List recent institutional notes, optionally filtered by "
+             "category and/or target.",
+             {"type": "object",
+              "properties": {
+                  "category": _str_prop(
+                      "findings | methodology | active_plans | target_context",
+                      ""),
+                  "target": _str_prop(
+                      "filter to one target domain/IP (optional)", ""),
+                  "limit": {"type": "integer", "default": 50}},
+              "required": []},
+             lambda category="", target="", limit=50:
+                 _notes_list(category, target, limit)),
+        Tool("notes_delete",
+             "Delete an institutional note by its id (e.g. after it is "
+             "proven a false positive or a plan is closed).",
+             {"type": "object",
+              "properties": {"note_id": _str_prop("numeric note id")},
+              "required": ["note_id"]},
+             lambda note_id="": _notes_delete(note_id)),
         Tool("spawn_agent",
              "Create a sub-agent that independently works on a task and "
              "returns its final answer. Use for parallel/specialized work.",

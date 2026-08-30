@@ -30,7 +30,11 @@ from ai_agent.config import (PROJECT_DIR, load_config, config_status, save_env_k
 from ai_agent.core import Agent, RunCancelled
 from ai_agent.llm import MockClient, OpenAIClient
 from ai_agent.artifacts import ArtifactManager
-from ai_agent.memory import GlobalKnowledge, MemoryStore
+from ai_agent.memory import (
+    GlobalKnowledge,
+    InstitutionalMemory,
+    MemoryStore,
+)
 from ai_agent.rpg import RPGEngine
 from ai_agent.tools import create_tools
 
@@ -251,8 +255,11 @@ def _build_agent(cfg):
     # past findings about a target are auto-injected into the system prompt
     # when a new chat mentions the same domain/IP.
     knowledge = GlobalKnowledge(os.path.join(PROJECT_DIR, "knowledge.db"))
+    institutional = InstitutionalMemory(
+        os.path.join(PROJECT_DIR, "institutional_notes.db"))
     llm = _build_llm(cfg)
     agent = Agent(llm, memory=memory, knowledge=knowledge,
+                  institutional=institutional,
                   max_iterations=cfg.get("max_iterations") or 60,
                   max_messages=cfg.get("max_messages") or 400,
                   spawn_timeout=cfg.get("spawn_timeout") or 900,

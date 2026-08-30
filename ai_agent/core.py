@@ -298,11 +298,47 @@ Formatting rules (very important):
 - Wrap commands, code, logs and raw tool output in fenced code blocks (```).
 - Put a blank line between paragraphs, headings and lists - never cram text together.
 - Use **bold** only for key terms and *italics* sparingly.
+{institutional_doctrine}
 {memory_block}
 {knowledge_block}
 # WORKSPACE MAP: use workspace_scan / workspace_symbols / workspace_deps /
 # workspace_query to index and cross-reference the whole project across turns.
 {workspace_block}"""
+
+# Cross-chat institutional memory doctrine. Rendered into the system prompt
+# ONLY when the agent has an InstitutionalMemory instance (placeholder
+# {institutional_block} is substituted with the pre-loaded notes block).
+INSTITUTIONAL_DOCTRINE = """\
+# CROSS-CHAT INSTITUTIONAL MEMORY DOCTRINE (ABSOLUTE RULE)
+You have a GLOBAL persistent memory (SQLite) shared by EVERY chat session on
+this machine. It outlives this conversation: notes written today are
+auto-injected into future chats about the same target.
+
+MANDATORY CONSULTATION (before planning or answering):
+- Before formulating any attack plan, exploitation strategy, or answer about
+  a target, FIRST consult past institutional notes:
+  * The {institutional_block} below is pre-loaded for this chat - read it.
+  * Also run notes_search with the target name / key terms to surface
+    historical findings, credentials, endpoints, methodology and plans.
+- Reuse what past chats already discovered (credentials, valid endpoints,
+  open ports, confirmed CVEs, working techniques). Do NOT re-enumerate or
+  re-scan what is already known unless the situation changed.
+
+MANDATORY RECORDING (instant, same-turn):
+- IMMEDIATELY after discovering anything of lasting value, log it with
+  notes_add in the SAME turn - never wait for the final report:
+  * credentials / tokens / API keys / hashes discovered -> findings
+  * confirmed open ports, subdomains, endpoints, paths, versions, CVEs
+    (with evidence) -> findings
+  * techniques, payloads, commands that WORKED or failed decisively ->
+    methodology
+  * the current plan and remaining attack vectors -> active_plans
+  * scope, IP ranges, tech stack, environment facts -> target_context
+- Always pass target=<domain/IP> so future chats about the same target get
+  the note auto-injected. Keep notes short, factual and reusable.
+- A finding that is not logged dies with this chat: the memory is
+  PERMANENT, never claim you lack history about a target you have notes for.
+{institutional_block}"""
 
 # ---------------------------------------------------------------------------
 # Verification sub-agent (Automated Verification Architecture)
@@ -640,6 +676,10 @@ _RE_KB_TARGET = re.compile(
     r"int|uk|us|in|de|fr|jp|cn|ru|br|au|ca|nl|se|no|fi|dk|pl|ch|at|be|es|"
     r"it|pt|mx|ar|za|ng|kr|sg|my|id|hk|tw|th|vn|ph|nz|il|tr|sa|ae|eg|"
     r"[a-z]{2})(?::\d{1,5})?(?![a-zA-Z0-9.])", re.I)
+# Internal/lab hostnames (.local etc.) - common in pentest lab environments.
+_RE_KB_INTERNAL = re.compile(
+    r"(?<![a-zA-Z0-9.])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
+    r"(?:local|internal|lan|home|corp|lab)(?::\d{1,5})?(?![a-zA-Z0-9.])", re.I)
 
 
 def _detect_kb_target(text):
@@ -648,7 +688,7 @@ def _detect_kb_target(text):
     m = _RE_KB_IP.search(text)
     if m:
         return m.group(0)
-    m = _RE_KB_TARGET.search(text)
+    m = _RE_KB_TARGET.search(text) or _RE_KB_INTERNAL.search(text)
     if m:
         # strip scheme leftovers, port and path (e.g. example.com:8080/x)
         return re.sub(r"[:/].*$", "", m.group(0)).lower()
@@ -1315,7 +1355,8 @@ class Agent:
                  spawn_depth=0, max_spawn_depth=3, allow_subagents=True,
                  spawn_timeout=900, game_master=False, world_state=None,
                  lorebook=None, npc_persona=None, auto_verify=True,
-                 knowledge=None, reasoning_engine=True):
+                 knowledge=None, institutional=None,
+                 reasoning_engine=True):
         self.llm = llm
         self.memory = memory
         self.name = name
@@ -1332,15 +1373,17 @@ class Agent:
         self.npc_persona = npc_persona
         self.auto_verify = auto_verify
         self.knowledge = knowledge
+        self.institutional = institutional
         self.reasoning_engine = reasoning_engine
         self._tactical = TacticalState()
         self._reasoner = TacticalReasoner(self._tactical)
         self._tactical_blocks = []
         self._kb_target = None
+        self._auto_note_seen = set()
         self.messages = []
         self._workspace_index = WorkspaceIndex()
         self._tool_list = create_tools(
-            memory, knowledge=knowledge,
+            memory, knowledge=knowledge, institutional=institutional,
             confirm_terminal=confirm_terminal,
             spawn_fn=(lambda task: self._spawn_impl(task, self.spawn_depth + 1))
             if allow_subagents else None,
@@ -1369,23 +1412,47 @@ class Agent:
                 memory_block = (
                     "\n\nSaved memory you should use when relevant:\n" + snap
                 )
+        # Cross-chat target detection: extract the target domain/IP from the
+        # first user message once per chat; both the knowledge base and the
+        # institutional memory use it to auto-inject past history.
+        first_user = ""
+        if self.messages:
+            m0 = self.messages[0]
+            first_user = m0.get("content") if isinstance(m0, dict) \
+                else (m0 or "") if isinstance(m0, str) else ""
+        if self._kb_target is None and first_user:
+            self._kb_target = _detect_kb_target(first_user)
+        # Cross-chat institutional memory: pre-load the notes previous chats
+        # logged about this target (SQLite institutional_notes), plus a
+        # semantic pass over the first user message so relevant history
+        # surfaces even without an explicit target.
+        institutional_block = ""
+        if self.institutional is not None:
+            try:
+                institutional_block = self.institutional.consult(
+                    target=self._kb_target, query=first_user)
+            except Exception:
+                institutional_block = ""
+        # The doctrine (consult-first / record-instantly rules) is rendered
+        # only when institutional memory is enabled, so agents without it are
+        # not told to call notes_* tools that do not exist.
+        institutional_doctrine = ""
+        if self.institutional is not None:
+            try:
+                institutional_doctrine = INSTITUTIONAL_DOCTRINE.format(
+                    institutional_block=institutional_block)
+            except Exception:
+                institutional_doctrine = ""
         # Cross-chat knowledge: if the chat names a target domain/IP, inject
         # what past chats already found about it (SQLite global_knowledge).
         knowledge_block = ""
-        if self.knowledge is not None:
-            target = self._kb_target
-            if target is None and self.messages:
-                first = self.messages[0].get("content") if isinstance(
-                    self.messages[0], dict) else None
-                target = _detect_kb_target(first)
-                self._kb_target = target
-            if target:
-                try:
-                    kb = self.knowledge.get_target_summary(target)
-                except Exception:
-                    kb = ""
-                if kb:
-                    knowledge_block = kb
+        if self.knowledge is not None and self._kb_target:
+            try:
+                kb = self.knowledge.get_target_summary(self._kb_target)
+            except Exception:
+                kb = ""
+            if kb:
+                knowledge_block = kb
         template = SYSTEM_PROMPT
         try:
             if os.path.exists(SYSTEM_PROMPT_FILE):
@@ -1402,9 +1469,12 @@ class Agent:
             workspace_block = ""
         prompt = template.format(name=self.name, memory_block=memory_block,
                                  knowledge_block=knowledge_block,
+                                 institutional_doctrine=institutional_doctrine,
                                  workspace_block=workspace_block)
         if knowledge_block and "{knowledge_block}" not in template:
             prompt = "%s\n\n%s" % (prompt, knowledge_block)
+        if institutional_doctrine and "{institutional_doctrine}" not in template:
+            prompt = "%s\n\n%s" % (prompt, institutional_doctrine)
         if workspace_block and "{workspace_block}" not in template:
             prompt = "%s\n\n%s" % (prompt, workspace_block)
         if self.reasoning_engine:
@@ -2150,6 +2220,7 @@ class Agent:
             game_master=False, world_state=self.world_state,
             lorebook=self.lorebook, auto_verify=False,
             knowledge=self.knowledge,
+            institutional=self.institutional,
             spawn_timeout=self.spawn_timeout,
             reasoning_engine=(getattr(self, "reasoning_engine", False)
                               if reasoning_engine is None

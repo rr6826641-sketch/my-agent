@@ -541,6 +541,326 @@ class GlobalKnowledge:
 
 
 # ---------------------------------------------------------------------------
+# InstitutionalMemory: cross-conversation institutional notes (SQLite)
+# ---------------------------------------------------------------------------
+# The Cross-Conversation Institutional Memory Doctrine: every agent chat
+# shares one global SQLite note database, so a brand-new chat about the same
+# target auto-loads what previous chats already learned (see consult() and
+# Agent._system_prompt auto-injection). Categories are fixed so notes stay
+# queryable and consistent:
+#   findings       - confirmed/probable vulnerabilities, behaviors, evidence
+#   methodology    - attack approaches tried and their outcomes
+#   active_plans   - strategies / task breakdowns currently in flight
+#   target_context - per-target context (credentials, endpoints, scope)
+# Thread-safe; TF-IDF recall reuses the MemoryStore machinery (no numpy).
+
+INSTITUTIONAL_CATEGORIES = ("findings", "methodology", "active_plans",
+                            "target_context")
+
+
+class InstitutionalMemory:
+    """Persistent cross-chat institutional notes (SQLite `institutional_notes`).
+
+    Every entry belongs to exactly one of INSTITUTIONAL_CATEGORIES. Notes are
+    global and shared across all chat sessions. consult() renders the block
+    that gets auto-injected into the system prompt before the agent plans or
+    answers, so historical findings always inform new work on the same target.
+    """
+
+    def __init__(self, db_path):
+        self.db_path = db_path
+        self._lock = threading.Lock()
+        os.makedirs(os.path.dirname(os.path.abspath(db_path)) or ".",
+                    exist_ok=True)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS institutional_notes ("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " category TEXT NOT NULL,"
+            " title TEXT NOT NULL,"
+            " content TEXT NOT NULL,"
+            " target TEXT NOT NULL DEFAULT '',"
+            " tags TEXT NOT NULL DEFAULT '',"
+            " created_at TEXT NOT NULL,"
+            " updated_at TEXT NOT NULL)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_institutional_notes_category"
+            " ON institutional_notes (category)")
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_institutional_notes_target"
+            " ON institutional_notes (target)")
+        self._conn.commit()
+
+    @staticmethod
+    def _norm_category(category):
+        """Validate/normalise a category; falls back to 'findings'."""
+        cat = (category or "").strip().lower()[:40]
+        for allowed in INSTITUTIONAL_CATEGORIES:
+            if cat == allowed:
+                return allowed
+        if cat in ("finding", "vuln", "vulnerability", "cve", "credential",
+                   "credentials", "endpoint", "endpoints", "note", "notes"):
+            return "findings"
+        if cat in ("method", "tactic", "tactics", "technique",
+                   "techniques", "approach", "process"):
+            return "methodology"
+        if cat in ("plan", "plans", "strategy", "todo", "roadmap"):
+            return "active_plans"
+        if cat in ("target", "context", "scope", "intel"):
+            return "target_context"
+        return "findings"
+
+    @staticmethod
+    def _norm_target(target):
+        """Normalise an optional target to a bare lower-case domain/IP."""
+        t = (target or "").strip().lower()
+        t = re.sub(r"^https?://", "", t)
+        t = t.split("/")[0].split(":")[0]
+        return t[:255]
+
+    def _row_to_note(self, row):
+        return {
+            "id": row["id"],
+            "category": row["category"],
+            "title": row["title"],
+            "content": row["content"],
+            "target": row["target"],
+            "tags": [t for t in (row["tags"] or "").split(",") if t],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def add_note(self, category="findings", title="", content="",
+                 target="", tags=None):
+        """Insert one institutional note and return it as a dict."""
+        category = self._norm_category(category)
+        title = (title or "untitled").strip()[:200]
+        content = (content or "").strip()
+        if not content:
+            raise ValueError("content is required")
+        target = self._norm_target(target)
+        tags = ",".join(_norm_tags(tags))[:400]
+        now = datetime.datetime.now().isoformat(timespec="seconds")
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO institutional_notes"
+                " (category, title, content, target, tags, created_at,"
+                "  updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (category, title, content, target, tags, now, now))
+            self._conn.commit()
+            note_id = cur.lastrowid
+        return self.get_note(note_id)
+
+    def update_note(self, note_id, category=None, title=None, content=None,
+                    target=None, tags=None):
+        """Update fields of an existing note; None fields are kept."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM institutional_notes WHERE id = ?",
+                (int(note_id),)).fetchone()
+            if row is None:
+                return None
+            tags_str = row["tags"]
+            if tags is not None:
+                tags_str = ",".join(_norm_tags(tags))[:400]
+            self._conn.execute(
+                "UPDATE institutional_notes SET category = ?, title = ?,"
+                " content = ?, target = ?, tags = ?, updated_at = ?"
+                " WHERE id = ?",
+                (self._norm_category(category) if category else
+                 row["category"],
+                 (title or row["title"]).strip()[:200],
+                 content if content is not None else row["content"],
+                 self._norm_target(target) if target is not None
+                 else row["target"],
+                 tags_str,
+                 datetime.datetime.now().isoformat(timespec="seconds"),
+                 int(note_id)))
+            self._conn.commit()
+        return self.get_note(note_id)
+
+    def delete_note(self, note_id):
+        """Delete a note by id; returns True when it existed."""
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM institutional_notes WHERE id = ?",
+                (int(note_id),))
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    def get_note(self, note_id):
+        """Fetch a single note by id (or None)."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM institutional_notes WHERE id = ?",
+                (int(note_id),)).fetchone()
+        return self._row_to_note(row) if row else None
+
+    def list_notes(self, category=None, target=None, limit=100):
+        """Recent notes, optionally filtered by category and/or target."""
+        with self._lock:
+            sql = "SELECT * FROM institutional_notes"
+            conds, args = [], []
+            if category:
+                conds.append("category = ?")
+                args.append(self._norm_category(category))
+            if target:
+                conds.append("target = ?")
+                args.append(self._norm_target(target))
+            if conds:
+                sql += " WHERE " + " AND ".join(conds)
+            sql += " ORDER BY id DESC LIMIT ?"
+            args.append(int(limit or 100))
+            rows = self._conn.execute(sql, args).fetchall()
+        return [self._row_to_note(r) for r in rows]
+
+    def search_notes(self, query, category=None, target=None, top_k=5):
+        """TF-IDF cosine recall over title + content + tags. Best-first."""
+        query = (query or "").strip()
+        with self._lock:
+            sql = "SELECT * FROM institutional_notes"
+            conds, args = [], []
+            if category:
+                conds.append("category = ?")
+                args.append(self._norm_category(category))
+            if target:
+                conds.append("target = ?")
+                args.append(self._norm_target(target))
+            if conds:
+                sql += " WHERE " + " AND ".join(conds)
+            rows = self._conn.execute(sql, args).fetchall()
+        if not rows:
+            return []
+        entries = [self._row_to_note(r) for r in rows]
+        if not query:
+            entries.sort(key=lambda n: (n["updated_at"], n["id"]),
+                         reverse=True)
+            return entries[: max(1, int(top_k or 5))]
+        texts = ["%s %s %s" % (n["title"], n["content"],
+                               " ".join(n["tags"])) for n in entries]
+        vectors, _idf = _tfidf_vectors(texts)
+        qv, _ = _tfidf_vectors([query])
+        qv = qv[0] if qv else {}
+        scored = [(n, _cosine(qv, vectors[i])) for i, n in enumerate(entries)]
+        scored.sort(key=lambda x: (x[1], x[0]["updated_at"], x[0]["id"]),
+                    reverse=True)
+        return [n for n, s in scored if s > 0.0][: max(1, int(top_k or 5))]
+
+    def record_finding(self, target, content, tags=None, title=None):
+        """Convenience for instant recording: store one key finding under
+        'findings' and keep a per-target context entry up to date."""
+        target = self._norm_target(target)
+        if not target:
+            raise ValueError("target is required")
+        note = self.add_note(
+            "findings",
+            (title or "finding for %s" % target).strip()[:200],
+            content, target=target,
+            tags=list(tags or []) + ["auto-logged"])
+        # Refresh target_context so consult(target) always has context.
+        ctx_title = "context: %s" % target
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id FROM institutional_notes WHERE category = ?"
+                " AND title = ?", ("target_context", ctx_title)).fetchone()
+        if row is None:
+            self.add_note("target_context", ctx_title,
+                          content, target=target,
+                          tags=["context", "auto-logged"])
+        else:
+            self.update_note(row["id"], content=content)
+        return note
+
+    def consult(self, target=None, query=None, limit=4000):
+        """Render the pre-response consultation block for the system prompt.
+
+        Always includes: recent global methodology + active_plans, and for a
+        known target every finding + target_context note about it. When a
+        `query` is given, top relevant notes across categories are also
+        included so historical knowledge informs the answer. Returns '' when
+        the database is empty.
+        """
+        with self._lock:
+            total = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM institutional_notes").fetchone()["n"]
+        if not total:
+            return ""
+        target = self._norm_target(target)
+        groups = []
+        if target:
+            rows = self.list_notes(category="findings", target=target,
+                                   limit=30)
+            if rows:
+                groups.append(("findings for %s" % target, rows))
+            rows = self.list_notes(category="target_context", target=target,
+                                   limit=10)
+            if rows:
+                groups.append(("context for %s" % target, rows))
+        rows = self.list_notes(category="methodology", limit=15)
+        if rows:
+            groups.append(("methodology (global)", rows))
+        rows = self.list_notes(category="active_plans", limit=15)
+        if rows:
+            groups.append(("active plans (global)", rows))
+        query = (query or "").strip()
+        if query:
+            rows = self.search_notes(query, top_k=6)
+            if rows:
+                groups.append(("relevant to '%s'" % query[:80], rows))
+        lines = []
+        used = 0
+        for label, entries in groups:
+            if used >= limit:
+                break
+            lines.append("[%s]" % label)
+            for n in entries:
+                block = "- [%s] %s: %s%s" % (
+                    n["category"], n["title"],
+                    " ".join(n["content"].split()),
+                    " (target: %s)" % n["target"] if n["target"] else "")
+                if used + len(block) > limit and lines:
+                    break
+                lines.append(block)
+                used += len(block)
+        if len(lines) <= 1:
+            return ""
+        return "\n".join(lines)
+
+    def notes_context(self, category=None, target=None, limit=4000):
+        """Compact text block of recent notes (any/all categories)."""
+        rows = self.list_notes(category=category, target=target, limit=50)
+        if not rows:
+            return ""
+        lines = []
+        used = 0
+        for n in rows:
+            block = "- [%s] %s: %s" % (
+                n["category"], n["title"],
+                " ".join(n["content"].split()))
+            if used + len(block) > limit:
+                break
+            lines.append(block)
+            used += len(block)
+        return "\n".join(lines)
+
+    def count(self):
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM institutional_notes").fetchone()
+        return row["n"] if row else 0
+
+    def category_counts(self):
+        """Notes per category: {category: count}."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT category, COUNT(*) AS n FROM institutional_notes"
+                " GROUP BY category").fetchall()
+        return {r["category"]: r["n"] for r in rows}
+
+
+# ---------------------------------------------------------------------------
 # GameState: persistent world state (location, inventory, stats, quests...)
 # ---------------------------------------------------------------------------
 

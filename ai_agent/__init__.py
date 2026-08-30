@@ -2,7 +2,8 @@
 
 from .core import Agent
 from .llm import OpenAIClient, MockClient, LLMError
-from .memory import MemoryStore
+from .memory import InstitutionalMemory, MemoryStore
 
-__all__ = ["Agent", "OpenAIClient", "MockClient", "MemoryStore", "LLMError"]
+__all__ = ["Agent", "OpenAIClient", "MockClient", "MemoryStore",
+           "InstitutionalMemory", "LLMError"]
 __version__ = "1.0.0"
