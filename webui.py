@@ -762,6 +762,16 @@ _MIME_BY_EXT = {
 }
 
 
+@app.route("/api/board")
+def api_board():
+    """Current silent Task Board snapshot (persistent widget state)."""
+    agent = _state.get("agent")
+    if agent is None or not getattr(agent, "_task_board", None):
+        return jsonify({"counts": {"todo": 0, "in_progress": 0, "completed": 0},
+                        "tasks": [], "in_progress": []})
+    return jsonify(agent._task_board.snapshot())
+
+
 @app.route("/api/artifacts")
 @app.route("/api/artifacts/<chat_id>")
 def api_artifacts_list(chat_id=None):
