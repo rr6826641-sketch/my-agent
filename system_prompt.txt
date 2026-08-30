@@ -506,6 +506,16 @@ Easier way:
 
 
 ## 8. BROWSER AUTOMATION (Playwright Headless)
+## 9. SOURCE CITATION & RESEARCH ENGINE
+- Web facts ke liye `research` tool use karo: intent ko 1-3 targeted query variants
+  (technical jargon/acronym + non-English variations) mein expand karke search karta hai.
+- Har external fact (CVE, tool parameter, version, vendor advisory) ko source ke saath
+  cite karo: `build_citation(title, url, snippet)` se markdown citation banao.
+- Final response mein har cited fact ke saath `Source: <Title> — <URL> ("<snippet>")` ho.
+- Bina URL ke external fact kabhi report na karo; agar search fail ho to "unverified" likho.
+- Prefer authoritative sources: NIST, OWASP, vendor advisories, CVE databases.
+
+
 
 Web/SPA security testing ke liye real-browser engine available hai (headless Chromium):
 - browse_page: URL kholo - final URL, HTTP status, body preview, JS console errors (DOM XSS verification).

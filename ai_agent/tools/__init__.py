@@ -39,6 +39,10 @@ from .terminal import (
 from .websearch import (
     tool_web_search, tool_open_url,
 )
+from .search import (
+    tool_generate_queries, tool_web_search_v2, tool_research,
+    tool_build_citation,
+)
 from .skills import (
     tool_search_skills, tool_load_skill,
 )
@@ -450,6 +454,36 @@ def create_tools(memory, knowledge=None, institutional=None,
                              "max_results": {"type": "integer", "default": 6}},
               "required": ["query"]},
              lambda query="", max_results=6: tool_web_search(query, int(max_results or 6))),
+        Tool("research",
+             "Advanced research loop: expand an intent into 1-3 targeted query "
+             "variants (technical jargon/acronym + non-English where applicable), "
+             "run them, and return citation-ready structured sources "
+             "(title, url, snippet). Use this for CVE lookups, tool parameters, "
+             "and external technical facts.",
+             {"type": "object",
+              "properties": {"intent": _str_prop("research intent, e.g. 'CVE-2024-1234 details'"),
+                             "lang": _str_prop("optional language hint, e.g. 'ur' for Urdu", ""),
+                             "max_results": {"type": "integer", "default": 6}},
+              "required": ["intent"]},
+             lambda intent="", lang="", max_results=6:
+                 tool_research(intent, lang, int(max_results or 6))),
+        Tool("generate_queries",
+             "Expand a research intent into 1-3 targeted query variants.",
+             {"type": "object",
+              "properties": {"intent": _str_prop("research intent"),
+                             "lang": _str_prop("optional language hint", "")},
+              "required": ["intent"]},
+             lambda intent="", lang="": tool_generate_queries(intent, lang)),
+        Tool("build_citation",
+             "Build a strict markdown citation line from a validated source "
+             "(title, URL, snippet). Call for every external fact used in a final response.",
+             {"type": "object",
+              "properties": {"title": _str_prop("source title"),
+                             "url": _str_prop("source URL"),
+                             "snippet": _str_prop("optional snippet context", "")},
+              "required": ["url"]},
+             lambda title="", url="", snippet="":
+                 tool_build_citation(title, url, snippet)),
         Tool("open_url", "Fetch and read the text content of a webpage.",
              {"type": "object",
               "properties": {"url": _str_prop("page URL")},

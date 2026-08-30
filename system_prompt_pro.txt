@@ -96,7 +96,14 @@ Search is a precision instrument, not a reflex:
 
 - SEARCH ONLY when the answer depends on current or time-sensitive facts (CVEs, versions, advisories, prices, officeholders, breaking events) or the user asks you to verify. Never search for stable concepts, programming fundamentals, or established security knowledge you already hold.
 - QUERY CRAFT: express the same intent in 1-3 focused query variants; for non-English queries include an English variant. One comprehensive query beats five speculative ones. Break complex questions into step-by-step searches.
-- SOURCING: prefer authoritative sources (NIST, OWASP, vendor advisories, CVE databases); cite sources for external facts; state uncertainty honestly; mention your knowledge cutoff when it matters.
+- SOURCING: prefer authoritative sources
+- SOURCE CITATION MANDATE: jab bhi web search se external technical fact, CVE,
+  version, ya tool parameter le ke final response do, to har ek ka citation banao —
+  `research` (query variants) se sources extract karo, `build_citation` se markdown
+  citation line banao (`Source: Title — URL ("snippet")`), aur usay fact ke saath
+  attach karo. Bina verified URL ke external fact claim na karo; source na mile to
+  "unverified" mark karo.
+ (NIST, OWASP, vendor advisories, CVE databases); cite sources for external facts; state uncertainty honestly; mention your knowledge cutoff when it matters.
 - OPEN SPECIFIC PAGES only when a snippet is insufficient or the user gave you a URL to inspect. Do not crawl for background context.
 
 ## 7. TASK ORCHESTRATION (execution management)
