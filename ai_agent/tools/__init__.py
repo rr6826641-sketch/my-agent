@@ -97,9 +97,21 @@ def _str_prop(desc, default=None, enum=None):
     return p
 
 
+def _as_bool(value, default=False):
+    """Coerce LLM-supplied strings ('true'/'false'/'1'/'0') to bool."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
 def create_tools(memory, knowledge=None, institutional=None,
                  confirm_terminal=True, spawn_fn=None, allow_spawn=True,
-                 spawn_parallel_fn=None, rpg_ctx=None, workspace_index=None):
+                 spawn_parallel_fn=None, rpg_ctx=None, workspace_index=None,
+                 orchestrator=None, spawn_default_wait=False):
     """Build the full tool list for an Agent.
 
     rpg_ctx: optional dict with 'world' (GameState) and 'lorebook'
@@ -107,19 +119,68 @@ def create_tools(memory, knowledge=None, institutional=None,
     registered.
     institutional: optional InstitutionalMemory - enables the notes_* tools
     implementing the cross-conversation institutional memory doctrine.
+    orchestrator: optional OrchestrationManager enforcing the Managed
+    Asynchronous Sub-Agent Orchestration Protocol - bounded child state
+    (max 2 siblings / 4 children), success criteria, capabilities and
+    progress ledgers. When present, spawn_agent/spawn_agents become ASYNC
+    (return agent_id JSON immediately) and the four management tools
+    (check_agent_status, fetch_agent_transcript, continue_agent,
+    cancel_agent) are registered; the legacy spawn_fn / spawn_parallel_fn
+    callbacks remain as the synchronous fallback when orchestrator is None.
+    spawn_default_wait: default for the wait flag (True keeps legacy
+    blocking behaviour, e.g. for Game-Master NPC reactions).
     """
     world = (rpg_ctx or {}).get("world")
     lorebook = (rpg_ctx or {}).get("lorebook")
 
-    def tool_spawn_agent(task):
-        if not allow_spawn or spawn_fn is None:
+    def tool_spawn_agent(task="", success_criteria=None, capabilities=None,
+                         wait=None):
+        if not allow_spawn:
+            return "Error: sub-agents are disabled."
+        if orchestrator is not None:
+            return orchestrator.spawn(
+                task, wait=_as_bool(wait, spawn_default_wait),
+                success_criteria=success_criteria,
+                capabilities=capabilities,
+                timeout=spawn_default_wait and 600 or None)
+        if spawn_fn is None:
             return "Error: sub-agents are disabled."
         return spawn_fn(task)
 
-    def tool_spawn_agents(tasks):
-        if not allow_spawn or spawn_parallel_fn is None:
+    def tool_spawn_agents(tasks, success_criteria=None, capabilities=None,
+                          wait=None):
+        if not allow_spawn:
+            return "Error: sub-agents are disabled."
+        if orchestrator is not None:
+            return orchestrator.spawn_many(
+                tasks, wait=_as_bool(wait, spawn_default_wait),
+                success_criteria=success_criteria,
+                capabilities=capabilities,
+                timeout=spawn_default_wait and 600 or None)
+        if spawn_parallel_fn is None:
             return "Error: parallel sub-agents are disabled."
         return spawn_parallel_fn(tasks or "")
+
+    def tool_check_agent_status(agent_id="", validate=False):
+        if orchestrator is None:
+            return "Error: sub-agent orchestration is disabled."
+        return orchestrator.check_status(agent_id or "",
+                                         validate=_as_bool(validate))
+
+    def tool_fetch_agent_transcript(agent_id=""):
+        if orchestrator is None:
+            return "Error: sub-agent orchestration is disabled."
+        return orchestrator.fetch_transcript(agent_id or "")
+
+    def tool_continue_agent(agent_id="", follow_up=""):
+        if orchestrator is None:
+            return "Error: sub-agent orchestration is disabled."
+        return orchestrator.continue_agent(agent_id or "", follow_up or "")
+
+    def tool_cancel_agent(agent_id=""):
+        if orchestrator is None:
+            return "Error: sub-agent orchestration is disabled."
+        return orchestrator.cancel_agent(agent_id or "")
 
     def tool_list_tools():
         names = "\n".join("  %-22s %s" % (t.name, t.description)
@@ -510,21 +571,92 @@ def create_tools(memory, knowledge=None, institutional=None,
               "required": ["note_id"]},
              lambda note_id="": _notes_delete(note_id)),
         Tool("spawn_agent",
-             "Create a sub-agent that independently works on a task and "
-             "returns its final answer. Use for parallel/specialized work.",
+             "Spawn ONE tracked sub-agent that independently works on a task. "
+             "Async by default: returns an agent_id JSON status immediately "
+             "and the child runs in the background (max 2 siblings at once, "
+             "4 children tracked). The child's output is UNVERIFIED until "
+             "check_agent_status(agent_id, validate=true). Pass wait=true "
+             "for legacy synchronous behaviour (blocks, returns the reply).",
              {"type": "object",
-              "properties": {"task": _str_prop("the task for the sub-agent")},
+              "properties": {
+                  "task": _str_prop("the task for the sub-agent"),
+                  "success_criteria": _str_prop(
+                      "what counts as done (optional; used by validation)", ""),
+                  "capabilities": _str_prop(
+                      "comma-separated capability bundle, e.g. 'terminal,web_research' (optional)", ""),
+                  "wait": {"type": "boolean",
+                            "default": False,
+                            "description": "false=async (default), true=block until done"}},
               "required": ["task"]},
-             lambda task="": tool_spawn_agent(task or "")),
+             lambda task="", success_criteria=None, capabilities=None, wait=None:
+                 tool_spawn_agent(task or "", success_criteria,
+                                  capabilities, wait)),
         Tool("spawn_agents",
-             "Run MULTIPLE sub-agents in PARALLEL. Pass a JSON array of tasks "
-             "or tasks separated by '|||'. Up to 8 concurrent sub-agents - "
-             "use for big multi-part jobs (parallel recon, multiple targets, "
-             "independent checks).",
+             "Spawn MULTIPLE tracked sub-agents. Pass a JSON array of tasks "
+             "or tasks separated by '|||'. Async by default: returns agent_id "
+             "JSON statuses immediately. At most 2 run at once and 4 are "
+             "tracked - excess tasks are REJECTED and reported. Outputs stay "
+             "UNVERIFIED until check_agent_status(agent_id, validate=true). "
+             "Pass wait=true for legacy synchronous behaviour.",
              {"type": "object",
-              "properties": {"tasks": _str_prop("JSON array of task strings, or 'task1 ||| task2 ||| task3'")},
+              "properties": {
+                  "tasks": _str_prop("JSON array of task strings, or 'task1 ||| task2 ||| task3'"),
+                  "success_criteria": _str_prop(
+                      "what counts as done (optional)", ""),
+                  "capabilities": _str_prop(
+                      "comma-separated capability bundle (optional)", ""),
+                  "wait": {"type": "boolean",
+                            "default": False,
+                            "description": "false=async (default), true=block until done"}},
               "required": ["tasks"]},
-             lambda tasks="": tool_spawn_agents(tasks or "")),
+             lambda tasks="", success_criteria=None, capabilities=None, wait=None:
+                 tool_spawn_agents(tasks or "", success_criteria,
+                                   capabilities, wait)),
+        Tool("check_agent_status",
+             "Check the status of one tracked sub-agent (or a table of all "
+             "children when agent_id is empty). Pass validate=true to "
+             "cross-check a finished child's output against its success "
+             "criteria and mark it VERIFIED or UNVERIFIED. Sub-agent output "
+             "must be validated this way before it is trusted.",
+             {"type": "object",
+              "properties": {
+                  "agent_id": _str_prop("child agent id (empty = all children)", ""),
+                  "validate": {"type": "boolean",
+                                "default": False,
+                                "description": "cross-check finished output against success criteria"}},
+              "required": []},
+             lambda agent_id="", validate=False:
+                 tool_check_agent_status(agent_id or "", validate)),
+        Tool("fetch_agent_transcript",
+             "Fetch the full persisted transcript of one tracked sub-agent "
+             "(or a summary table of all children when agent_id is empty). "
+             "Use to audit exactly what a background child said and did.",
+             {"type": "object",
+              "properties": {"agent_id": _str_prop(
+                  "child agent id (empty = all children)", "")},
+              "required": []},
+             lambda agent_id="": tool_fetch_agent_transcript(agent_id or "")),
+        Tool("continue_agent",
+             "Resume a FINISHED tracked sub-agent from its persisted "
+             "transcript with a follow-up prompt; the same conversation "
+             "continues. The new output is re-marked UNVERIFIED until "
+             "validated again.",
+             {"type": "object",
+              "properties": {
+                  "agent_id": _str_prop("child agent id to resume"),
+                  "follow_up": _str_prop("follow-up prompt continuing the task")},
+              "required": ["agent_id", "follow_up"]},
+             lambda agent_id="", follow_up="":
+                 tool_continue_agent(agent_id or "", follow_up or "")),
+        Tool("cancel_agent",
+             "Cancel one tracked sub-agent (or ALL active children when "
+             "agent_id is empty). The child stops at its next checkpoint "
+             "and its slot frees up for new spawns.",
+             {"type": "object",
+              "properties": {"agent_id": _str_prop(
+                  "child agent id (empty = cancel all active)", "")},
+              "required": []},
+             lambda agent_id="": tool_cancel_agent(agent_id or "")),
         Tool("list_tools", "List every available tool with a short description.",
              {"type": "object", "properties": {}, "required": []},
              lambda: tool_list_tools()),

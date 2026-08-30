@@ -204,22 +204,35 @@ def _test_spawn_cap():
                   max_iterations=5, allow_subagents=True)
     tasks = ["say one", "say two", "say three", "say four", "say five",
              "say six", "say seven", "say eight", "say nine", "say ten"]
-    out = agent._spawn_parallel_impl(tasks, timeout=30)
-    check("spawn_agents max8", "Sub-agent 8" in out
-          and "Sub-agent 9" not in out
-          and "Sub-agent 10" not in out, "agents listed")
-    # string-form with ||| separator
-    out2 = agent._spawn_parallel_impl("task a ||| task b ||| task c", timeout=30)
+    # async single spawn returns agent_id immediately (managed protocol)
+    one = agent.spawn_agent("say hello")
+    check("spawn_agent async id", "agent_id" in one, one[:80])
+    # legacy synchronous single spawn still works (wait=True routing)
+    one_sync = agent._spawn_impl("say hello")
+    check("spawn_agent single", bool(one_sync), str(one_sync)[:60])
+    # string-form with ||| separator, synchronous (wait=True) - drains
+    out2 = agent.spawn_agents("task a ||| task b ||| task c", wait=True)
     check("spawn_agents pipe-sep", "Sub-agent 3" in out2, "")
-    # json-form
-    out3 = agent._spawn_parallel_impl(json.dumps(["x", "y"]), timeout=30)
+    # json-form, synchronous
+    out3 = agent.spawn_agents(json.dumps(["x", "y"]), wait=True)
     check("spawn_agents json", "Sub-agent 2" in out3, "")
     # empty -> error
-    err = agent._spawn_parallel_impl("", timeout=5)
+    err = agent.spawn_agents("")
     check("spawn_agents empty", "Error" in err, err[:60])
-    # single spawn
-    one = agent._spawn_impl("say hello")
-    check("spawn_agent single", bool(one), str(one)[:60])
+    # legacy parallel path: bounded at 4 tracked, sync result shows 1..4
+    sync = agent._spawn_parallel_impl(tasks, timeout=30)
+    check("spawn_parallel cap4", "Sub-agent 4" in sync
+          and "Sub-agent 5" not in sync, "agents listed")
+    # async multi-spawn: at most 4 tracked, excess tasks rejected
+    out = agent.spawn_agents(tasks)
+    data = json.loads(out)
+    check("spawn_agents spawned4", data.get("spawned") == 4
+          and data.get("rejected") == 6, "spawned=%s rejected=%s"
+          % (data.get("spawned"), data.get("rejected")))
+    errors = [s for s in data.get("queued_or_running", [])
+              if "error" in s]
+    check("spawn_agents reject msg", errors
+          and "cap (4) reached" in errors[0]["error"], errors)
 
 
 def _test_mock_agent():
@@ -238,7 +251,8 @@ def _test_mock_agent():
         check("mock run system info", bool(out.strip()), out[:80])
         agent.reset()
         out = agent.run("spawns [\"say a\", \"say b\"]")
-        check("mock run spawns", "Sub-agent" in out, out[:80])
+        check("mock run spawns", ("agent_id" in out or "spawned" in out)
+              and "UNVERIFIED" in out, out[:120])
 
 
 def _test_custom_tools(tmp):

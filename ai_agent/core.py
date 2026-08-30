@@ -7,6 +7,11 @@ import threading
 import time
 
 from .llm import LLMError, RunCancelled
+from .orchestration import (
+    DEFAULT_MAX_CHILDREN,
+    DEFAULT_MAX_SIBLINGS,
+    OrchestrationManager,
+)
 from .tools import create_tools, execute_tool
 from .tools.workspace import WorkspaceIndex
 from .tools.verify import (
@@ -737,7 +742,7 @@ Each choice must be a plausible next action in the current scene, and all three 
 - spawn_agent: bring ONE NPC to life. Task format (put the persona in the [PERSONA] block):
   [PERSONA]Full description: appearance, voice, personality, motives, secrets, speaking style, knowledge.\nThe adventurer asks: <their question or action>. Reply as this character in 2-4 sentences, in first person, with their spoken words.
   Use the returned reply as that character's exact words/actions in the narrative. Include the relevant lore facts about the character, faction or place inside their [PERSONA] block so the reply stays consistent with the Lorebook.
-- spawn_agents: run several NPC reactions in PARALLEL (same [PERSONA] format per task, up to 8).
+- spawn_agents: run several NPC reactions in PARALLEL (same [PERSONA] format per task; max 2 at once, 4 tracked).
 - remember / recall / vector_search: long-term campaign notes and lore retrieval.
 - All other tools (run_terminal, web_search, ...): only if the story genuinely needs them (e.g. rendering a treasure map). Never use terminal/network/scanning tools for game content unless it is the actual point of the scene.
 
@@ -1382,6 +1387,20 @@ class Agent:
         self._auto_note_seen = set()
         self.messages = []
         self._workspace_index = WorkspaceIndex()
+        # Managed Asynchronous Sub-Agent Orchestration: every child this
+        # agent spawns (tool or internal) is tracked in a bounded registry
+        # with caps (2 siblings running / 4 children tracked), success
+        # criteria, capabilities and a progress ledger + transcript.
+        self._orchestrator = OrchestrationManager(
+            parent_name=self.name,
+            spawn_timeout=spawn_timeout,
+            max_siblings=DEFAULT_MAX_SIBLINGS,
+            max_children=DEFAULT_MAX_CHILDREN,
+            max_depth=max_spawn_depth,
+            make_child=(lambda task, depth:
+                        self._make_subagent(task, depth=depth))
+            if allow_subagents else None,
+        )
         self._tool_list = create_tools(
             memory, knowledge=knowledge, institutional=institutional,
             confirm_terminal=confirm_terminal,
@@ -1391,6 +1410,8 @@ class Agent:
             spawn_parallel_fn=(lambda tasks, timeout=spawn_timeout:
                                self._spawn_parallel_impl(tasks, timeout))
             if allow_subagents else None,
+            orchestrator=self._orchestrator,
+            spawn_default_wait=bool(game_master),
             rpg_ctx=({"world": world_state, "lorebook": lorebook}
                      if game_master else None),
             workspace_index=self._workspace_index,
@@ -2229,75 +2250,90 @@ class Agent:
         return child, task or ""
 
     def _spawn_impl(self, task, depth=0):
+        """Legacy synchronous spawn entry point. Routed through the managed
+        orchestrator with wait=True so every child is still tracked,
+        bounded and validated - no fire-and-forget threads remain."""
         if not self.allow_subagents or depth >= self.max_spawn_depth:
             return "Error: sub-agent depth limit reached."
-        child, rest = self._make_subagent(task, name_suffix="-child",
-                                          depth=depth)
-        box = {}
-        def work():
-            try:
-                box["out"] = child.run(rest)
-            except Exception as exc:
-                box["err"] = "%s: %s" % (type(exc).__name__, exc)
-        thread = threading.Thread(target=work, daemon=True)
-        thread.start()
-        thread.join(timeout=self.spawn_timeout)
-        if thread.is_alive():
-            return "Error: sub-agent timed out after %ds." % self.spawn_timeout
-        if "err" in box:
-            return "Sub-agent error: %s" % box["err"]
-        return box.get("out", "(no output)")
+        return self._orchestrator.spawn(
+            task, wait=True, depth=depth, timeout=self.spawn_timeout)
 
     def _spawn_parallel_impl(self, tasks, timeout=600):
-        """Run multiple sub-agents concurrently; returns one combined result.
+        """Legacy synchronous parallel spawn entry point. Routed through
+        the managed orchestrator (wait=True): at most DEFAULT_MAX_SIBLINGS
+        children run at once and DEFAULT_MAX_CHILDREN are tracked; excess
+        tasks are rejected and reported instead of silently truncated."""
+        if not self.allow_subagents:
+            return "Error: sub-agents are disabled."
+        depth = self.spawn_depth + 1
+        if depth >= self.max_spawn_depth:
+            return "Error: sub-agent depth limit reached."
+        return self._orchestrator.spawn_many(
+            tasks, wait=True, timeout=timeout, depth=depth)
 
-        tasks: JSON array of strings, or a string with tasks separated by
-        '|||'. Each task runs in its own thread with its own agent.
+    # --------------------------------------- managed async orchestration
+
+    def spawn_agent(self, task, wait=False, success_criteria=None,
+                    capabilities=None, timeout=None):
+        """Spawn ONE tracked sub-agent (async by default).
+
+        Returns immediately with a JSON status string carrying the
+        agent_id; the child runs in the background under bounded caps
+        (max 2 siblings running / 4 children tracked). The child's output
+        stays UNVERIFIED until the parent explicitly validates it with
+        check_agent_status(agent_id, validate=true), which cross-checks
+        the recorded success criteria against the output.
+
+        pass wait=True for the legacy synchronous behaviour (blocks and
+        returns the final output).
         """
-        if isinstance(tasks, str):
-            tasks = tasks.strip()
-            if not tasks:
-                return "Error: spawn_agents needs at least one task."
-            if tasks.lstrip().startswith("["):
-                try:
-                    tasks = json.loads(tasks)
-                except ValueError:
-                    return "Error: tasks JSON is invalid."
-            else:
-                tasks = [t.strip() for t in tasks.split("|||") if t.strip()]
-        if not isinstance(tasks, (list, tuple)) or not tasks:
-            return "Error: spawn_agents needs a list of tasks."
-        if len(tasks) > 8:
-            tasks = tasks[:8]
+        if not self.allow_subagents:
+            return "Error: sub-agents are disabled."
+        depth = self.spawn_depth + 1
+        if depth >= self.max_spawn_depth:
+            return "Error: sub-agent depth limit reached."
+        return self._orchestrator.spawn(
+            task, wait=wait, success_criteria=success_criteria,
+            capabilities=capabilities, timeout=timeout, depth=depth)
 
-        boxes = [{} for _ in tasks]
-        threads = []
-        for i, task in enumerate(tasks):
-            def work(idx, t):
-                try:
-                    child, rest = self._make_subagent(
-                        t, name_suffix="-child%d" % (idx + 1))
-                    boxes[idx]["out"] = child.run(rest)
-                except Exception as exc:
-                    boxes[idx]["err"] = "%s: %s" % (type(exc).__name__, exc)
-            th = threading.Thread(target=work, args=(i, str(task)), daemon=True)
-            th.start()
-            threads.append(th)
+    def spawn_agents(self, tasks, wait=False, success_criteria=None,
+                     capabilities=None, timeout=None):
+        """Spawn MULTIPLE tracked sub-agents (async by default).
 
-        for th in threads:
-            th.join(timeout=timeout)
+        At most DEFAULT_MAX_SIBLINGS run at once and DEFAULT_MAX_CHILDREN
+        are tracked (queued included); excess tasks are rejected and
+        reported. Returns a JSON status list immediately unless wait=True.
+        """
+        if not self.allow_subagents:
+            return "Error: sub-agents are disabled."
+        depth = self.spawn_depth + 1
+        if depth >= self.max_spawn_depth:
+            return "Error: sub-agent depth limit reached."
+        return self._orchestrator.spawn_many(
+            tasks, wait=wait, success_criteria=success_criteria,
+            capabilities=capabilities, timeout=timeout, depth=depth)
 
-        lines = []
-        for i, (task, box) in enumerate(zip(tasks, boxes), 1):
-            snippet = " ".join(str(task).split())[:80]
-            lines.append("--- Sub-agent %d: %s ---" % (i, snippet))
-            if "err" in box:
-                lines.append("ERROR: %s" % box["err"])
-            elif "out" in box:
-                lines.append(box["out"])
-            else:
-                lines.append("(timed out after %ds)" % timeout)
-        return "\n\n".join(lines)
+    def check_agent_status(self, agent_id="", validate=False):
+        """Status of one tracked sub-agent (or a table of all children).
+        With validate=true, a done child's output is cross-checked against
+        its success criteria and marked verified / unverified."""
+        return self._orchestrator.check_status(
+            agent_id=agent_id or "", validate=bool(validate))
+
+    def fetch_agent_transcript(self, agent_id=""):
+        """Full persisted transcript of one tracked sub-agent (or a
+        summary table of all children)."""
+        return self._orchestrator.fetch_transcript(agent_id or "")
+
+    def continue_agent(self, agent_id, follow_up):
+        """Resume a finished sub-agent from its persisted transcript with
+        a follow-up prompt; the same conversation continues. Output is
+        re-marked UNVERIFIED until validated again."""
+        return self._orchestrator.continue_agent(agent_id or "", follow_up)
+
+    def cancel_agent(self, agent_id=""):
+        """Cancel one tracked sub-agent (or all active children)."""
+        return self._orchestrator.cancel_agent(agent_id or "")
 
     # ------------------------------------------------------------ helpers
 
