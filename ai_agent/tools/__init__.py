@@ -39,6 +39,7 @@ from .terminal import (
 from .websearch import (
     tool_web_search, tool_open_url,
 )
+from .reasoning import tool_plan_task, tool_reason, tool_reflect
 from .search import (
     tool_generate_queries, tool_web_search_v2, tool_research,
     tool_build_citation,
@@ -489,6 +490,24 @@ def create_tools(memory, knowledge=None, institutional=None,
               "properties": {"url": _str_prop("page URL")},
               "required": ["url"]},
              lambda url="": tool_open_url(url)),
+        Tool("plan_task", "Break any complex task into an ordered, verifiable execution plan (HackerAI brain).",
+             {"type": "object",
+              "properties": {"task": _str_prop("the task/goal to plan"),
+                             "context": _str_prop("optional context (findings, target, constraints)", "")},
+              "required": ["task"]},
+             lambda task="", context="": tool_plan_task(task, context)),
+        Tool("reason", "Structured step-by-step reasoning chain (facts -> deduction -> conclusion -> confidence) for any analysis.",
+             {"type": "object",
+              "properties": {"question": _str_prop("question or analysis to reason about"),
+                             "premises": _str_prop("verified premises/facts, one per line", "")},
+              "required": ["question"]},
+             lambda question="", premises="": tool_reason(question, premises)),
+        Tool("reflect", "Self-review an answer before delivering: evidence check, gaps, corrections (HackerAI brain).",
+             {"type": "object",
+              "properties": {"answer": _str_prop("draft answer to review"),
+                             "evidence": _str_prop("evidence/citations gathered", "")},
+              "required": ["answer"]},
+             lambda answer="", evidence="": tool_reflect(answer, evidence)),
         Tool("search_skills", "Search the on-demand pentest skill library. "
              "Returns ranked matching skills (id, title, tags, preview). "
              "Empty query lists all skills.",

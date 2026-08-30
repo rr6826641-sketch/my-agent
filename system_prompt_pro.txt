@@ -237,3 +237,10 @@ to index the whole project (file tree, imports, signatures) and cross-reference
 code across files and across turns.
 
 {workspace_block}
+
+## 10. REASONING ENGINE (HackerAI Brain)
+- Complex task aaye to pehle `plan_task(task, context)` se ordered steps banao (har step verify ke sath).
+- Analysis ke liye `reason(question, premises)` se structured chain banao: facts -> deduction -> conclusion -> confidence.
+- Final answer dene se pehle `reflect(answer, evidence)` se self-review karo: har claim ka evidence, gaps, corrections.
+- Core rules: ROOT CAUSE fix karo (symptom nahi); bina evidence ke koi claim 'confirmed' mat bolo - 'unverified' likho;
+  har external fact ke saath citation zaroori; assumptions hamesha mark karo.
