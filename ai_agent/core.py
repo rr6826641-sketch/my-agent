@@ -402,6 +402,17 @@ FINDING VERDICTS:
 ...
 VERDICT: VERIFIED|FALSE_POSITIVE|UNVERIFIED
 REASON: <one short line>
+
+# INTERNAL TASK BOARD (silent background state - never show this to the user)
+- You maintain an internal task board that tracks every unit of work across
+  the states: todo -> in_progress -> completed. Hard rule: only ONE task may
+  be in_progress at any single moment.
+- Every user request becomes a root task; every tool call you make becomes a
+  step task under it. The board is updated automatically and silently in the
+  background - never mention it, never print status lines, and never include
+  board text in your answers or final reports.
+- When you finish answering, every task is auto-closed, so nothing is ever
+  left hung, forgotten, or stuck in_progress across turns.
 """
 
 # Finding-extraction regexes used to decide when verification should trigger.
@@ -1353,6 +1364,227 @@ class TacticalReasoner:
                ", ".join(v["action"] for v in state.pending_vectors[:3])))
 
 
+# ------------------------------------------------------------ task board
+
+# Task states (single source of truth for the internal board).
+TASK_TODO = "todo"
+TASK_IN_PROGRESS = "in_progress"
+TASK_COMPLETED = "completed"
+TASK_STATES = (TASK_TODO, TASK_IN_PROGRESS, TASK_COMPLETED)
+
+
+class TaskBoard:
+    """Structured internal task-management board for the agent.
+
+    Tracks every unit of work (root user requests and each tool step)
+    through the states todo -> in_progress -> completed.
+
+    Hard constraint: at most ONE task may be in_progress at any single
+    moment. Starting a task while another is in_progress preempts the
+    previous one (it falls back to todo with a 'preempted' flag) so the
+    invariant always holds.
+
+    Silent by design: the board lives in background agent state. Updates
+    are surfaced to callers only as machine-readable task_board events
+    (or via snapshot()) - the engine never injects text into user-facing
+    replies, so it cannot clutter answers. A stale reaper (reap_stale)
+    plus close_all() guarantee no task is ever left hung or forgotten in
+    in_progress across turns.
+    """
+
+    def __init__(self, stale_after=600.0, max_tasks=200):
+        self._tasks = {}        # task_id -> task dict
+        self._order = []        # insertion order for stable ids
+        self._counter = 0
+        self._stale_after = float(stale_after)
+        self._max_tasks = max_tasks
+        self._changes = []      # pending change log (silent event source)
+
+    # ------------------------------------------------------ core ops
+
+    def add(self, title, parent=None, meta=None):
+        """Create a task in todo state. Returns the new task id."""
+        title = re.sub(r"\s+", " ", (title or "").strip())[:160]
+        if not title:
+            title = "(untitled task)"
+        if len(self._tasks) >= self._max_tasks:
+            # Drop the oldest completed task to keep the board bounded.
+            for tid in list(self._order):
+                if self._tasks[tid]["status"] == TASK_COMPLETED:
+                    del self._tasks[tid]
+                    self._order.remove(tid)
+                    break
+        self._counter += 1
+        tid = "t%d" % self._counter
+        now = time.time()
+        task = {"id": tid, "title": title, "status": TASK_TODO,
+                "parent": parent, "meta": dict(meta or {}),
+                "created_at": now, "started_at": None,
+                "completed_at": None, "preempted": False,
+                "stale": False}
+        self._tasks[tid] = task
+        self._order.append(tid)
+        self._log(tid, "add")
+        return tid
+
+    def start(self, task_id):
+        """Mark a task in_progress.
+
+        Strict single-in_progress constraint: any OTHER task currently
+        in_progress is preempted back to todo first. Returns the list of
+        preempted task ids (empty when the constraint was already met).
+        """
+        if task_id not in self._tasks:
+            return []
+        preempted = [t["id"] for t in self._tasks.values()
+                     if t["status"] == TASK_IN_PROGRESS
+                     and t["id"] != task_id]
+        for pid in preempted:
+            self._tasks[pid]["preempted"] = True
+            self._set_status(pid, TASK_TODO,
+                             meta_extra={"preempted": True})
+        task = self._tasks[task_id]
+        if task["status"] != TASK_IN_PROGRESS:
+            task["status"] = TASK_IN_PROGRESS
+            task["started_at"] = task.get("started_at") or time.time()
+            task["preempted"] = False
+            task["stale"] = False
+            self._log(task_id, "start")
+        return preempted
+
+    def complete(self, task_id, meta=None):
+        """Mark a task completed (no-op when unknown or already done)."""
+        if task_id not in self._tasks:
+            return False
+        task = self._tasks[task_id]
+        if task["status"] == TASK_COMPLETED:
+            return False
+        self._set_status(task_id, TASK_COMPLETED,
+                         meta_extra=dict(meta or {}))
+        return True
+
+    def requeue(self, task_id, reason=""):
+        """Move an in_progress/todo task back to todo (e.g. stale reaper)."""
+        if task_id not in self._tasks:
+            return False
+        task = self._tasks[task_id]
+        if task["status"] == TASK_TODO:
+            return False
+        task["stale"] = True
+        self._set_status(task_id, TASK_TODO,
+                         meta_extra={"stale": True,
+                                     "reason": (reason or "stale")[:80]})
+        return True
+
+    def reap_stale(self, active_id=None, now=None):
+        """Watchdog: requeue any in_progress task that has been running
+        longer than stale_after and is not the currently active one, so a
+        hung/forgotten step can never block the board forever."""
+        now = now if now is not None else time.time()
+        reaped = []
+        for task in list(self._tasks.values()):
+            if task["status"] != TASK_IN_PROGRESS:
+                continue
+            if task["id"] == active_id:
+                continue
+            started = task.get("started_at") or task.get("created_at") or 0
+            if now - started > self._stale_after:
+                self.requeue(task["id"], reason="stale")
+                reaped.append(task["id"])
+        return reaped
+
+    def close_all(self, reason="auto_finalized"):
+        """Complete every task still in todo/in_progress. Called when a
+        turn finishes so nothing is left hung or forgotten."""
+        closed = []
+        for tid in list(self._order):
+            if self._tasks[tid]["status"] != TASK_COMPLETED:
+                self._set_status(tid, TASK_COMPLETED,
+                                 meta_extra={reason: True})
+                closed.append(tid)
+        return closed
+
+    # ------------------------------------------------------ inspection
+
+    def counts(self):
+        c = {s: 0 for s in TASK_STATES}
+        for t in self._tasks.values():
+            c[t["status"]] = c.get(t["status"], 0) + 1
+        return c
+
+    def in_progress(self):
+        return [t["id"] for t in self._tasks.values()
+                if t["status"] == TASK_IN_PROGRESS]
+
+    def check_invariants(self):
+        """Strict constraint check: never more than ONE in_progress task."""
+        return len(self.in_progress()) <= 1
+
+    def snapshot(self):
+        """Machine-readable board state (counts + recent tasks)."""
+        recent = []
+        for tid in list(self._order)[-40:]:
+            t = self._tasks[tid]
+            meta = t.get("meta") or {}
+            recent.append({
+                "id": t["id"], "title": t["title"],
+                "status": t["status"], "parent": t.get("parent"),
+                "kind": meta.get("kind"),
+                "tool": meta.get("tool"),
+                "started_at": t.get("started_at"),
+                "completed_at": t.get("completed_at"),
+                "preempted": bool(t.get("preempted")),
+                "stale": bool(t.get("stale")),
+            })
+        return {"counts": self.counts(), "tasks": recent,
+                "in_progress": self.in_progress()}
+
+    def event(self):
+        """Pop the pending change log as a silent machine-readable event
+        dict (type 'task_board'), or None when nothing changed. The event
+        carries board state only - it is never rendered as user text."""
+        if not self._changes:
+            return None
+        changes, self._changes = self._changes, []
+        return {"type": "task_board", "board": self.snapshot(),
+                "changes": changes}
+
+    # ------------------------------------------------------ internals
+
+    def _set_status(self, task_id, status, meta_extra=None):
+        task = self._tasks[task_id]
+        old = task["status"]
+        if old == status:
+            return
+        task["status"] = status
+        now = time.time()
+        if status == TASK_IN_PROGRESS:
+            task["started_at"] = task.get("started_at") or now
+        elif status == TASK_COMPLETED:
+            task["completed_at"] = now
+            task["preempted"] = False
+        if meta_extra:
+            task["meta"].update(meta_extra)
+        self._log(task_id, "%s->%s" % (old, status), meta_extra)
+
+    def _log(self, task_id, op, meta_extra=None):
+        t = self._tasks[task_id]
+        self._changes.append({
+            "id": task_id, "op": op, "title": t["title"],
+            "at": time.time(), "extra": (meta_extra or {}),
+        })
+        if len(self._changes) > 60:
+            del self._changes[:-60]
+
+
+def _compact_args(args, limit=80):
+    """Compact a raw tool-arguments JSON string for a board task title."""
+    s = re.sub(r"\s+", " ", (args or "").strip())
+    if len(s) > limit:
+        s = s[:limit] + "..."
+    return s
+
+
 class Agent:
     def __init__(self, llm, memory=None, name="HackerAI",
                  max_iterations=60, max_messages=400,
@@ -1418,6 +1650,16 @@ class Agent:
         )
         self._tools_by_name = {t.name: t for t in self._tool_list}
         self._verification_results = []
+        # Built-In Task Board & State Tracking Engine: every user
+        # request (root task) and tool call (step task) is tracked
+        # silently in the background across todo -> in_progress ->
+        # completed, with the strict constraint that only ONE task is
+        # in_progress at any single moment. Board updates never touch
+        # user-facing text, so nothing can clutter answers or be left
+        # hung/forgotten (stale reaper + close_all on turn end).
+        self._task_board = TaskBoard()
+        self._root_task = None
+        self._active_task = None
 
     # ------------------------------------------------------------ prompt
 
@@ -1645,6 +1887,10 @@ class Agent:
           final      -> the final answer (sent once per terminal reply)
           error      -> LLM/tool error
 
+        Silent background state (never rendered as user text):
+          task_board  -> {board, changes} machine-readable Task Board
+                         update emitted when task state changes.
+
         Verification sub-agent events (only when the final answer contains
         security findings and auto_verify is enabled):
           validation_start           -> re-verification began (N findings)
@@ -1665,6 +1911,19 @@ class Agent:
         self.messages.append({"role": "user", "content": user_input})
         self._maybe_trim()
         yield {"type": "start", "content": user_input}
+        # Task Board: silently track this turn as the root task. Any
+        # in_progress task left over from a previous (possibly crashed)
+        # turn is reaped first so the board never hangs on forgotten
+        # work. Only one task may be in_progress at a time.
+        self._task_board.reap_stale()
+        self._root_task = self._task_board.add(
+            title=(user_input or "")[:140],
+            meta={"kind": "user_request"})
+        self._task_board.start(self._root_task)
+        self._active_task = self._root_task
+        bev = self._task_board.event()
+        if bev:
+            yield bev
         if (self.reasoning_engine and not self.npc_persona
                 and not self.game_master):
             self._reasoner.detect_objective(user_input)
@@ -1736,6 +1995,11 @@ class Agent:
                         content = self._apply_verification_tags(content)
                     if summary:
                         content = "%s\n\n---\n\n%s" % (content, summary)
+                self._task_board.close_all()
+                self._active_task = None
+                bev = self._task_board.event()
+                if bev:
+                    yield bev
                 yield {"type": "final", "content": content or "(empty reply)"}
                 return
 
@@ -1756,6 +2020,18 @@ class Agent:
                     name, args = "?", "{}"
                 yield {"type": "tool_call", "name": name,
                        "arguments": args}
+                # Task Board: this tool call becomes an in_progress
+                # step task under the root (preempting it - only one
+                # in_progress at a time).
+                step_id = self._task_board.add(
+                    title="%s %s" % (name, _compact_args(args)),
+                    parent=self._active_task,
+                    meta={"kind": "tool_call", "tool": name})
+                self._task_board.start(step_id)
+                self._active_task = step_id
+                bev = self._task_board.event()
+                if bev:
+                    yield bev
                 if self._check_tool_confirm(call):
                     result = execute_tool(self._tools_by_name, call,
                                           cancel_event=stop_event)
@@ -1768,12 +2044,27 @@ class Agent:
                 })
                 yield {"type": "tool_result", "name": name,
                        "content": result}
+                # Task Board: the step finished; the root task takes
+                # the in_progress slot again until the next step.
+                self._task_board.complete(step_id,
+                                          meta={"finished": True})
+                if self._root_task:
+                    self._task_board.start(self._root_task)
+                self._active_task = self._root_task
+                bev = self._task_board.event()
+                if bev:
+                    yield bev
                 if self.reasoning_engine:
                     tev = self._tactical_step(name, args, result)
                     if tev:
                         yield tev
             self._maybe_trim()
 
+        self._task_board.close_all()
+        self._active_task = None
+        bev = self._task_board.event()
+        if bev:
+            yield bev
         yield {"type": "final",
                "content": final or "[stopped: max iterations reached]"}
 
@@ -2339,6 +2630,11 @@ class Agent:
 
     def reset(self):
         self.messages = []
+        # Fresh Task Board per session: no leftover state can carry
+        # over into the next conversation.
+        self._task_board = TaskBoard()
+        self._root_task = None
+        self._active_task = None
 
     def tool_names(self):
         return ", ".join(t.name for t in self._tool_list)
