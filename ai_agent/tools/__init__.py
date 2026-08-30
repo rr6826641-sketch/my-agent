@@ -42,6 +42,14 @@ from .websearch import (
 from .skills import (
     tool_search_skills, tool_load_skill,
 )
+from .browser import (
+    tool_browse_page,
+    tool_click_element,
+    tool_fill_form,
+    tool_take_screenshot,
+    tool_capture_network_traffic,
+    tool_close_browser,
+)
 from .pentest import (
     tool_nmap_scan, tool_sqlmap_check, tool_nikto_scan,
     tool_nuclei_scan, tool_ffuf_fuzz, tool_gobuster_dir,
@@ -455,7 +463,26 @@ def create_tools(memory, knowledge=None, institutional=None,
                              "limit": _str_prop("max results (1-10, default 5)", 5)},
               "required": []},
              lambda query="", limit=5: tool_search_skills(query, int(limit or 5))),
-        Tool("load_skill", "Load a full methodology guide for one skill into "
+        
+Tool("browse_page", "Open a URL in headless Chromium; returns final URL, title, HTTP status, body preview and JS console/page errors (DOM XSS + SPA checks).",
+     {"type": "object", "properties": {"uri": _str_prop("page URL to open (http/https/file)"), "wait_ms": {"type": "integer", "default": 2500}, "capture_js_errors": {"type": "boolean", "default": True}}, "required": ["uri"]},
+     lambda uri="", wait_ms=2500, capture_js_errors=True: tool_browse_page(uri, int(wait_ms), bool(capture_js_errors))),
+Tool("click_element", "Click a CSS selector in the live browser page (SPA navigation, client-side auth bypass).",
+     {"type": "object", "properties": {"selector": _str_prop("CSS selector to click"), "wait_ms": {"type": "integer", "default": 1200}}, "required": ["selector"]},
+     lambda selector="", wait_ms=1200: tool_click_element(selector, int(wait_ms))),
+Tool("fill_form", "Fill form fields in the live page.",
+     {"type": "object", "properties": {"fields": _str_prop("JSON object mapping CSS selector to value"), "submit_selector": _str_prop("optional CSS selector to click after filling", "")}, "required": ["fields"]},
+     lambda fields="{}", submit_selector="": tool_fill_form(fields, submit_selector)),
+Tool("take_screenshot", "Save a PNG screenshot of the current page.",
+     {"type": "object", "properties": {"path": _str_prop("absolute output path (default: temp dir)", ""), "full_page": {"type": "boolean", "default": False}}, "required": []},
+     lambda path="", full_page=False: tool_take_screenshot(path, bool(full_page))),
+Tool("capture_network_traffic", "Record page network requests/responses (CSRF tokens, API calls).",
+     {"type": "object", "properties": {"uri": _str_prop("optional URL to navigate to", ""), "wait_ms": {"type": "integer", "default": 3000}, "filter_substring": _str_prop("optional URL substring filter", ""), "max_entries": {"type": "integer", "default": 250}}, "required": []},
+     lambda uri="", wait_ms=3000, filter_substring="", max_entries=250: tool_capture_network_traffic(uri, int(wait_ms), filter_substring, int(max_entries))),
+Tool("close_browser", "Close the headless browser and free memory.",
+     {"type": "object", "properties": {}, "required": []},
+     lambda: tool_close_browser()),
+Tool("load_skill", "Load a full methodology guide for one skill into "
              "context. Call search_skills first to find skill ids.",
              {"type": "object",
               "properties": {"skill_id": _str_prop("skill id, e.g. 'recon_methodology'")},

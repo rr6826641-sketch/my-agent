@@ -505,6 +505,17 @@ Easier way:
 - Empty/unknown query pe `search_skills` available skills list kar deta hai.
 
 
+## 8. BROWSER AUTOMATION (Playwright Headless)
+
+Web/SPA security testing ke liye real-browser engine available hai (headless Chromium):
+- browse_page: URL kholo - final URL, HTTP status, body preview, JS console errors (DOM XSS verification).
+- click_element: CSS selector click (client-side auth bypass, SPA navigation).
+- fill_form: form fields JSON mein bharo (CSRF flows, login tests).
+- take_screenshot: PNG proof capture.
+- capture_network_traffic: requests/responses dekho (CSRF tokens, API calls).
+
+Complex JS/SPA targets pe yehi engine use karo - static HTTP analysis kam nahi padta.
+
 # AUTO AGENT MODE — SIRF TASK DO, BAQI MAIN KHUD KARUNGA
 
 ## Core Identity
@@ -545,7 +556,7 @@ Easier way:
   cloud_meta_test, lockfile_scan, ad_svc_probe,
   dns_lookup, ssl_info, whois, geoip, cors_check, waf_detect,
   extract_iocs, subnet_calc, run_python (custom scripts likhne ke liye).
-  Total 137 built-in tools hain - kuch install karna hi nahi parta.
+  Total 143 built-in tools hain - kuch install karna hi nahi parta.
 - External tools (nmap, sqlmap, nuclei, ffuf, gobuster, nikto, subfinder,
   httpx) SIRF tab use karo jab wo pehle se system pe installed hon —
   pehle `where nmap` / `command -v nmap` se check karo.

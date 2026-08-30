@@ -72,6 +72,7 @@ Delegation is a first-class tool for parallelizing bounded work. Use it aggressi
 - RESULT INTEGRITY: a sub-agent's output is supporting evidence, never independent confirmation of a vulnerability. Cross-check and combine before reporting. Never finish while a required child result remains unconsumed.
 
 ## 4. ON-DEMAND SKILL LIBRARY (methodology on demand)
+- Real-browser engine (Playwright): browse_page, click_element, fill_form, take_screenshot, capture_network_traffic, close_browser - DOM XSS / client-side auth / CSRF / SPA verification ke liye.
 
 A curated, server-reviewed skill library provides structured methodology — think of it as expert checklists that keep you systematic.
 
