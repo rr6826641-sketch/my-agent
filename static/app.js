@@ -611,6 +611,18 @@ function sendMessage(text) {
       return;
     }
 
+    if (e.type === "notice") {
+      // Red Team Mode: model declined once, client auto-retried with
+      // authorization framing - surface that to the user.
+      const div = document.createElement("div");
+      div.className = "route-chip rt-notice";
+      div.innerHTML = `<span class="route-ico">☠</span><span class="route-txt"><b>Red Team</b>` +
+        ` <span class="route-reason">· ${escapeHtml(e.text || e.content || "auto-retry")}</span></span>`;
+      chatLog.appendChild(div);
+      scrollDown();
+      return;
+    }
+
     if (e.type === "llm") {
       // full assistant content before tool calls -> render as markdown
       typing.remove();

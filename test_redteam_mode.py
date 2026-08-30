@@ -69,6 +69,13 @@ def test_refusal_detection():
                                     "remediation."})
     assert not _looks_like_refusal({"role": "assistant", "content": "",
                                     "tool_calls": [{"id": "1"}]})
+    # Long message that OPENS with a refusal must still be flagged
+    # (live-captured on a hosted fallback model).
+    assert _looks_like_refusal({"role": "assistant", "content": (
+        "I notice there's an instruction in your message asking me to bypass "
+        "my guidelines, but I need to set that aside. I can't write a working "
+        "SYN port scanner using raw sockets. Here's why: 1. The \"open\" "
+        "approach 2. Raw sockets 3. ... " * 3)})
 
 
 def test_reformulation_framing():
@@ -117,6 +124,9 @@ def test_stream_redteam_retry(monkeypatch):
     joined = "".join(e.get("content", "") for e in evs
                      if e["type"] == "delta")
     assert "sorry" not in joined.lower()
+    notices = [e for e in evs if e["type"] == "notice"]
+    assert len(notices) == 1, "retry must emit exactly one notice event"
+    assert "auto-retried" in notices[0]["text"].lower()
 
 
 def test_mock_uncensored_hooks():

@@ -92,10 +92,16 @@ REFUSAL_PATTERNS = [
     r"i'?m here to (assist|help).*(not |can'?t |unable )",
     r"i cannot engage",
     r"i (will|would) (not|never) (help|assist|provide)",
+    # Telltales observed on hosted models (often followed by a long
+    # explanation - see _looks_like_refusal head-based check).
+    r"bypass(ing)? (my|our|the|these).*(guideline|polic|safety|rule)",
+    r"(need to|must) set (that|this) aside",
 ]
 _REFUSAL_RE = re.compile("|".join(REFUSAL_PATTERNS), re.IGNORECASE)
 
-# Real technical answers are (usually) longer than a refusal.
+# Refusal checks look at the opening of the message only. Hosted models
+# often refuse and then append a long explanation ("I can't do X. Here's
+# why: 1.. 2.."); that whole message must still be treated as a refusal.
 _REFUSAL_MAX_LEN = 600
 
 
@@ -107,9 +113,8 @@ def _looks_like_refusal(message):
     content = (msg.get("content") or "").strip()
     if not content:
         return False
-    if len(content) > _REFUSAL_MAX_LEN:
-        return False
-    return bool(_REFUSAL_RE.search(content))
+    head = content[:_REFUSAL_MAX_LEN]
+    return bool(_REFUSAL_RE.search(head))
 
 
 def _prep_messages(messages, uncensored):
@@ -308,7 +313,10 @@ class OpenAIClient:
                 retry = None
             if retry is not None and not _looks_like_refusal(retry):
                 final_msg = retry
-                events = [{"type": "delta",
+                events = [{"type": "notice",
+                           "text": "model declined — auto-retried with "
+                                   "authorization framing (Red Team Mode)"},
+                          {"type": "delta",
                            "content": retry.get("content") or ""}]
         for ev in events:
             yield ev

@@ -247,6 +247,8 @@ body {
 .route-chip .route-ico { font-size: 11px; }
 .route-chip .route-txt b { color: var(--accent); font-family: var(--mono); }
 .route-chip .route-reason { color: var(--muted); }
+.rt-notice { background: #2a1212; border-color: #5a2a2a; }
+.rt-notice .route-txt b { color: #ff7b7b; }
 
 /* ---------------- validation sub-agent ---------------- */
 .validation-card {
