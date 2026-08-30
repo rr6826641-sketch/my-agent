@@ -126,7 +126,8 @@ def run_tests():
     section("Task 6 - prompt still renders")
     try:
         out = core.SYSTEM_PROMPT.format(name="HackerAI", memory_block="",
-                                        knowledge_block="")
+                                        knowledge_block="",
+                                        workspace_block="")
         check("prompt_renders", "# PENTEST FRAMEWORK" in out
               and "# PRODUCTION CODE RULES" in out)
     except Exception as exc:

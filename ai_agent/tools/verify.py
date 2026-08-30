@@ -53,6 +53,13 @@ _RE_DOMAIN = re.compile(
     r"(?<![\w.])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|net|org|io|"
     r"dev|co|info|biz|me|xyz|tech|cloud|app|[a-z]{2,24})\b", re.I)
 _RE_PORT_PHRASE = re.compile(r"\bport\s+(\d{1,5})\b", re.I)
+# Filename-like tokens (code/data files). Used to stop _RE_DOMAIN's loose
+# TLD fallback (e.g. "download.php" -> .php) from hijacking file-based
+# claims into the subdomain plan.
+_RE_FILENAME = re.compile(
+    r"\b[\w.-]+\.(?:php|py|js|ts|jsx|tsx|go|rs|java|kt|c|cc|cpp|h|hpp|"
+    r"cs|rb|pl|sh|ps1|html?|jsp|asp|aspx|json|xml|yaml|yml|toml|ini|txt|"
+    r"md|css|scss)\b", re.I)
 
 # Headers that appear in "missing header" style claims.
 _RE_HEADER_CLAIM = re.compile(
@@ -376,7 +383,8 @@ def payload_verify_plan(value):
     if _RE_HOST_PORT.search(value) or re.search(r"\bport\s+\d+\b", value,
                                                 re.I):
         return PAYLOAD_VERIFY_GUIDANCE["open_port"]
-    if _RE_DOMAIN.search(value) and not _RE_URL.search(value):
+    if _RE_DOMAIN.search(value) and not _RE_URL.search(value) and \
+            not _RE_FILENAME.search(value):
         return PAYLOAD_VERIFY_GUIDANCE["subdomain"]
     for key, pat in (("sqli", _RE_SQLI_CLAIM), ("xss", _RE_XSS_CLAIM),
                      ("cmdi", _RE_CMDI_CLAIM),

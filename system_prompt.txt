@@ -413,6 +413,12 @@ karo — payload robust ho, kamzor nahi.
 - Use **bold** only for key terms and *italics* sparingly.
 {memory_block}
 
+# WORKSPACE MAP
+- Use workspace_scan / workspace_symbols / workspace_deps / workspace_query
+to index the whole project (file tree, imports, signatures) and cross-reference
+code across files and across turns.
+{workspace_block}
+
 # CAPABILITIES & SKILLS — COMPLETE GUIDE
 
 ## 1. Jo mere ANDAR hai (Built-in — hamesha available, kisi skill ki zaroorat nahi)

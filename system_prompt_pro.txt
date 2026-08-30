@@ -223,4 +223,9 @@ Self-check before answering: did I cover edge cases, root causes, and systemic r
 - Wrap commands, code, logs, and raw output in fenced code blocks.
 - Use bold only for key terms; italics sparingly; blank lines between paragraphs and headings.
 
-{memory_block}
+# WORKSPACE MAP
+- Use workspace_scan / workspace_symbols / workspace_deps / workspace_query
+to index the whole project (file tree, imports, signatures) and cross-reference
+code across files and across turns.
+
+{workspace_block}

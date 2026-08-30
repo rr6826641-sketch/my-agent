@@ -8,6 +8,7 @@ import time
 
 from .llm import LLMError, RunCancelled
 from .tools import create_tools, execute_tool
+from .tools.workspace import WorkspaceIndex
 from .tools.verify import (
     REJECTED as V_REJECTED,
     UNVERIFIED as V_UNVERIFIED,
@@ -298,7 +299,10 @@ Formatting rules (very important):
 - Put a blank line between paragraphs, headings and lists - never cram text together.
 - Use **bold** only for key terms and *italics* sparingly.
 {memory_block}
-{knowledge_block}"""
+{knowledge_block}
+# WORKSPACE MAP: use workspace_scan / workspace_symbols / workspace_deps /
+# workspace_query to index and cross-reference the whole project across turns.
+{workspace_block}"""
 
 # ---------------------------------------------------------------------------
 # Verification sub-agent (Automated Verification Architecture)
@@ -414,6 +418,30 @@ _RE_COMPLEX_BUG = re.compile(
     r"null pointer dereference|deadlock|memory leak|double[- ]free|"
     r"deserialization|code audit|static analysis|multi[- ]file refactor|"
     r"bug in the code|code flaw|defect|faulty logic)\b", re.I)
+# Concrete bug keywords (no generic audit trigger phrases). Used to pick WHICH
+# bug the validator re-checks when a complex-bug trigger fired - re.search is
+# position-first, so "code audit found a race condition" would otherwise hand
+# the validator the trigger phrase instead of the actual bug.
+_RE_SPECIFIC_BUG = re.compile(
+    r"\b(race condition|use[- ]after[- ]free|buffer overflow|integer overflow|"
+    r"off[- ]by[- ]one|null pointer dereference|deadlock|memory leak|"
+    r"double[- ]free|deserialization|logic(?:al)? (?:error|flaw|bug))\b",
+    re.I)
+
+
+def _pick_complex_bug_value(text):
+    """Extract the concrete bug name from a complex-bug claim.
+
+    Prefers a specific bug keyword (race condition, use-after-free, ...) over
+    generic audit trigger phrases (code audit, static analysis, ...) so the
+    validator re-checks the actual bug, not the phrase that triggered it.
+    """
+    m = _RE_SPECIFIC_BUG.search(text or "")
+    if m:
+        return m.group(0)
+    m = _RE_COMPLEX_BUG.search(text or "")
+    return m.group(0) if m else ""
+
 
 # ---------------------------------------------------------------------------
 # Dynamic tactical reasoning engine: shared constants.
@@ -1292,6 +1320,7 @@ class Agent:
         self._tactical_blocks = []
         self._kb_target = None
         self.messages = []
+        self._workspace_index = WorkspaceIndex()
         self._tool_list = create_tools(
             memory, knowledge=knowledge,
             confirm_terminal=confirm_terminal,
@@ -1303,6 +1332,7 @@ class Agent:
             if allow_subagents else None,
             rpg_ctx=({"world": world_state, "lorebook": lorebook}
                      if game_master else None),
+            workspace_index=self._workspace_index,
         )
         self._tools_by_name = {t.name: t for t in self._tool_list}
         self._verification_results = []
@@ -1345,10 +1375,20 @@ class Agent:
                     template = f.read()
         except Exception:
             pass  # fall back to the built-in prompt on any error
+        # Workspace index: compact map of the currently indexed project so the
+        # agent keeps multi-file awareness across turns (workspace_* tools).
+        workspace_block = ""
+        try:
+            workspace_block = self._workspace_index.summary()
+        except Exception:
+            workspace_block = ""
         prompt = template.format(name=self.name, memory_block=memory_block,
-                                 knowledge_block=knowledge_block)
+                                 knowledge_block=knowledge_block,
+                                 workspace_block=workspace_block)
         if knowledge_block and "{knowledge_block}" not in template:
             prompt = "%s\n\n%s" % (prompt, knowledge_block)
+        if workspace_block and "{workspace_block}" not in template:
+            prompt = "%s\n\n%s" % (prompt, workspace_block)
         if self.reasoning_engine:
             ctx = self._render_tactical_context()
             if ctx:
@@ -1848,8 +1888,8 @@ class Agent:
                 seen_values.add(key)
                 finding_pool.append(f)
         if complex_bug:
-            bug_value = _RE_COMPLEX_BUG.search(text).group(0)
-            if bug_value.lower() not in seen_values:
+            bug_value = _pick_complex_bug_value(text)
+            if bug_value and bug_value.lower() not in seen_values:
                 finding_pool.append({"type": "bug", "value": bug_value,
                                      "severity": "high"})
 
@@ -1966,6 +2006,15 @@ class Agent:
                        "method": method}
 
         # ---- persist verdicts for final-answer tagging ------------------
+        # Include findings the deterministic pass resolved AND any synthesized
+        # entries the validator was asked about (e.g. complex-bug findings
+        # appended to finding_pool but not to findings).
+        results_src = list(findings)
+        seen = {f["value"].lower() for f in findings}
+        for f in finding_pool:
+            if f["value"].lower() not in seen:
+                seen.add(f["value"].lower())
+                results_src.append(f)
         self._verification_results = [{
             "type": f["type"], "value": f["value"],
             "status": (resolved.get(f["value"].lower()) or {}).get(
@@ -1974,7 +2023,7 @@ class Agent:
                 "reason", ""),
             "method": (resolved.get(f["value"].lower()) or {}).get(
                 "method", "sub-agent"),
-        } for f in findings]
+        } for f in results_src]
 
         verified = sum(1 for r in self._verification_results
                        if r["status"] == V_VERIFIED)

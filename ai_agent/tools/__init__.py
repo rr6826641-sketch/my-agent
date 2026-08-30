@@ -78,6 +78,10 @@ from .custom import (
     tool_sha1_quick, tool_strings_extract, tool_html_to_text,
     tool_dedupe_lines, tool_count_lines,
 )
+from .workspace import (
+    tool_workspace_scan, tool_workspace_symbols, tool_workspace_deps,
+    tool_workspace_query, tool_workspace_export,
+)
 
 from .base import Tool as _Tool  # noqa: F401
 
@@ -93,7 +97,7 @@ def _str_prop(desc, default=None, enum=None):
 
 def create_tools(memory, knowledge=None, confirm_terminal=True,
                  spawn_fn=None, allow_spawn=True, spawn_parallel_fn=None,
-                 rpg_ctx=None):
+                 rpg_ctx=None, workspace_index=None):
     """Build the full tool list for an Agent.
 
     rpg_ctx: optional dict with 'world' (GameState) and 'lorebook'
@@ -1106,6 +1110,60 @@ def create_tools(memory, knowledge=None, confirm_terminal=True,
               "properties": {"host": _str_prop("host, IP or URL to check")},
               "required": ["host"]},
              lambda host="": tool_check_scope(host or "")),
+
+        # ---- workspace mapping & cross-references ----
+        Tool("workspace_scan", "Index a project/workspace directory: file tree "
+             "with per-file stats (language, size, lines) plus a cached symbol "
+             "and import index used by the other workspace_* tools. Re-scans "
+             "only changed files (mtime cache).",
+             {"type": "object",
+              "properties": {"root": _str_prop("workspace directory to index", "."),
+                             "depth": {"type": "integer",
+                                       "description": "limit scan depth (optional)"}},
+              "required": []},
+             lambda root=".", depth=None:
+                 tool_workspace_scan(root or ".", depth=depth,
+                                     index=workspace_index)),
+        Tool("workspace_symbols", "List function/class signatures indexed for "
+             "the workspace (optionally filtered by file glob).",
+             {"type": "object",
+              "properties": {"root": _str_prop("workspace directory", "."),
+                             "file_pattern": _str_prop(
+                                 "file glob filter, e.g. 'core.py' or '*.py'", "*")},
+              "required": []},
+             lambda root=".", file_pattern="*":
+                 tool_workspace_symbols(root or ".", file_pattern or "*",
+                                        index=workspace_index)),
+        Tool("workspace_deps", "Show the dependency (import) graph for one "
+             "file: internal imports resolved to files, external packages, "
+             "and the reverse list of files that import it. Without a file, "
+             "prints all internal import edges.",
+             {"type": "object",
+              "properties": {"root": _str_prop("workspace directory", "."),
+                             "file": _str_prop(
+                                 "relative file path to inspect (empty = whole graph)", "")},
+              "required": []},
+             lambda root=".", file="":
+                 tool_workspace_deps(root or ".", file or "",
+                                     index=workspace_index)),
+        Tool("workspace_query", "Cross-reference lookup across the whole "
+             "workspace: where a function/class is defined and referenced, or "
+             "which files import a module. Free-form text searches code lines.",
+             {"type": "object",
+              "properties": {"query": _str_prop(
+                  "symbol name, module path, or text to find"),
+                             "root": _str_prop("workspace directory", ".")},
+              "required": ["query"]},
+             lambda query="", root=".":
+                 tool_workspace_query(query or "", root or ".",
+                                      index=workspace_index)),
+        Tool("workspace_export", "Export the current workspace index as JSON "
+             "(files, symbols, imports) for caching or persistence.",
+             {"type": "object",
+              "properties": {"root": _str_prop("workspace directory", ".")},
+              "required": []},
+             lambda root=".":
+                 tool_workspace_export(root or ".", index=workspace_index)),
     ]
 
     if rpg_ctx:
