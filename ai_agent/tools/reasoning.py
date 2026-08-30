@@ -12,7 +12,7 @@ from __future__ import annotations
 
 _KEYWORDS = {
     "recon": ["recon", "scan", "enumerate", "osint", "subdomain", "footprint", "fingerprint"],
-    "exploit": ["exploit", "pwn", "bypass", "rce", "inject", "payload", "attack"],
+    "exploit": ["hack", "exploit", "pwn", "bypass", "rce", "inject", "payload", "attack"],
     "debug": ["debug", "error", "crash", "traceback", "broken", "not working", "hang"],
     "research": ["research", "search", "cve", "citation", "source", "compare", "investigate"],
     "report": ["report", "summary", "writeup", "document", "review"],
