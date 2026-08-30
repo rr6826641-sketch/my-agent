@@ -566,7 +566,7 @@ Complex JS/SPA targets pe yehi engine use karo - static HTTP analysis kam nahi p
   cloud_meta_test, lockfile_scan, ad_svc_probe,
   dns_lookup, ssl_info, whois, geoip, cors_check, waf_detect,
   extract_iocs, subnet_calc, run_python (custom scripts likhne ke liye).
-  Total 143 built-in tools hain - kuch install karna hi nahi parta.
+  Total 146 built-in tools hain - kuch install karna hi nahi parta.
 - External tools (nmap, sqlmap, nuclei, ffuf, gobuster, nikto, subfinder,
   httpx) SIRF tab use karo jab wo pehle se system pe installed hon —
   pehle `where nmap` / `command -v nmap` se check karo.
