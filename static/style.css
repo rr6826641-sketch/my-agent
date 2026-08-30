@@ -672,3 +672,13 @@ body {
 .b-prog { border: 1px solid rgba(80,160,255,.45); }
 .b-done { border: 1px solid rgba(80,220,130,.4); }
 .board-current { color: #8fd3ff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Task Board widget - recent tasks list */
+.board-list { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; max-height: 96px; overflow-y: auto; }
+.b-item { display: flex; align-items: center; gap: 5px; color: #b9c2cd; font-size: 10.5px; }
+.b-item .b-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.b-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: #8a93a0; }
+.b-item.todo .b-dot { background: #ffc83c; }
+.b-item.in_progress .b-dot { background: #50a0ff; box-shadow: 0 0 4px #50a0ff; }
+.b-item.completed .b-dot { background: #50dc82; }
+.b-item.completed { opacity: .55; }

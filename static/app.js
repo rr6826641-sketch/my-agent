@@ -1458,6 +1458,13 @@ function renderBoard(board) {
   const ip = board.in_progress || [];
   const cur = document.getElementById("b-current");
   if (cur) cur.textContent = ip.length ? "▶ " + (ip[0].title || ip[0].id) : "idle";
+  const list = document.getElementById("board-list");
+  if (list) {
+    const tasks = (board.tasks || []).slice(-5).reverse();
+    list.innerHTML = tasks.map((t) =>
+      `<div class="b-item ${t.status || ""}"><span class="b-dot"></span><span class="b-title">${escapeHtml(t.title || t.id)}</span></div>`
+    ).join("");
+  }
   w.hidden = false;
 }
 async function refreshBoard() {
