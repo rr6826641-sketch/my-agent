@@ -33,6 +33,8 @@ from .code import (
 )
 from .terminal import (
     tool_run_terminal, tool_read_file, tool_write_file, tool_list_files,
+    tool_start_session, tool_send_input, tool_view_session_output,
+    tool_wait_for_pattern, tool_kill_session, tool_list_sessions,
 )
 from .websearch import (
     tool_web_search, tool_open_url,
@@ -226,6 +228,90 @@ def create_tools(memory, knowledge=None, confirm_terminal=True,
               "properties": {"path": _str_prop("directory", ".")},
               "required": []},
              lambda path=".": tool_list_files(path or ".")),
+
+        # ---- persistent interactive sessions ----
+        Tool("start_session",
+             "Start a long-running interactive shell/process (e.g. a dev "
+             "server, REPL, scanner, or listener) and return a session_id. "
+             "The session keeps running in the background across tool calls "
+             "so you can send input, read output, and wait for patterns "
+             "later.",
+             {"type": "object",
+              "properties": {"command": _str_prop(
+                  "command line to start (e.g. 'nmap -p- host')"),
+                  "cwd": _str_prop("working directory", None),
+                  "name": _str_prop("friendly label"),
+                  "env": _str_prop("extra env vars as KEY=VALUE;...", None),
+                  "shell": {"type": "boolean", "default": True,
+                             "description": "run via shell"}},
+              "required": ["command"]},
+             lambda command="", cwd=None, name=None, env=None, shell=True:
+                 tool_start_session(command, cwd=cwd or None, name=name or None,
+                                    env=env or None, shell=bool(shell))),
+        Tool("send_input",
+             "Send text or a control signal (ctrl_c, ctrl_d, ctrl_z, esc, "
+             "enter) into a running interactive session's stdin. Control "
+             "signals do not kill the background process.",
+             {"type": "object",
+              "properties": {"session_id": _str_prop(
+                  "session id from start_session"),
+                  "input": _str_prop("text to type", ""),
+                  "signal": _str_prop(
+                      "control signal name: ctrl_c, ctrl_d, ctrl_z, esc, "
+                      "enter", None, enum=["ctrl_c", "ctrl_d", "ctrl_z",
+                                            "esc", "enter"]),
+                  "press_enter": {"type": "boolean", "default": True}},
+              "required": ["session_id"]},
+             lambda session_id="", input="", signal=None, press_enter=True:
+                 tool_send_input(session_id, input=input, signal=signal,
+                                 press_enter=bool(press_enter))),
+        Tool("view_session_output",
+             "Read accumulated output of a running session (never blocks; "
+             "use wait_for_pattern to wait for something).",
+             {"type": "object",
+              "properties": {"session_id": _str_prop(
+                  "session id from start_session"),
+                  "tail": {"type": "integer", "default": 4000,
+                            "description": "max chars per stream"},
+                  "clear": {"type": "boolean", "default": False,
+                             "description": "clear buffers after read"},
+                  "include_stderr": {"type": "boolean", "default": True}},
+              "required": ["session_id"]},
+             lambda session_id="", tail=4000, clear=False,
+                    include_stderr=True:
+                 tool_view_session_output(
+                     session_id, tail=int(tail or 4000), clear=bool(clear),
+                     include_stderr=bool(include_stderr))),
+        Tool("wait_for_pattern",
+             "Poll a running session until a regex pattern appears in its "
+             "combined output (or a timeout elapses). Use this after "
+             "sending input to wait for the program's next prompt.",
+             {"type": "object",
+              "properties": {"session_id": _str_prop(
+                  "session id from start_session"),
+                  "pattern": _str_prop("regex to search for"),
+                  "timeout": {"type": "integer", "default": 60,
+                               "description": "seconds (max 100)"}},
+              "required": ["session_id", "pattern"]},
+             lambda session_id="", pattern="", timeout=60:
+                 tool_wait_for_pattern(session_id, pattern, timeout=timeout)),
+        Tool("kill_session",
+             "Terminate a session's process tree and remove it from the "
+             "session ledger.",
+             {"type": "object",
+              "properties": {"session_id": _str_prop(
+                  "session id from start_session")},
+              "required": ["session_id"]},
+             lambda session_id="": tool_kill_session(session_id)),
+        Tool("list_sessions",
+             "List all interactive sessions: id, pid, status, age, and "
+             "output sizes. Pass active_only=true for just running ones.",
+             {"type": "object",
+              "properties": {"active_only": {"type": "boolean",
+                                              "default": False}},
+              "required": []},
+             lambda active_only=False:
+                 tool_list_sessions(active_only=bool(active_only))),
         Tool("web_search",
              "Search the web (DuckDuckGo) and return top results with links "
              "and snippets.",

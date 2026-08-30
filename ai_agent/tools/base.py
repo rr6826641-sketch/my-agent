@@ -69,10 +69,17 @@ def kill_proc_tree(proc):
         pass
 
 
-def kill_active_procs():
-    """Kill every subprocess currently started by tools (Stop path)."""
+def kill_active_procs(include_sessions=False):
+    """Kill every subprocess currently started by tools.
+
+    Long-lived interactive sessions (started via start_session) survive
+    plain tool-timeout kills so a slow wait_for_pattern can never destroy
+    a running nmap scan / dev server / listener. Pass include_sessions=True
+    on user Stop / shutdown so they are torn down too.
+    """
     with _proc_lock:
-        procs = list(_active_procs)
+        procs = [p for p in _active_procs
+                 if include_sessions or not getattr(p, "_hackerai_session_proc", False)]
     for proc in procs:
         kill_proc_tree(proc)
         unregister_proc(proc)
@@ -118,7 +125,7 @@ def execute_tool(tool_by_name, tool_call, timeout=TOOL_TIMEOUT,
     deadline = time.time() + timeout
     while True:
         if cancel_event is not None and cancel_event.is_set():
-            kill_active_procs()
+            kill_active_procs(include_sessions=True)
             return "[cancelled by user]"
         worker.join(0.2)
         if not worker.is_alive():
