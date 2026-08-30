@@ -19,6 +19,7 @@ context). This keeps the static system prompt lean and the reasoning context foc
 |---|---|---|---|
 | `recon_methodology` | Reconnaissance & Attack Surface Mapping | methodology | recon, osint, enumeration, discovery |
 | `web_exploitation_patterns` | Web Application Exploitation Patterns | methodology | sqli, xss, ssrf, xxe, ssti, idor, jwt |
+| `browser_dom_testing` | Real-Browser DOM, SPA and Client-Side Security Testing | methodology | dom-xss, spa, csrf, playwright |
 | `active_directory` | Active Directory Attack & Defense Playbook | methodology | kerberos, kerberoast, llmnr, pth, ad |
 | `report_templates` | Pentest Report Templates & Writing Standards | reporting | cvss, cwe, writeup, template |
 

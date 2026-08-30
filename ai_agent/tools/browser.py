@@ -128,7 +128,16 @@ def tool_browse_page(uri: str, wait_ms: int = 2500, capture_js_errors: bool = Tr
     page = _ensure_page()
     if page is None:
         return {"error": _pw_missing()}
-    _reset_capture()
+    # Same-document (hash-only) navigation does not re-fetch the document, so
+    # keep the previous HTTP status instead of resetting it to None.
+    same_doc = False
+    try:
+        cur = page.url
+        same_doc = bool(cur and uri.startswith(("http://", "https://")) and cur.split("#")[0] == uri.split("#")[0])
+    except Exception:
+        pass
+    if not same_doc:
+        _reset_capture()
     try:
         page.goto(uri, wait_until="domcontentloaded", timeout=max(int(wait_ms), 1000))
         page.wait_for_timeout(int(wait_ms))

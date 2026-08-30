@@ -1,0 +1,13 @@
+{
+  "id": "browser_dom_testing",
+  "title": "Real-Browser DOM, SPA & Client-Side Security Testing",
+  "version": "1.0.0",
+  "category": "methodology",
+  "description": "Playwright/Chromium real-browser workflow for verifying DOM-based XSS, client-side auth bypasses, CSRF flows and JavaScript single-page applications (SPAs). Covers source/sink mapping, hash/query payload delivery, SPA route clicking, form automation and network-traffic inspection.",
+  "tags": ["browser", "playwright", "dom-xss", "spa", "csrf", "client-side", "javascript", "auth-bypass"],
+  "keywords": ["dom xss", "dom-based xss", "innerHTML", "document.write", "postMessage", "location.hash", "spa testing", "single page application", "client side auth", "csrf verification", "headless browser", "javascript rendering", "localStorage", "xss sink", "xss source"],
+  "phases": ["vulnerability-mapping", "proof-of-concept"],
+  "tools": ["browse_page", "click_element", "fill_form", "take_screenshot", "capture_network_traffic", "close_browser"],
+  "load_budget": "low",
+  "when_to_use": "Any web target where the page runs JavaScript: DOM XSS candidates, hash/query-driven sinks, SPAs whose content never appears in raw HTTP responses, client-side login/role logic, or CSRF-relevant forms."
+}
