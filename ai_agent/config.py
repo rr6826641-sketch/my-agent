@@ -28,6 +28,7 @@ DEFAULTS = {
     "model": "gpt-4o-mini",
     "mock": False,
     "auto": False,
+    "red_team_mode": False,
     "once": "",
     "memory_file": os.path.join(PROJECT_DIR, "memory.json"),
     "max_iterations": 60,
@@ -164,6 +165,8 @@ def load_config(args=None):
             cfg["mock"] = True
         if args.auto:
             cfg["auto"] = True
+        if getattr(args, "red_team_mode", False):
+            cfg["red_team_mode"] = True
         if args.once:
             cfg["once"] = args.once
         if args.memory_file:

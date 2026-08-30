@@ -894,6 +894,7 @@ async function loadSettings() {
   $("#set-model").value = s.auto ? "auto" : (s.model || "auto");
   $("#set-auto").checked = !!s.auto;
   $("#set-mock").checked = !!s.mock;
+  $("#set-redteam").checked = !!s.red_team_mode;
   $("#set-iter").value = s.max_iterations || 12;
 }
 
@@ -913,6 +914,7 @@ $("#set-save").addEventListener("click", async () => {
       model: $("#set-model").value.trim(),
       auto: $("#set-auto").checked,
       mock: $("#set-mock").checked,
+      red_team_mode: $("#set-redteam").checked,
       max_iterations: parseInt($("#set-iter").value, 10) || 12,
     }),
   });

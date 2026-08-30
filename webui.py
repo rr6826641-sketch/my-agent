@@ -230,7 +230,7 @@ def _save_cfg(patch):
 def _build_llm(cfg):
     """Create the LLM client from the current config (mock or live)."""
     if cfg.get("mock"):
-        return MockClient()
+        return MockClient(uncensored=cfg.get("red_team_mode"))
     # Smart Auto-Model Selector: in auto mode the configured model is a
     # placeholder; the actual model is chosen per-request by the router.
     model = cfg.get("model") or "gpt-4o-mini"
@@ -241,6 +241,7 @@ def _build_llm(cfg):
         base_url=cfg.get("base_url") or "https://api.openai.com/v1",
         model=model,
         fallback_models=cfg.get("fallback_models"),
+        uncensored=cfg.get("red_team_mode"),
     )
 
 
@@ -306,6 +307,7 @@ def _status():
     return {
         "mode": mode,
         "model": model,
+        "red_team_mode": bool(cfg.get("red_team_mode")),
         "base_url": "built-in" if cfg.get("mock") else cfg.get("base_url", "?"),
         "has_key": bool(cfg.get("api_key")),
         "key_error": _state.get("key_error", ""),
@@ -1018,6 +1020,7 @@ def api_settings():
         "auto": auto,
         "catalog": MODEL_CATALOG,
         "mock": bool(cfg.get("mock")),
+        "red_team_mode": bool(cfg.get("red_team_mode")),
         "key_error": _state.get("key_error", ""),
         "max_iterations": cfg.get("max_iterations", 60),
     })
@@ -1031,9 +1034,11 @@ def api_settings_save():
     model = (data.get("model") or "").strip()
     auto = bool(data.get("auto")) or (model == "auto")
     mock = bool(data.get("mock"))
+    red_team_mode = bool(data.get("red_team_mode"))
     mi = data.get("max_iterations")
 
-    patch = {"mock": mock, "auto": auto}
+    patch = {"mock": mock, "auto": auto,
+             "red_team_mode": red_team_mode}
     if api_key:
         # Security: API keys go ONLY into .env, never config.json.
         ok, msg = save_env_key(api_key)

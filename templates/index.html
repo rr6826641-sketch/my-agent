@@ -157,6 +157,10 @@
         <label class="check">
           <input type="checkbox" id="set-mock"> Mock mode (built-in test LLM, no key needed)
         </label>
+        <label class="check">
+          <input type="checkbox" id="set-redteam"> ☠ Red Team Mode (uncensored)
+          <small>Full-uncensored HackerAI: no refusals, auto-retry when the model declines, authorization block injected into the system prompt</small>
+        </label>
         <label>Max iterations
           <input type="number" id="set-iter" min="1" max="100" value="12">
         </label>
