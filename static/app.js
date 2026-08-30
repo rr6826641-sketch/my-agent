@@ -1449,6 +1449,13 @@ document.addEventListener("click", (e) => {
 });
 
 /* ---------------- task board widget: silent state tracker ---------------- */
+let boardTick = null;
+function stopBoardTick() { if (boardTick) { clearInterval(boardTick); boardTick = null; } }
+function fmtElapsed(s) {
+  s = Math.max(0, Math.floor(s));
+  const m = Math.floor(s / 60), sec = s % 60;
+  return (m ? m + "m " : "") + sec + "s";
+}
 function renderBoard(board) {
   const w = document.getElementById("board-widget");
   if (!w || !board) return;
@@ -1457,7 +1464,19 @@ function renderBoard(board) {
   setN("b-todo", c.todo); setN("b-prog", c.in_progress); setN("b-done", c.completed);
   const ip = board.in_progress || [];
   const cur = document.getElementById("b-current");
-  if (cur) cur.textContent = ip.length ? "▶ " + (ip[0].title || ip[0].id) : "idle";
+  const live = (board.tasks || []).filter((t) => t.status === "in_progress").pop();
+  if (cur && live) {
+    const tool = live.tool ? " (" + live.tool + ")" : "";
+    const label = "▶ " + (live.title || live.id) + tool;
+    const start = typeof live.started_at === "number" ? live.started_at : null;
+    const upd = () => { cur.textContent = start ? label + " · " + fmtElapsed(Date.now() / 1000 - start) : label; };
+    upd();
+    stopBoardTick();
+    boardTick = setInterval(upd, 1000);
+  } else if (cur) {
+    stopBoardTick();
+    cur.textContent = ip.length ? "▶ " + (ip[0].title || ip[0].id) : "idle";
+  }
   const list = document.getElementById("board-list");
   if (list) {
     const tasks = (board.tasks || []).slice(-5).reverse();
