@@ -685,6 +685,17 @@ function sendMessage(text) {
       // end-of-turn panel: saved scan outputs + markdown report button
       typing.remove();
       renderArtifactsPanel(e.artifacts, e.chat_id);
+    } else if (e.type === "task_board") {
+      // silent background state tracker: live board counts, never chat clutter
+      const w = document.getElementById("board-widget");
+      if (!w) return;
+      const c = (e.board && e.board.counts) || {};
+      const setN = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v || 0; };
+      setN("b-todo", c.todo); setN("b-prog", c.in_progress); setN("b-done", c.completed);
+      const ip = (e.board && e.board.in_progress) || [];
+      const cur = document.getElementById("b-current");
+      if (cur) cur.textContent = ip.length ? "▶ " + (ip[0].title || ip[0].id) : "idle";
+      w.hidden = false;
     } else if (e.type === "validation_spawned") {
       // an independent validation sub-agent was spawned for critical/high
       // findings, complex bugs, or unresolved findings

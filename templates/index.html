@@ -36,6 +36,16 @@
       <button class="nav-item" data-view="system">🖥️ System</button>
     </nav>
 
+    <div class="board-widget" id="board-widget" hidden>
+      <div class="board-head">📋 Task Board</div>
+      <div class="board-row">
+        <span class="b-chip b-todo">todo <b id="b-todo">0</b></span>
+        <span class="b-chip b-prog">in_progress <b id="b-prog">0</b></span>
+        <span class="b-chip b-done">completed <b id="b-done">0</b></span>
+      </div>
+      <div class="board-current" id="b-current">idle</div>
+    </div>
+
     <div class="sidebar-footer">
       <div class="status-line">
         <span class="dot" id="dot-mode"></span>

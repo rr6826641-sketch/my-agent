@@ -654,3 +654,21 @@ body {
 .report-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .report-btn { font-size: 12px; padding: 7px 12px; text-decoration: none; cursor: pointer; }
 .artifact-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+
+/* Task Board widget (silent sidebar state tracker) */
+.board-widget {
+  margin: 8px 12px 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  font-size: 11px;
+}
+.board-widget .board-head { font-weight: 600; color: #9aa4b2; margin-bottom: 6px; }
+.board-widget .board-row { display: flex; gap: 6px; margin-bottom: 6px; }
+.b-chip { padding: 2px 6px; border-radius: 10px; background: rgba(255,255,255,.06); color: #cdd5df; }
+.b-chip b { color: #fff; }
+.b-todo { border: 1px solid rgba(255,200,60,.35); }
+.b-prog { border: 1px solid rgba(80,160,255,.45); }
+.b-done { border: 1px solid rgba(80,220,130,.4); }
+.board-current { color: #8fd3ff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
