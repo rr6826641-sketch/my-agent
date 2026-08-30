@@ -39,6 +39,9 @@ from .terminal import (
 from .websearch import (
     tool_web_search, tool_open_url,
 )
+from .skills import (
+    tool_search_skills, tool_load_skill,
+)
 from .pentest import (
     tool_nmap_scan, tool_sqlmap_check, tool_nikto_scan,
     tool_nuclei_scan, tool_ffuf_fuzz, tool_gobuster_dir,
@@ -444,6 +447,20 @@ def create_tools(memory, knowledge=None, institutional=None,
               "properties": {"url": _str_prop("page URL")},
               "required": ["url"]},
              lambda url="": tool_open_url(url)),
+        Tool("search_skills", "Search the on-demand pentest skill library. "
+             "Returns ranked matching skills (id, title, tags, preview). "
+             "Empty query lists all skills.",
+             {"type": "object",
+              "properties": {"query": _str_prop("free-text search query", ""),
+                             "limit": _str_prop("max results (1-10, default 5)", 5)},
+              "required": []},
+             lambda query="", limit=5: tool_search_skills(query, int(limit or 5))),
+        Tool("load_skill", "Load a full methodology guide for one skill into "
+             "context. Call search_skills first to find skill ids.",
+             {"type": "object",
+              "properties": {"skill_id": _str_prop("skill id, e.g. 'recon_methodology'")},
+              "required": ["skill_id"]},
+             lambda skill_id="": tool_load_skill(skill_id)),
         Tool("remember", "Save a fact/note to persistent memory.",
              {"type": "object",
               "properties": {"key": _str_prop("short key, e.g. 'target_ip'"),

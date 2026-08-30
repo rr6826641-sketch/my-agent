@@ -1,0 +1,13 @@
+{
+  "id": "active_directory",
+  "title": "Active Directory Attack & Defense Playbook",
+  "version": "1.0.0",
+  "category": "methodology",
+  "description": "AD engagement playbook: domain enumeration, Kerberos abuse (AS-REP roasting, Kerberoasting, golden/silver tickets), LLMNR/NBT-NS poisoning, pass-the-hash, delegation and ACL abuse, GPO and trust attacks.",
+  "tags": ["ad", "windows", "kerberos", "domain", "lateral-movement", "privesc", "kerberoast", "asrep", "pth", "llmnr"],
+  "keywords": ["active directory", "kerberos", "kerberoasting", "as-rep roasting", "golden ticket", "silver ticket", "llmnr", "ntlm", "pass the hash", "dcsync", "bloodhound", "gpo", "delegation", "acl abuse", "domain trust", "privilege escalation", "lateral movement"],
+  "phases": ["vulnerability-mapping", "exploitation", "post-exploitation"],
+  "tools": ["ad_svc_probe", "port_scan", "nmap_scan", "run_terminal", "run_python", "add_finding"],
+  "load_budget": "medium",
+  "when_to_use": "Windows/AD domains, Kerberos-based networks, or post-exploitation on domain-joined hosts."
+}

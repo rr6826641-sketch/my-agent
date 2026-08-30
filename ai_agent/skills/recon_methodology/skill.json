@@ -1,0 +1,13 @@
+{
+  "id": "recon_methodology",
+  "title": "Reconnaissance & Attack Surface Mapping",
+  "version": "1.0.0",
+  "category": "methodology",
+  "description": "Staged reconnaissance playbook: passive OSINT, subdomain/asset discovery, port and service enumeration, tech fingerprinting, and directory fuzzing with scope discipline.",
+  "tags": ["recon", "osint", "enumeration", "subdomain", "port-scan", "fingerprint", "discovery", "attack-surface"],
+  "keywords": ["recon", "osint", "subdomain enum", "port scan", "service enumeration", "fingerprint", "dir fuzz", "robots.txt", "ssl certificate", "shodan", "crt.sh", "whois", "dns"],
+  "phases": ["reconnaissance", "service-enumeration"],
+  "tools": ["set_scope", "subdomain_enum", "dns_lookup", "whois", "ssl_info", "port_scan", "nmap_scan", "httpx_probe", "http_request", "tech_detect", "check_headers", "dir_fuzz", "gobuster_dir", "ffuf_fuzz", "extract_links", "robots_txt", "cve_lookup"],
+  "load_budget": "small",
+  "when_to_use": "Start of every engagement, scope expansion, or when the target's full attack surface is unknown."
+}

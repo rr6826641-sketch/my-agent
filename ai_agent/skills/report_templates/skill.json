@@ -1,0 +1,13 @@
+{
+  "id": "report_templates",
+  "title": "Pentest Report Templates & Writing Standards",
+  "version": "1.0.0",
+  "category": "reporting",
+  "description": "Professional pentest report structure: executive summary, scope, methodology, severity-scored findings with CVSS/CWE, reproduction evidence, and remediation — plus per-finding and final-report templates.",
+  "tags": ["reporting", "report", "documentation", "cvss", "cwe", "writeup", "template"],
+  "keywords": ["report", "template", "executive summary", "cvss", "cwe", "finding", "severity", "remediation", "evidence", "writeup", "reproduction"],
+  "phases": ["reporting", "remediation"],
+  "tools": ["add_finding", "list_findings", "update_finding", "delete_finding", "write_report", "verify_finding", "verify_all_findings"],
+  "load_budget": "small",
+  "when_to_use": "At reporting time, when writing findings, or when the user asks for a professional pentest report."
+}
