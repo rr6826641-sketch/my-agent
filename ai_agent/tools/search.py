@@ -78,6 +78,9 @@ def tool_generate_queries(intent: str, lang: str = "") -> dict:
             if len(variants) < 3 and len(reps) > 1:
                 variants.append(pat.sub(reps[1], intent))
             break
+    # generic non-Latin fallback -> english security gloss
+    if len(variants) < 2 and not intent.isascii():
+        variants.append(intent + " vulnerability security CVE")
     # CVE-number variation -> authoritative databases
     if len(variants) < 3 and re.search(r"\bcve-\d{4}-\d+\b", low):
         for rep in ("NVD vulnerability details", "cve.mitre.org database"):
