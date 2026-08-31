@@ -5,6 +5,7 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from .llm import LLMError, RunCancelled
 from .orchestration import (
@@ -14,6 +15,44 @@ from .orchestration import (
 )
 from .tools import create_tools, execute_tool
 from .tools.workspace import WorkspaceIndex
+
+# --------------------------------------------------------------------------
+# Parallel Tool Execution Maximizer
+#
+# The LLM often emits several tool_calls in one reply. Instead of running
+# them one-by-one (serial), independent calls are grouped into batches and
+# executed concurrently (capped at _PARALLEL_MAX_WORKERS) while strictly
+# dependent calls are forced into later batches so they run sequentially.
+# --------------------------------------------------------------------------
+
+_PARALLEL_MAX_WORKERS = 4  # cap for concurrent executions (3-5 range)
+
+# Stateful tool families. Calls inside the same family mutate/read shared
+# state (a terminal session, a browser, a file), so their original order
+# must be preserved -> they land in strictly consecutive batches.
+_SEQUENTIAL_FAMILIES = {
+    "terminal": frozenset({
+        "start_session", "send_input", "view_session_output",
+        "wait_for_pattern", "kill_session", "list_sessions"}),
+    "browser": frozenset({
+        "browse_page", "click_element", "fill_form",
+        "take_screenshot", "capture_network_traffic", "close_browser"}),
+    "file_writes": frozenset({
+        "write_file", "create_archive", "extract_archive"}),
+}
+
+# Argument markers that signal a data dependency on a previous result.
+_OUTPUT_MARKER_RE = re.compile(
+    r"\$(?:prev|previous|output|result|last)\b"
+    r"|previous_result|\{prev\}|\{output\}|<prev_result>")
+
+
+def _tool_family(name):
+    """Return the sequential family a tool belongs to, or None."""
+    for _fam, members in _SEQUENTIAL_FAMILIES.items():
+        if name in members:
+            return _fam
+    return None
 from .tools.verify import (
     REJECTED as V_REJECTED,
     UNVERIFIED as V_UNVERIFIED,
@@ -1868,6 +1907,77 @@ class Agent:
 
     # ------------------------------------------------------------ loop
 
+    # ------------------------------------------- parallel tool executor
+
+    def _call_name_args(self, call):
+        """Safely extract (name, arguments_json) from one tool call."""
+        try:
+            name = call["function"]["name"]
+            args = call["function"].get("arguments") or "{}"
+        except Exception:
+            name, args = "?", "{}"
+        return name, str(args)
+
+    def _plan_tool_batches(self, tool_calls):
+        """Split the LLM's tool_calls into parallel-friendly batches.
+
+        Returns a list of batches; every call inside one batch may execute
+        concurrently (the loop caps it at _PARALLEL_MAX_WORKERS). Two calls
+        are forced into DIFFERENT (strictly later) batches when:
+
+          * they belong to the same stateful family (terminal / browser /
+            file writes) - original order inside the family is preserved
+            because each call depends on state left by the previous one;
+          * a call's arguments reference an earlier call's id
+            (e.g. "use the output of call_ab12") or an output marker
+            ($prev / $output / $result ...) - a data dependency.
+
+        Everything else - e.g. dns_lookup + port_scan + check_headers on
+        the same target - is treated as independent and shares one batch,
+        so recon fan-out fires simultaneously instead of serially.
+        """
+        calls = list(tool_calls)
+        if len(calls) < 2:
+            return [[c] for c in calls]
+        recs = []
+        ids = []
+        for i, call in enumerate(calls):
+            name, args = self._call_name_args(call)
+            recs.append({"i": i, "call": call, "name": name,
+                         "args": args, "preds": set()})
+            ids.append(call.get("id") if isinstance(call, dict) else None)
+        # 1) explicit data dependencies: output markers + earlier call ids
+        for cur in recs:
+            a = cur["args"]
+            if _OUTPUT_MARKER_RE.search(a):
+                for j in range(cur["i"]):
+                    cur["preds"].add(j)
+                continue
+            for j in range(cur["i"]):
+                if ids[j] and ids[j] in a:
+                    cur["preds"].add(j)
+        # 2) stateful family lanes: keep original order within each family
+        fam_pos = {}
+        for cur in recs:
+            fam = _tool_family(cur["name"])
+            if fam is not None:
+                prev = fam_pos.get(fam)
+                if prev is not None:
+                    cur["preds"].add(prev)
+                fam_pos[fam] = cur["i"]
+        # 3) batch index = 1 + max batch of direct predecessors.
+        #    Edges only point to earlier indices, so one forward pass works.
+        for cur in recs:
+            batch_idx = 0
+            for pr in cur["preds"]:
+                batch_idx = max(batch_idx, recs[pr]["batch"])
+            cur["batch"] = batch_idx + 1
+        depth = max((r["batch"] for r in recs), default=1)
+        out = [[] for _ in range(depth)]
+        for r in recs:
+            out[r["batch"] - 1].append(r["call"])
+        return out
+
     def run(self, user_input):
         """Run one user query and return the final answer string."""
         parts = []
@@ -2010,33 +2120,50 @@ class Agent:
                 "content": content,
                 "tool_calls": tool_calls,
             })
-            for call in tool_calls:
+            # Dependency-aware batching: independent calls (e.g. DNS +
+            # port scan + header check on one target) run in parallel;
+            # strictly dependent calls run in later, sequential batches.
+            batches = self._plan_tool_batches(tool_calls)
+            pending = {}
+            for batch in batches:
                 if stop_event is not None and stop_event.is_set():
                     raise RunCancelled("run cancelled by user")
-                try:
-                    name = call["function"]["name"]
-                    args = call["function"].get("arguments") or "{}"
-                except Exception:
-                    name, args = "?", "{}"
-                yield {"type": "tool_call", "name": name,
-                       "arguments": args}
-                # Task Board: this tool call becomes an in_progress
-                # step task under the root (preempting it - only one
-                # in_progress at a time).
-                step_id = self._task_board.add(
-                    title="%s %s" % (name, _compact_args(args)),
-                    parent=self._active_task,
-                    meta={"kind": "tool_call", "tool": name})
-                self._task_board.start(step_id)
-                self._active_task = step_id
-                bev = self._task_board.event()
-                if bev:
-                    yield bev
-                if self._check_tool_confirm(call):
-                    result = execute_tool(self._tools_by_name, call,
-                                          cancel_event=stop_event)
+                # Confirm every call up front (sequential UI prompts).
+                confirmed = [self._check_tool_confirm(call)
+                             for call in batch]
+                names = []
+                for call in batch:
+                    name, args = self._call_name_args(call)
+                    names.append((name, args))
+                    yield {"type": "tool_call", "name": name,
+                           "arguments": args}
+                # Execute the batch concurrently (capped at
+                # _PARALLEL_MAX_WORKERS); single calls bypass the pool.
+                if len(batch) > 1:
+                    def _run_one(idx):
+                        if not confirmed[idx]:
+                            return "[cancelled by user]"
+                        return execute_tool(self._tools_by_name, batch[idx],
+                                            cancel_event=stop_event)
+                    with ThreadPoolExecutor(
+                            max_workers=min(len(batch),
+                                            _PARALLEL_MAX_WORKERS)) as pool:
+                        results = list(pool.map(_run_one, range(len(batch))))
                 else:
-                    result = "[cancelled by user]"
+                    if confirmed[0]:
+                        results = [execute_tool(self._tools_by_name,
+                                                batch[0],
+                                                cancel_event=stop_event)]
+                    else:
+                        results = ["[cancelled by user]"]
+                # Collect (name, args, call, result) per batch; execution
+                # was parallel but we store results keyed by call object.
+                for (name, args), call, result in zip(names, batch, results):
+                    pending[id(call)] = (name, args, call, result)
+            # Feed results back in ORIGINAL call order (LLM contract) with
+            # per-call Task Board steps + tactical updates.
+            for call in tool_calls:
+                name, args, _c, result = pending[id(call)]
                 self.messages.append({
                     "role": "tool",
                     "tool_call_id": call.get("id", "call_0"),
@@ -2044,8 +2171,11 @@ class Agent:
                 })
                 yield {"type": "tool_result", "name": name,
                        "content": result}
-                # Task Board: the step finished; the root task takes
-                # the in_progress slot again until the next step.
+                step_id = self._task_board.add(
+                    title="%s %s" % (name, _compact_args(args)),
+                    parent=self._active_task,
+                    meta={"kind": "tool_call", "tool": name})
+                self._task_board.start(step_id)
                 self._task_board.complete(step_id,
                                           meta={"finished": True})
                 if self._root_task:
