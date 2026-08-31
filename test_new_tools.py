@@ -276,6 +276,50 @@ def _test_custom_tools(tmp):
     c = tool_count_lines(path=p)
     check("count_lines", "3" in c, c[:60])
 
+    # ---- Parallel Tool Execution Maximizer regression tests ----
+    from ai_agent.core import Agent
+
+    def _mkcall(tag, name, **kwargs):
+        return {"id": "call_%s" % tag,
+                "function": {"name": name,
+                             "arguments": json.dumps(kwargs or {})}}
+
+    ag = Agent(llm=object())
+
+    # independent recon fan-out -> ONE parallel batch
+    batch = ag._plan_tool_batches([
+        _mkcall("dns", "dns_lookup", host="example.com"),
+        _mkcall("scan", "port_scan", host="example.com"),
+        _mkcall("hdrs", "check_headers", url="http://example.com"),
+    ])
+    check("parallel_batch_independent",
+          len(batch) == 1 and len(batch[0]) == 3,
+          "expected 1 batch of 3, got %s" % [len(b) for b in batch])
+
+    # same stateful family -> strictly sequential
+    batch = ag._plan_tool_batches([
+        _mkcall("b1", "browse_page", url="http://a"),
+        _mkcall("b2", "browse_page", url="http://b"),
+    ])
+    check("parallel_batch_same_family",
+          len(batch) == 2, "expected 2 batches, got %d" % len(batch))
+
+    # cross-family path dependency: write_file -> run_python same path
+    batch = ag._plan_tool_batches([
+        _mkcall("w", "write_file", path="/tmp/poc.py", content="x"),
+        _mkcall("r", "run_python", script_path="/tmp/poc.py"),
+    ])
+    check("parallel_batch_path_dep",
+          len(batch) == 2, "expected 2 batches, got %d" % len(batch))
+
+    # different paths -> independent, same batch
+    batch = ag._plan_tool_batches([
+        _mkcall("w", "write_file", path="/tmp/a.py", content="x"),
+        _mkcall("r", "run_python", script_path="/tmp/b.py"),
+    ])
+    check("parallel_batch_path_indep",
+          len(batch) == 1, "expected 1 batch, got %d" % len(batch))
+
 
 if __name__ == "__main__":
     print("=== HackerAI new-tools unit tests ===")
