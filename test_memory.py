@@ -50,11 +50,13 @@ def test_empty_key_rejected():
     assert "Error" in tool_memory_save("  ", "x")
 
 
-def test_persistence_across_reload():
+def test_persistence_across_process():
     tool_memory_save("persist", "survives")
-    # simulate fresh process: reload module state from disk
-    import importlib
-    import ai_agent.tools.memory as m
-    importlib.reload(ai_agent.tools.memory)
-    assert tool_memory_get("persist") == "survives"
+    # simulate a fresh agent process: read the store from a new interpreter
+    import subprocess
+    code = ("from ai_agent.tools.memory import tool_memory_get;"
+            "print(tool_memory_get('persist'))")
+    out = subprocess.run([sys.executable, "-c", code],
+                         capture_output=True, text=True, timeout=60)
+    assert "survives" in out.stdout
     tool_memory_delete("persist")
