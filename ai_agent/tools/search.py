@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, quote_plus, urlparse
 import requests
 
 from .base import truncate
+from .web_search import search_web
 
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
@@ -167,18 +168,37 @@ def _parse_lite(page, max_results):
     return out
 
 def tool_web_search_v2(query: str, max_results: int = 6, variant: str = "") -> dict:
-    """Search with one query; return structured {title, url, snippet} results."""
+    """Search with one query; return structured {title, url, snippet} results.
+
+    Delegates to the dedicated web_search module (ddgs multi-engine +
+    lite.duckduckgo.com scraper fallback); keeps the direct lite-scraper
+    path as a last-resort fallback of its own.
+    """
     if not query:
         return {"error": "query is required", "results": []}
     try:
+        res = search_web(query, max_results=max(1, min(int(max_results), 10)))
+        if res.get("results"):
+            return {
+                "query": query, "variant": variant, "count": res.get("count", 0),
+                "results": res["results"],
+            }
+        first_err = res.get("error", "no results")
+    except Exception as exc:
+        first_err = str(exc)
+    try:
         page = _fetch_lite(query)
         results = _parse_lite(page, max(1, min(int(max_results), 10)))
-        return {
-            "query": query, "variant": variant, "count": len(results),
-            "results": results,
-        }
+        if results:
+            return {
+                "query": query, "variant": variant, "count": len(results),
+                "results": results,
+            }
+        raise RuntimeError("no results")
     except Exception as exc:
-        return {"query": query, "variant": variant, "error": str(exc), "results": []}
+        return {"query": query, "variant": variant,
+                "error": "%s; lite-fallback: %s" % (first_err, exc),
+                "results": []}
 
 
 def tool_research(intent: str, lang: str = "", max_results: int = 6) -> dict:

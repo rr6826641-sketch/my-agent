@@ -42,6 +42,8 @@ from .memory import (
 from .websearch import (
     tool_web_search, tool_open_url,
 )
+from .web_search import search_web
+from .web_fetch import fetch_url
 from .reasoning import tool_plan_task, tool_reason, tool_reflect
 from .search import (
     tool_generate_queries, tool_web_search_v2, tool_research,
@@ -473,6 +475,36 @@ def create_tools(memory, knowledge=None, institutional=None,
                              "max_results": {"type": "integer", "default": 6}},
               "required": ["query"]},
              lambda query="", max_results=6: tool_web_search(query, int(max_results or 6))),
+        Tool("fetch_url",
+             "Fetch a web page and extract its main readable text as clean "
+             "plain text (scripts, CSS, navigation and ad junk removed, "
+             "response cleanly truncated to max_length chars). Returns a "
+             "structured dict: title, text, http_status, truncated flag, or "
+             "a status/error message on 404/403/timeouts/SSL/DNS failures. "
+             "Use after search_web/research to read a specific result page. "
+             "For raw HTTP inspection (headers, status probes) use "
+             "http_request instead.",
+             {"type": "object",
+              "properties": {"url": _str_prop("URL to fetch (https://...)"),
+                             "max_length": {"type": "integer", "default": 4000,
+                                             "description": "max characters of "
+                                             "extracted text to return (200-50000)"}},
+              "required": ["url"]},
+             lambda url="", max_length=4000: fetch_url(url, int(max_length or 4000))),
+        Tool("search_web",
+             "Dedicated DuckDuckGo web search that returns structured JSON: "
+             "a list of hits, each with title, url, and snippet. Uses the "
+             "duckduckgo_search library with an automatic API-key-free "
+             "fallback scraper. Use for quick factual lookups, current "
+             "events, library/docs lookups, and CVE or exploit references. "
+             "Prefer `research` when you need multi-variant citation-ready "
+             "sources, and `open_url` afterwards to read a specific page.",
+             {"type": "object",
+              "properties": {"query": _str_prop("search query"),
+                             "max_results": {"type": "integer", "default": 5,
+                                             "description": "results to return (1-20)"}},
+              "required": ["query"]},
+             lambda query="", max_results=5: search_web(query, int(max_results or 5))),
         Tool("research",
              "Advanced research loop: expand an intent into 1-3 targeted query "
              "variants (technical jargon/acronym + non-English where applicable), "
