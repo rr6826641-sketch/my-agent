@@ -46,6 +46,36 @@ def _clamp(max_results) -> int:
         n = 5
     return max(1, min(n, MAX_RESULTS_CAP))
 
+# --------------------------------------------------------------------------
+# Tiny TTL cache: avoids hammering search backends on repeated queries.
+# --------------------------------------------------------------------------
+
+import threading, time as _time
+
+_CACHE_TTL = 300  # seconds
+_cache = {}
+_cache_lock = threading.Lock()
+
+
+def _cache_get(key):
+    with _cache_lock:
+        hit = _cache.get(key)
+        if not hit:
+            return None
+        ts, val = hit
+        if _time.monotonic() - ts > _CACHE_TTL:
+            del _cache[key]
+            return None
+        return val
+
+
+def _cache_put(key, value):
+    with _cache_lock:
+        if len(_cache) > 256:
+            oldest = min(_cache, key=lambda k: _cache[k][0])
+            del _cache[oldest]
+        _cache[key] = (_time.monotonic(), value)
+
 
 # --------------------------------------------------------------------------
 # Backend 1: duckduckgo_search / ddgs library
@@ -171,25 +201,37 @@ def search_web(query: str, max_results: int = 5) -> dict:
                 "results": [], "count": 0}
     max_results = _clamp(max_results)
 
+    cache_key = "%s::%d" % (query.lower(), max_results)
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        out = dict(cached)
+        out["cached"] = True
+        return out
+
     errors = []
     # 1) library backend
     try:
         results = _ddgs_search(query, max_results)
         if results:
-            return {"query": query, "backend": "ddgs",
-                    "count": len(results), "results": results}
+            out = {"query": query, "backend": "ddgs",
+                   "count": len(results), "results": results}
+            _cache_put(cache_key, out)
+            return dict(out)
         errors.append("ddgs: no results")
     except Exception as exc:
         errors.append("ddgs: %s" % exc)
-    # 2) API-key-free scraper fallback
-    try:
-        results = _scraper_search(query, max_results)
-        if results:
-            return {"query": query, "backend": "scraper",
-                    "count": len(results), "results": results}
-        errors.append("scraper: no results")
-    except Exception as exc:
-        errors.append("scraper: %s" % exc)
+    # 2) API-key-free scraper fallbacks (lite + html endpoints)
+    for name, fn in (("scraper", _scraper_search), ("html", _html_search)):
+        try:
+            results = fn(query, max_results)
+            if results:
+                out = {"query": query, "backend": name,
+                       "count": len(results), "results": results}
+                _cache_put(cache_key, out)
+                return dict(out)
+            errors.append("%s: no results" % name)
+        except Exception as exc:
+            errors.append("%s: %s" % (name, exc))
 
     return {"query": query, "error": "; ".join(errors) or "no results",
             "results": [], "count": 0}
