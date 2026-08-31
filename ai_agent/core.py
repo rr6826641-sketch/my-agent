@@ -2185,7 +2185,8 @@ class Agent:
                     name, args = self._call_name_args(call)
                     names.append((name, args))
                     yield {"type": "tool_call", "name": name,
-                           "arguments": args}
+                           "arguments": args,
+                           "parallel": len(batch) > 1}
                 # Execute the batch concurrently (capped at
                 # _PARALLEL_MAX_WORKERS); single calls bypass the pool.
                 if len(batch) > 1:

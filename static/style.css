@@ -682,3 +682,5 @@ body {
 .b-item.in_progress .b-dot { background: #50a0ff; box-shadow: 0 0 4px #50a0ff; }
 .b-item.completed .b-dot { background: #50dc82; }
 .b-item.completed { opacity: .55; }
+
+.toolcard-head .par { font-style: normal; font-size: 10px; color: #00e676; border: 1px solid #00e67655; border-radius: 8px; padding: 0 5px; margin-left: 6px; vertical-align: middle; }

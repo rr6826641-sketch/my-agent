@@ -314,12 +314,12 @@ function addRouteChip(label, reason) {
   return div;
 }
 
-function addToolCard(name, args) {
+function addToolCard(name, args, parallel) {
   const div = document.createElement("div");
   div.className = "toolcard";
   div.innerHTML = `
     <div class="toolcard-head">
-      <span class="t-name">${escapeHtml(name)}</span>
+      <span class="t-name">${escapeHtml(name)}${parallel ? " <em class=par>⚡ parallel</em>" : ""}</span>
       <span class="t-args">${escapeHtml(args || "{}")}</span>
       <span class="chev">▾</span>
     </div>
@@ -648,7 +648,7 @@ function sendMessage(text) {
     } else if (e.type === "tool_call") {
       typing.remove();
       preview = null; // next assistant text gets a fresh bubble
-      addToolCard(e.name, typeof e.arguments === "string" ? e.arguments : JSON.stringify(e.arguments || ""));
+      addToolCard(e.name, typeof e.arguments === "string" ? e.arguments : JSON.stringify(e.arguments || ""), e.parallel);
     } else if (e.type === "tool_result") {
       const cards = chatLog.querySelectorAll(".toolcard");
       const card = cards[cards.length - 1];
