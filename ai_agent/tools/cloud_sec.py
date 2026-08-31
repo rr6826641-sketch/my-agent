@@ -113,9 +113,7 @@ _TAKEOVER_FINGERPRINTS: List[Dict[str, Any]] = [
 
 def _resolve_cname(host: str) -> List[str]:
     try:
-        import socket as _s
-        return [a for a in _s.getaddrinfo(host, None) if a[0] == socket.AF_INET] and \
-               list({ai[4][0] for ai in _s.getaddrinfo(host, None)}) or []
+        return list({ai[4][0] for ai in socket.getaddrinfo(host, None) if ai[0] == socket.AF_INET})
     except Exception:
         return []
 
@@ -174,8 +172,6 @@ def cloud_misconfig_scan(target_domain: str, max_subdomains: int = 15) -> Dict[s
     for url in probes:
         r = _http_probe(url, timeout=5.0)
         status, body = r.get("status"), r.get("body", "")
-        exposed = status == 200 and "ListBucketResult" not in body or (
-            status == 200 and "<ListBucketResult" in body)
         if status == 200:
             result["exposed_endpoints"].append({
                 "url": url, "http_status": status, "note": "accessible anonymously",
@@ -279,7 +275,6 @@ def docker_security_audit(docker_host: str = "", timeout: float = 3.0) -> Dict[s
 def _docker_api_get(url: str, sock_path: str, timeout: float) -> Any:
     """GET a Docker API endpoint over a unix socket; returns parsed JSON or None."""
     try:
-        import http.client
         import http.client as hc
 
         class UnixConn(hc.HTTPConnection):
