@@ -25,7 +25,16 @@ from .tools.workspace import WorkspaceIndex
 # dependent calls are forced into later batches so they run sequentially.
 # --------------------------------------------------------------------------
 
-_PARALLEL_MAX_WORKERS = 4  # cap for concurrent executions (3-5 range)
+# Cap for concurrent executions (3-5 range). Overridable via
+# config.json -> {"parallel_max_workers": N}.
+_PARALLEL_MAX_WORKERS = 4
+try:
+    from .config import load_config
+    _cfg_parallel = (load_config() or {}).get("parallel_max_workers")
+    if _cfg_parallel:
+        _PARALLEL_MAX_WORKERS = max(1, min(8, int(_cfg_parallel)))
+except Exception:
+    pass
 
 # Stateful tool families. Calls inside the same family mutate/read shared
 # state (a terminal session, a browser, a file), so their original order
@@ -53,6 +62,39 @@ def _tool_family(name):
         if name in members:
             return _fam
     return None
+
+
+_PATH_MARKER_RE = re.compile(
+    r"(?:/|\\)[A-Za-z0-9_./\\{}-]{2,}"
+    r"|\b[A-Za-z0-9_.-]+\.(?:py|txt|json|yaml|yml|sh|bat|md|csv|log|"
+    r"html|js|ts|go|rs|c|h|cpp|java|xml|toml|ini|conf|env|db|sql)\b")
+
+
+def _find_path_tokens(text):
+    """Paths / filenames appearing in a tool call's arguments."""
+    if not text:
+        return set()
+    return {m.group(0).strip('\"') 
+            for m in _PATH_MARKER_RE.finditer(text)}
+
+
+def _has_path_dependency(cur, prev):
+    """Cross-family data dependency: a path written/created earlier is
+    read/referenced later (e.g. write_file -> run_python on same file).
+    Only meaningful when the earlier call can create or change a file:
+    write_file, create_archive, extract_archive, run_python, run_terminal,
+    start_session, browse_page, download-style tools."""
+    _WRITERS = frozenset({
+        "write_file", "create_archive", "extract_archive", "run_python",
+        "run_terminal", "start_session", "browse_page", "capture_network_traffic",
+        "take_screenshot", "wordlist_gen", "spawn_agents"})
+    if prev["name"] not in _WRITERS:
+        return False
+    prev_paths = _find_path_tokens(prev["args"])
+    if not prev_paths:
+        return False
+    cur_paths = _find_path_tokens(cur["args"])
+    return bool(prev_paths & cur_paths)
 from .tools.verify import (
     REJECTED as V_REJECTED,
     UNVERIFIED as V_UNVERIFIED,
@@ -1965,6 +2007,13 @@ class Agent:
                 if prev is not None:
                     cur["preds"].add(prev)
                 fam_pos[fam] = cur["i"]
+        # 2b) cross-family file/path dependencies: an earlier call that
+        # writes a file, and a later call referencing that same path,
+        # must run sequentially (e.g. write_file -> run_python).
+        for cur in recs:
+            for j in range(cur["i"]):
+                if _has_path_dependency(cur, recs[j]):
+                    cur["preds"].add(j)
         # 3) batch index = 1 + max batch of direct predecessors.
         #    Edges only point to earlier indices, so one forward pass works.
         for cur in recs:
