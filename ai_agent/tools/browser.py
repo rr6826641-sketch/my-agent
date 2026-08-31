@@ -43,6 +43,7 @@ _page = None
 _console_msgs: List[Dict[str, str]] = []
 _requests: List[Dict[str, Any]] = []
 _last_status_code: int | None = None
+_user_agent: str | None = None
 
 
 def _pw_missing() -> str:
@@ -71,7 +72,10 @@ def _ensure_page():
             headless=True,
             args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
         )
-    _context = _browser.new_context(ignore_https_errors=True)
+    ctx_kwargs: Dict[str, Any] = {"ignore_https_errors": True}
+    if _user_agent:
+        ctx_kwargs["user_agent"] = _user_agent
+    _context = _browser.new_context(**ctx_kwargs)
     _page = _context.new_page()
 
     def _on_request(req):
@@ -122,7 +126,12 @@ def _close_browser() -> None:
     _browser = _context = _page = None
 
 
-def tool_browse_page(uri: str, wait_ms: int = 2500, capture_js_errors: bool = True) -> Dict[str, Any]:
+def tool_browse_page(uri: str, wait_ms: int = 2500, capture_js_errors: bool = True,
+                     user_agent: str = "") -> Dict[str, Any]:
+    global _user_agent
+    if user_agent and user_agent != _user_agent:
+        _close_browser()
+        _user_agent = user_agent
     if not isinstance(uri, str) or not uri.startswith(("http://", "https://", "file://")):
         return {"error": "uri must start with http://, https:// or file://"}
     page = _ensure_page()
