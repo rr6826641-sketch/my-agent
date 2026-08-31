@@ -1646,6 +1646,12 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
              lambda query="", top_k=5: _gm_lore_search(query, top_k)),
         ]
 
+    REGISTRY.append(Tool("current_time",
+        "Current date and time - local + UTC ISO-8601, unix epoch, weekday,"
+        "date. Use for log correlation, artifact timestamps, TLS cert"
+        "validity checks and deadline awareness. Zero arguments.",
+        {"type": "object", "properties": {}, "required": []},
+        lambda: tool_current_time()))
     global _REGISTRY
     _REGISTRY = REGISTRY
     return REGISTRY
@@ -1653,6 +1659,19 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
 
 DEFAULT_PORTS = "21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1433,1521,2049,2375,3000,3306,3389,5432,5900,6379,8000,8080,8443,8888,9000,9090,9200,11211,27017"
 
+
+def tool_current_time():
+    """Current local/UTC time: ISO-8601, unix epoch, weekday, date.
+    Always knows what 'today' is - for log correlation, artifact
+    timestamps, TLS cert validity and deadline checks."""
+    import datetime
+    import time as _time
+    now = datetime.datetime.now()
+    return {"local": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "utc": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S") + "Z",
+            "epoch": int(_time.time()),
+            "weekday": now.strftime("%A"),
+            "date": now.strftime("%Y-%m-%d")}
 _REGISTRY = []
 
 
