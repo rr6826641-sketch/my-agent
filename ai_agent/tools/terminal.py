@@ -493,6 +493,38 @@ def _pump_winpty(session):
     session.out.eof()
 
 
+def _conpty_spawn(cmdline, cwd=None, env_dict=None):
+    """Spawn on ConPTY passing the command line RAW (no re-quoting).
+
+    pywinpty's PtyProcess.spawn() re-splits its argv with shlex and
+    re-joins via list2cmdline, which mangles commands that contain
+    quotes (e.g. python -c "print('hi')" becomes unterminated-string
+    garbage). The raw PTY backend accepts appname + cmdline exactly
+    like CreateProcess, so quoting survives untouched.
+    """
+    from winpty._winpty import PTY
+    from winpty.ptyprocess import PtyProcess
+    env = None
+    if env_dict:
+        env = "\0".join("%s=%s" % (str(k), str(v))
+                        for k, v in env_dict.items()) + "\0"
+    if cmdline.startswith('"'):
+        end = cmdline.find('"', 1)
+        if end == -1:
+            appname, rest = cmdline, ""
+        else:
+            appname, rest = cmdline[:end + 1], cmdline[end + 1:]
+    else:
+        appname, _, rest = cmdline.partition(" ")
+    rest = rest.strip()
+    pty = PTY(80, 24)
+    if rest:
+        pty.spawn(appname, cmdline=" " + rest, cwd=cwd, env=env)
+    else:
+        pty.spawn(appname, cwd=cwd, env=env)
+    return PtyProcess(pty)
+
+
 def _start_pty_session(command, cwd=None, name=None, env=None, shell=True):
     """start_session on a real pseudo-terminal (ConPTY / POSIX pty)."""
     if not command or not command.strip():
@@ -511,10 +543,21 @@ def _start_pty_session(command, cwd=None, name=None, env=None, shell=True):
             return ("Error: pty=True needs pywinpty (pip install pywinpty); "
                     "retry with pty=false for anonymous pipes")
         backend = "conpty"
+        # NOTE: with shell=True and a quoted exe path containing spaces
+        # (e.g. cmd.exe /c ""C:\path with spaces\py.exe" -c "print(1)""),
+        # cmd.exe strips quotes per its documented /c rules and fails with
+        # "is not recognized". This is an OS limitation, not a ConPTY bug;
+        # use pty=false (pipes) for such commands or shell=False.
         cmdline = ("cmd.exe /c %s" % command) if shell else command
         proc = None
         try:
-            pty_obj = _WinPtyProcess(cmdline, cwd=cwd or None)
+            try:
+                pty_obj = _conpty_spawn(cmdline, cwd or None, full_env)
+            except ImportError:
+                # very old pywinpty without the raw PTY module exposed:
+                # fall back to PtyProcess.spawn (may mangle inner quotes)
+                pty_obj = _WinPtyProcess.spawn(cmdline, cwd=cwd or None,
+                                               env=full_env or None)
         except Exception as exc:
             return "start_session error (conpty): %s" % exc
         proc = _PtyProcShim(pty_obj)
