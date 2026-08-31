@@ -52,6 +52,11 @@ from .search import (
 from .skills import (
     tool_search_skills, tool_load_skill,
 )
+from .cloud_sec import (
+    aws_s3_enum,
+    cloud_misconfig_scan,
+    docker_security_audit,
+)
 from .browser import (
     tool_browse_page,
     tool_click_element,
@@ -635,6 +640,15 @@ Tool("browser_capture_network", "Record page network requests/responses in headl
 Tool("browser_close_browser", "Close the headless browser and free memory.",
      {"type": "object", "properties": {}, "required": []},
      lambda: browser_close_browser()),
+Tool("aws_s3_enum", "Enumerate anonymous (public) access on an AWS S3 bucket: checks public read, object listing and optional anonymous write probe (misconfigured bucket policies).",
+     {"type": "object", "properties": {"bucket_name": _str_prop("S3 bucket name to audit"), "probe_write": {"type": "boolean", "default": False}}, "required": ["bucket_name"]},
+     lambda bucket_name="", probe_write=False: aws_s3_enum(bucket_name, bool(probe_write))),
+Tool("cloud_misconfig_scan", "Scan a target domain for subdomain takeover fingerprints (AWS S3, GitHub Pages, Azure, GCP, Heroku, Fastly, CloudFront) and anonymously exposed cloud endpoints (.env, storage buckets).",
+     {"type": "object", "properties": {"target_domain": _str_prop("target domain to scan (e.g. example.com)"), "max_subdomains": {"type": "integer", "default": 15}}, "required": ["target_domain"]},
+     lambda target_domain="", max_subdomains=15: cloud_misconfig_scan(target_domain, int(max_subdomains))),
+Tool("docker_security_audit", "Audit local/remote Docker daemon security: exposed unix/TCP sockets (2375/2376), privileged containers, published ports and daemon reachability.",
+     {"type": "object", "properties": {"docker_host": _str_prop("optional remote host to probe for exposed Docker TCP API", ""), "timeout": {"type": "number", "default": 3.0}}, "required": []},
+     lambda docker_host="", timeout=3.0: docker_security_audit(docker_host, float(timeout))),
 Tool("load_skill", "Load a full methodology guide for one skill into "
              "context. Call search_skills first to find skill ids.",
              {"type": "object",
