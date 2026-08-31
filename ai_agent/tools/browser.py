@@ -289,6 +289,6 @@ def browser_capture_network(uri: str = "", wait_ms: int = 3000,
     return tool_capture_network_traffic(uri, wait_ms, filter_substring, max_entries)
 
 
-def browser_close() -> Dict[str, Any]:
+def browser_close_browser() -> Dict[str, Any]:
     """Close the headless browser and free memory (alias of tool_close_browser)."""
     return tool_close_browser()
