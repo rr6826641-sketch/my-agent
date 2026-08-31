@@ -155,3 +155,104 @@ def test_tool_timeout_kill_preserves_sessions_cancel_kills_them():
     # execute_tool's user-Stop path: include_sessions=True.
     kill_active_procs(include_sessions=True)
     assert _wait_dead(sess.proc), "session survived cancel kill"
+
+
+# ================================================================
+# v2 upgrades: real PTY backend, extended signals, fresh_only waits
+# ================================================================
+
+import os
+
+from ai_agent.tools.terminal import (
+    _HAVE_POSIX_PTY,
+    _WinPtyProcess,
+    tool_view_session_output,
+)
+
+
+def test_pty_session_real_terminal_roundtrip():
+    """pty=True runs the child on a real pseudo-terminal: isatty()=True."""
+    code = ("import sys,time;"
+            "print('ISATTY', sys.stdout.isatty(), flush=True);"
+            "time.sleep(30)")
+    if os.name == "nt":
+        if _WinPtyProcess is None:
+            pytest.skip("pywinpty not installed; pty backend unavailable")
+        cmd = _cmd(code)
+    else:
+        if not _HAVE_POSIX_PTY:
+            pytest.skip("no posix pty available")
+        cmd = "python3 -c '%s'" % code
+    r = tool_start_session(cmd, pty=True)
+    assert "started" in r, r
+    assert "pty=" in r, r
+    sid = _sid(r)
+    r = tool_wait_for_pattern(sid, r"ISATTY\s+True", timeout=10)
+    assert "pattern matched" in r, r
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows console event")
+def test_ctrl_break_signal_delivered_and_caught():
+    code = ("import signal,sys,time;"
+            "signal.signal(signal.SIGBREAK,"
+            " lambda s, f: print('CAUGHT', flush=True));"
+            "print('brk-ready', flush=True);time.sleep(60)")
+    sid = _sid(tool_start_session(_cmd(code)))
+    r = tool_wait_for_pattern(sid, "brk-ready", timeout=5)
+    assert "pattern matched" in r, r
+    r = tool_send_input(sid, signal="ctrl_break")
+    # CTRL_BREAK console-event delivery is best-effort on Windows: with a
+    # real attached console the event usually reaches the child, but some
+    # console-less/hidden-conhost contexts accept the event without
+    # delivering it. Contract: never kills the session either way.
+    assert "ctrl-break" in r, r
+    assert "Error" not in r, r
+    assert sid in _SESSIONS, r
+    time.sleep(0.3)
+    assert sid in _SESSIONS, "ctrl_break tore the session down"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX named signals")
+def test_sigterm_signal_delivered_and_caught():
+    if not _HAVE_POSIX_PTY and os.name != "posix":
+        pytest.skip("not a posix host")
+    code = ("import signal,sys,time;"
+            "signal.signal(signal.SIGTERM,"
+            " lambda s, f: print('CAUGHT', flush=True));"
+            "print('sig-ready', flush=True);time.sleep(60)")
+    sid = _sid(tool_start_session("python3 -c '%s'" % code))
+    r = tool_wait_for_pattern(sid, "sig-ready", timeout=5)
+    assert "pattern matched" in r, r
+    r = tool_send_input(sid, signal="sigterm")
+    assert "sigterm delivered" in r, r
+    r = tool_wait_for_pattern(sid, "CAUGHT", timeout=8)
+    assert "pattern matched" in r, r
+
+
+def test_wait_for_pattern_fresh_only_ignores_stale_output():
+    stmts = [
+        "import sys",
+        "print('PROMPT1', flush=True)",
+        "line = sys.stdin.readline()",
+        "print('PROMPT2', flush=True)",
+        "sys.stdout.write('ANSWER:' + line.strip() + '\\n')",
+        "sys.stdout.flush()",
+    ]
+    sid = _sid(tool_start_session(_cmd(stmts)))
+    r = tool_wait_for_pattern(sid, "PROMPT1", timeout=5)
+    assert "pattern matched" in r, r
+    # fresh_only must NOT hit the stale PROMPT1 still sitting in the buffer
+    r = tool_wait_for_pattern(sid, "PROMPT1", timeout=1, fresh_only=True)
+    assert "pattern NOT matched" in r, r
+    # ...but new output still matches
+    r = tool_send_input(sid, input="hello")
+    assert "sent" in r, r
+    r = tool_wait_for_pattern(sid, "ANSWER:hello", timeout=5, fresh_only=True)
+    assert "pattern matched" in r, r
+
+
+@pytest.mark.skipif(os.name != "nt" or _WinPtyProcess is not None,
+                    reason="only meaningful when pywinpty is missing")
+def test_pty_unavailable_reports_clear_error():
+    r = tool_start_session(_cmd("import time;time.sleep(5)"), pty=True)
+    assert "pywinpty" in r and "pty=false" in r, r

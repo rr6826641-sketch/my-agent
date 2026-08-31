@@ -378,23 +378,34 @@ def create_tools(memory, knowledge=None, institutional=None,
                   "name": _str_prop("friendly label"),
                   "env": _str_prop("extra env vars as KEY=VALUE;...", None),
                   "shell": {"type": "boolean", "default": True,
-                             "description": "run via shell"}},
+                             "description": "run via shell"},
+                  "pty": {"type": "boolean", "default": False,
+                           "description": "run on a real pseudo-terminal "
+                                          "(ConPTY/pty) so TUIs, colors, "
+                                          "and isatty()-aware programs work"}},
               "required": ["command"]},
-             lambda command="", cwd=None, name=None, env=None, shell=True:
+             lambda command="", cwd=None, name=None, env=None, shell=True,
+                    pty=False:
                  tool_start_session(command, cwd=cwd or None, name=name or None,
-                                    env=env or None, shell=bool(shell))),
+                                    env=env or None, shell=bool(shell),
+                                    pty=bool(pty))),
         Tool("send_input",
-             "Send text or a control signal (ctrl_c, ctrl_d, ctrl_z, esc, "
-             "enter) into a running interactive session's stdin. Control "
-             "signals do not kill the background process.",
+             "Send text or a control signal (ctrl_c, ctrl_break, ctrl_d, "
+             "ctrl_z, esc, enter; POSIX also accepts sigint, sigterm, "
+             "sigkill, sighup) into a running interactive session's stdin. "
+             "Control signals do not kill the background process.",
              {"type": "object",
               "properties": {"session_id": _str_prop(
                   "session id from start_session"),
                   "input": _str_prop("text to type", ""),
                   "signal": _str_prop(
-                      "control signal name: ctrl_c, ctrl_d, ctrl_z, esc, "
-                      "enter", None, enum=["ctrl_c", "ctrl_d", "ctrl_z",
-                                            "esc", "enter"]),
+                      "control signal name: ctrl_c, ctrl_break, ctrl_d, "
+                      "ctrl_z, esc, enter; POSIX also accepts sigint, "
+                      "sigterm, sigkill, sighup, sigquit, sigusr1, sigusr2",
+                      None, enum=["ctrl_c", "ctrl_break", "ctrl_d", "ctrl_z",
+                                  "esc", "enter", "sigint", "sigterm",
+                                  "sigkill", "sighup", "sigquit", "sigusr1",
+                                  "sigusr2"]),  # enum aligned with terminal.py
                   "press_enter": {"type": "boolean", "default": True}},
               "required": ["session_id"]},
              lambda session_id="", input="", signal=None, press_enter=True:
@@ -426,10 +437,14 @@ def create_tools(memory, knowledge=None, institutional=None,
                   "session id from start_session"),
                   "pattern": _str_prop("regex to search for"),
                   "timeout": {"type": "integer", "default": 60,
-                               "description": "seconds (max 100)"}},
+                               "description": "seconds (max 100)"},
+                  "fresh_only": {"type": "boolean", "default": False,
+                                  "description": "only match output produced "
+                                                 "after this call starts"}},
               "required": ["session_id", "pattern"]},
-             lambda session_id="", pattern="", timeout=60:
-                 tool_wait_for_pattern(session_id, pattern, timeout=timeout)),
+             lambda session_id="", pattern="", timeout=60, fresh_only=False:
+                 tool_wait_for_pattern(session_id, pattern, timeout=timeout,
+                                       fresh_only=bool(fresh_only))),
         Tool("kill_session",
              "Terminate a session's process tree and remove it from the "
              "session ledger.",

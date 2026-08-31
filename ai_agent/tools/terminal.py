@@ -13,6 +13,16 @@ import time
 
 from .base import kill_proc_tree, register_proc, unregister_proc
 
+# Real ConPTY backend (optional): gives children a genuine Windows console
+# (isatty()=True, colors, interactive menus, arrow-key apps). Falls back to
+# anonymous pipes when pywinpty is not installed.
+try:
+    from winpty import PtyProcess as _WinPtyProcess
+except Exception:
+    _WinPtyProcess = None
+
+_HAVE_POSIX_PTY = hasattr(os, "openpty") and hasattr(os, "setsid")
+
 
 def _oem_codepage():
     """OEM code page (what cmd.exe writes to pipes), e.g. 437/850/936."""
@@ -116,6 +126,14 @@ _CTRL_BYTES = {
     "esc": b"\x1b",
     "enter": b"\r",
 }
+
+# Real OS signals deliverable by name via proc.send_signal() (POSIX only;
+# on Windows use ctrl_c / ctrl_break console events instead).
+_POSIX_SIGNALS = {}
+for _sig_name in ("SIGINT", "SIGTERM", "SIGKILL", "SIGHUP", "SIGQUIT",
+                  "SIGUSR1", "SIGUSR2"):
+    if hasattr(_signal, _sig_name):
+        _POSIX_SIGNALS[_sig_name.lower()] = getattr(_signal, _sig_name)
 
 
 def _ledger_path():
@@ -254,6 +272,13 @@ class _InteractiveSession:
         self.err = _ByteBuffer()
         self._stdin_lock = threading.Lock()
 
+    @property
+    def pid(self):
+        return self.proc.pid
+
+    def kill(self):
+        kill_proc_tree(self.proc)
+
     def start_threads(self):
         threading.Thread(target=_pump_stream,
                          args=(self.proc.stdout, self.out),
@@ -273,7 +298,7 @@ class _InteractiveSession:
         status = "running" if not self.exited else "exited(%s)" % self.exit_code
         age = int(time.time() - self.created_at)
         return ("%s pid=%s %s age=%ss out=%dB err=%dB  %s"
-                % (self.session_id, self.proc.pid, status, age,
+                % (self.session_id, self.pid, status, age,
                    self.out.raw_size(), self.err.raw_size(), self.command))
 
 
@@ -331,14 +356,227 @@ def _get_session(session_id):
     return sess
 
 
+# ---------------------------------------------------------------- pty engine
+
+class _PtyProcShim:
+    """subprocess.Popen stand-in for ConPTY sessions (no Popen exists).
+
+    Exposes only what the session engine needs: pid, poll(), wait(),
+    kill(), terminate(). All no-ops delegate to the winpty handle.
+    """
+
+    def __init__(self, pty_obj):
+        self._pty = pty_obj
+        self.pid = pty_obj.pid
+        self.returncode = None
+
+    def _sync(self):
+        if self.returncode is None and not self._pty.isalive():
+            try:
+                self.returncode = self._pty.exitstatus or 0
+            except Exception:
+                self.returncode = 0
+        return self.returncode
+
+    def poll(self):
+        return self._sync()
+
+    def isalive(self):
+        return self._sync() is None
+
+    def wait(self):
+        while self._sync() is None:
+            time.sleep(0.1)
+        return self.returncode
+
+    def terminate(self):
+        try:
+            self._pty.terminate(force=True)
+        except Exception:
+            pass
+        self.returncode = self._sync() or 0
+
+    kill = terminate
+
+
+class _PtySession(_InteractiveSession):
+    """Interactive session on a REAL pseudo-terminal.
+
+    stdout+stderr are merged by the tty into one stream (`out`); `err`
+    stays an empty buffer for interface compatibility. Children see a
+    genuine terminal (isatty()=True), so REPLs, pagers, colored output,
+    and full-screen/menu apps behave exactly like in a real console.
+    """
+
+    def __init__(self, session_id, command, cwd, name, proc, pty_obj,
+                 master_fd, backend):
+        super().__init__(session_id, command, cwd, name, proc,
+                         shell=True)
+        self.pty_obj = pty_obj
+        self.master_fd = master_fd
+        self.backend = backend          # "conpty" | "posix-pty"
+
+    def start_threads(self):
+        if self.master_fd is not None:
+            threading.Thread(target=_pump_pty_fd, args=(self,),
+                             daemon=True,
+                             name="sess-pty-%s" % self.session_id).start()
+        else:
+            threading.Thread(target=_pump_winpty, args=(self,),
+                             daemon=True,
+                             name="sess-pty-%s" % self.session_id).start()
+        threading.Thread(target=_monitor_proc, args=(self,),
+                         daemon=True,
+                         name="sess-mon-%s" % self.session_id).start()
+
+    def write_stdin(self, raw):
+        with self._stdin_lock:
+            if self.master_fd is not None:
+                os.write(self.master_fd, raw)
+            else:
+                self.pty_obj.write(raw.decode("utf-8", errors="replace"))
+
+    def kill(self):
+        if self.master_fd is not None:
+            try:
+                os.killpg(self.proc.pid, _signal.SIGKILL)
+            except Exception:
+                kill_proc_tree(self.proc)
+            try:
+                os.close(self.master_fd)
+            except OSError:
+                pass
+            self.master_fd = None
+        else:
+            try:
+                self.pty_obj.terminate(force=True)
+            except Exception:
+                pass
+            kill_proc_tree(self.proc)
+
+    def describe(self):
+        status = "running" if not self.exited else "exited(%s)" % self.exit_code
+        age = int(time.time() - self.created_at)
+        return ("%s pid=%s %s age=%ss out=%dB pty=%s  %s"
+                % (self.session_id, self.proc.pid, status, age,
+                   self.out.raw_size(), self.backend, self.command))
+
+
+def _pump_pty_fd(session):
+    try:
+        while session.master_fd is not None:
+            try:
+                chunk = os.read(session.master_fd, 4096)
+            except OSError:
+                break
+            if not chunk:
+                break
+            session.out.append(chunk)
+    except Exception:
+        pass
+    session.out.eof()
+
+
+def _pump_winpty(session):
+    try:
+        while True:
+            try:
+                chunk = session.pty_obj.read()
+            except Exception:
+                break
+            if chunk:
+                session.out.append(chunk.encode("utf-8", errors="replace"))
+            if not session.pty_obj.isalive():
+                break
+    except Exception:
+        pass
+    session.out.eof()
+
+
+def _start_pty_session(command, cwd=None, name=None, env=None, shell=True):
+    """start_session on a real pseudo-terminal (ConPTY / POSIX pty)."""
+    if not command or not command.strip():
+        return "Error: empty command"
+    if cwd and not os.path.isdir(cwd):
+        return "Error: cwd does not exist: %s" % cwd
+    full_env = dict(os.environ)
+    if env:
+        if not isinstance(env, dict):
+            return "Error: env must be an object of key/value strings"
+        for k, v in env.items():
+            full_env[str(k)] = str(v)
+    sid = _new_session_id()
+    if os.name == "nt":
+        if _WinPtyProcess is None:
+            return ("Error: pty=True needs pywinpty (pip install pywinpty); "
+                    "retry with pty=false for anonymous pipes")
+        backend = "conpty"
+        cmdline = ("cmd.exe /c %s" % command) if shell else command
+        proc = None
+        try:
+            pty_obj = _WinPtyProcess(cmdline, cwd=cwd or None)
+        except Exception as exc:
+            return "start_session error (conpty): %s" % exc
+        proc = _PtyProcShim(pty_obj)
+        session = _PtySession(sid, command, cwd, name, proc, pty_obj,
+                              None, backend)
+    elif _HAVE_POSIX_PTY:
+        backend = "posix-pty"
+        master, slave = os.openpty()
+        proc = None
+        try:
+            proc = subprocess.Popen(
+                command, shell=bool(shell), cwd=cwd or None, env=full_env,
+                stdin=slave, stdout=slave, stderr=slave,
+                preexec_fn=os.setsid, bufsize=0,
+            )
+        except Exception as exc:
+            os.close(master)
+            os.close(slave)
+            return "start_session error (posix-pty): %s" % exc
+        os.close(slave)  # child owns the tty now; keep only the master
+        session = _PtySession(sid, command, cwd, name, proc, None,
+                              master, backend)
+    else:
+        return ("Error: no pty backend available on this platform; "
+                "retry with pty=false")
+    try:
+        proc._hackerai_session_proc = True
+        proc._hackerai_session_id = sid
+        with _SESSIONS_LOCK:
+            _SESSIONS[sid] = session
+        register_proc(proc)
+        session.start_threads()
+        _persist_ledger()
+        return ("[session %s started] pid=%s cwd=%s pty=%s\n"
+                "command: %s\n"
+                "Drive it with send_input / view_session_output / "
+                "wait_for_pattern; stop it with kill_session."
+                % (sid, proc.pid, session.cwd, backend, command))
+    except Exception as exc:
+        try:
+            session.kill()
+        except Exception:
+            pass
+        return "start_session error: %s" % exc
+
+
 # ---------------------------------------------------------------- tools
 
-def tool_start_session(command, cwd=None, name=None, env=None, shell=True):
+def tool_start_session(command, cwd=None, name=None, env=None, shell=True,
+                       pty=False):
     """Start a long-running interactive background process.
 
     Returns a unique session_id that is valid for the rest of the
     conversation: the process keeps running between tool calls.
+
+    pty=True runs the child on a real pseudo-terminal (ConPTY on Windows
+    via pywinpty, os.openpty elsewhere) instead of anonymous pipes, so
+    interactive TUIs, color output, and isatty()-aware programs work.
     """
+    if pty:
+        return _start_pty_session(command, cwd=cwd, name=name, env=env,
+                                  shell=shell)
     if not command or not command.strip():
         return "Error: empty command"
     if cwd and not os.path.isdir(cwd):
@@ -398,17 +636,43 @@ def tool_send_input(session_id, input="", signal=None, press_enter=True):
         if signal:
             key = str(signal).lower().replace("-", "_")
             if (key == "ctrl_c" and os.name == "nt"
-                    and hasattr(_signal, "CTRL_C_EVENT")):
+                    and hasattr(_signal, "CTRL_C_EVENT")
+                    and hasattr(sess.proc, "send_signal")):
                 try:
                     sess.proc.send_signal(_signal.CTRL_C_EVENT)
                     return ("[ctrl-c delivered as console event to session "
                             "%s]" % session_id)
                 except Exception:
                     pass  # no console (service mode) -> fall back to \x03
+            if (key == "ctrl_break" and os.name == "nt"
+                    and hasattr(_signal, "CTRL_BREAK_EVENT")
+                    and hasattr(sess.proc, "send_signal")):
+                try:
+                    import ctypes
+                    if ctypes.windll.kernel32.GetConsoleWindow() == 0:
+                        return ("[ctrl-break unavailable: no Windows console "
+                                "attached to the agent process; session %s "
+                                "unaffected]" % session_id)
+                    sess.proc.send_signal(_signal.CTRL_BREAK_EVENT)
+                    return ("[ctrl-break delivered as console event to "
+                            "session %s]" % session_id)
+                except Exception:
+                    pass
+            if (os.name != "nt" and key in _POSIX_SIGNALS
+                    and hasattr(sess.proc, "send_signal")):
+                try:
+                    sess.proc.send_signal(_POSIX_SIGNALS[key])
+                    return ("[%s delivered to session %s]"
+                            % (key, session_id))
+                except Exception:
+                    pass
             raw = _CTRL_BYTES.get(key)
             if raw is None:
+                known = sorted(set(_CTRL_BYTES) | set(_POSIX_SIGNALS))
+                if os.name == "nt":
+                    known = sorted(set(list(_CTRL_BYTES) + ["ctrl_break"]))
                 return ("Error: unknown signal %r. Known signals: %s"
-                        % (signal, ", ".join(sorted(_CTRL_BYTES))))
+                        % (signal, ", ".join(known)))
             sess.write_stdin(raw)
             return "[signal %s sent to session %s]" % (signal, session_id)
         text = str(input)
@@ -441,8 +705,13 @@ def tool_view_session_output(session_id, tail=_VIEW_TAIL, clear=False,
     return "[%s] session %s\n%s" % (status, session_id, text)
 
 
-def tool_wait_for_pattern(session_id, pattern, timeout=60):
-    """Poll a session until a regex appears in its output (or timeout)."""
+def tool_wait_for_pattern(session_id, pattern, timeout=60, fresh_only=False):
+    """Poll a session until a regex appears in its output (or timeout).
+
+    With fresh_only=True only output produced after this call starts is
+    searched, so a pattern that already matched earlier does not hit
+    stale buffer content again (e.g. two identical prompts in a row).
+    """
     sess = _get_session(session_id)
     if not isinstance(sess, _InteractiveSession):
         return sess
@@ -455,9 +724,17 @@ def tool_wait_for_pattern(session_id, pattern, timeout=60):
     timeout = max(1, min(int(timeout or 60), _MAX_WAIT_TIMEOUT))
     deadline = time.time() + timeout
     last_text = ""
+    base_out = base_err = ""
+    if fresh_only:
+        base_out = sess.out.text(tail=None)
+        base_err = sess.err.text(tail=None)
     while True:
-        out = sess.out.text(tail=_VIEW_TAIL * 2)
-        err = sess.err.text(tail=_VIEW_TAIL)
+        if fresh_only:
+            out = sess.out.text(tail=None)[len(base_out):]
+            err = sess.err.text(tail=None)[len(base_err):]
+        else:
+            out = sess.out.text(tail=_VIEW_TAIL * 2)
+            err = sess.err.text(tail=_VIEW_TAIL)
         last_text = (out + ("\n[stderr]\n" + err if err.strip() else "")).strip()
         if regex.search(last_text):
             return ("[pattern matched] session %s\n%s"
@@ -475,9 +752,9 @@ def tool_kill_session(session_id):
     if sess is None:
         return "Error: no such session: %s (use list_sessions)" % session_id
     if not sess.exited:
-        kill_proc_tree(sess.proc)
+        sess.kill()
         sess.exited = True
-        sess.exit_code = sess.proc.returncode
+        sess.exit_code = getattr(sess.proc, "returncode", None)
         sess.ended_at = time.time()
         unregister_proc(sess.proc)
         status = "killed"
@@ -487,7 +764,7 @@ def tool_kill_session(session_id):
         _SESSIONS.pop(sess.session_id, None)
     _record_finished(sess, status)
     _persist_ledger()
-    return "[session %s %s (pid %s)]" % (session_id, status, sess.proc.pid)
+    return "[session %s %s (pid %s)]" % (session_id, status, sess.pid)
 
 
 def tool_list_sessions(active_only=False):

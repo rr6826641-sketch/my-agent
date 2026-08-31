@@ -1,2 +1,5 @@
 requests>=2.31
 python-dotenv>=1.0
+# Optional: real ConPTY backend for start_session(pty=True) on Windows.
+# Install manually if pywinpty wheels are unavailable for your Python:
+# pywinpty>=2.0; sys_platform == "win32"
