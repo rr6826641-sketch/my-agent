@@ -260,3 +260,35 @@ def tool_capture_network_traffic(
 def tool_close_browser() -> Dict[str, Any]:
     _close_browser()
     return {"closed": True}
+
+
+# ---- task-named aliases (browser_* API surface) ----
+def browser_open_url(uri: str, wait_ms: int = 2500, capture_js_errors: bool = True, user_agent: str = "") -> Dict[str, Any]:
+    """Open a URL in headless Chromium (alias of tool_browse_page)."""
+    return tool_browse_page(uri, wait_ms, capture_js_errors, user_agent)
+
+
+def browser_click_element(selector: str, wait_ms: int = 1200) -> Dict[str, Any]:
+    """Click a CSS selector in the live page (alias of tool_click_element)."""
+    return tool_click_element(selector, wait_ms)
+
+
+def browser_fill_form(fields: str, submit_selector: str = "") -> Dict[str, Any]:
+    """Fill (and optionally submit) form fields (alias of tool_fill_form)."""
+    return tool_fill_form(fields, submit_selector)
+
+
+def browser_take_screenshot(path: str = "", full_page: bool = False) -> Dict[str, Any]:
+    """Save a PNG screenshot of the current page (alias of tool_take_screenshot)."""
+    return tool_take_screenshot(path, full_page)
+
+
+def browser_capture_network(uri: str = "", wait_ms: int = 3000,
+                            filter_substring: str = "", max_entries: int = 250) -> Dict[str, Any]:
+    """Record page network requests/responses (alias of tool_capture_network_traffic)."""
+    return tool_capture_network_traffic(uri, wait_ms, filter_substring, max_entries)
+
+
+def browser_close() -> Dict[str, Any]:
+    """Close the headless browser and free memory (alias of tool_close_browser)."""
+    return tool_close_browser()
