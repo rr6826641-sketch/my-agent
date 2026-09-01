@@ -745,6 +745,156 @@ _PLAN_PHASE_OF = {
 _MAX_PLAN_PIVOTS = 6
 
 
+# ---------------------------------------------------------------------------
+# 4-Stage Autonomous Multi-Agent Pipeline
+#
+# A high-level run mode: the whole engagement executes as FOUR strict
+# sequential stages. The structured output of Stage N is distilled into a
+# bounded context block that is mechanically injected into Stage N+1's
+# directive, so each stage reasons over exactly the evidence produced by
+# the previous one (no unbounded chat-history leakage).
+# ---------------------------------------------------------------------------
+
+PIPELINE_STAGES = (
+    {"num": 1, "key": "recon",
+     "title": "Reconnaissance & Surface Mapping",
+     "goal": "map identity, subdomains, live hosts, open ports/services, "
+             "technologies and exposed endpoints into a structured "
+             "ATTACK SURFACE MAP",
+     "tools": "subdomain_enum, dns_lookup, whois, ssl_info, httpx_probe, "
+              "port_scan / nmap_scan, tech_detect, check_headers, dir_fuzz, "
+              "extract_links"},
+    {"num": 2, "key": "hypotheses",
+     "title": "Hypothesis Generation & Vulnerability Modeling",
+     "goal": "turn the surface map into ranked vulnerability hypotheses "
+             "(CVE mappings, misconfigurations, injection classes, logic "
+             "flaws) with evidence pointers into Stage 1 findings",
+     "tools": "generate_security_hypotheses, cve_lookup, reasoning over the "
+              "bounded context"},
+    {"num": 3, "key": "analysis",
+     "title": "Deep Technical Analysis & Targeted Testing",
+     "goal": "validate or refute each hypothesis with targeted, non-"
+             "destructive probes and produce a confirmed/refuted/untested "
+             "verdict per hypothesis",
+     "tools": "sqli_test, xss_test, cmd_inject_test, path_traversal_test, "
+              "ssrf_test, xxe_test, ssti_test, graphql_check, jwt_attack, "
+              "cors_check, nuclei_scan, nikto_scan, waf_detect"},
+    {"num": 4, "key": "poc",
+     "title": "Proof-of-Concept Execution & Validated Reporting",
+     "goal": "safely reproduce confirmed weaknesses as PoCs, log every "
+             "validated finding with add_finding, then generate the final "
+             "validated engagement report via write_report",
+     "tools": "add_finding, verify_finding, list_findings, write_report, "
+              "run_python (safe PoC scripts)"},
+)
+
+# Hard cap (chars) on any single prior-stage output injected into the next
+# stage's directive - keeps the bounded context bounded by construction.
+_PIPELINE_STAGE_CONTEXT_LIMIT = 3500
+
+
+def _pipeline_bounded(text, limit=_PIPELINE_STAGE_CONTEXT_LIMIT):
+    """Distill one stage's raw output into a bounded context block."""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    head = text[: int(limit * 0.6)]
+    tail = text[-int(limit * 0.35):]
+    return (head + "\n...[context truncated]...\n" + tail)
+
+
+class PipelineState:
+    """Explicit state object passed through all 4 pipeline stages.
+
+    Stage N's structured output is stored here; Stage N+1 reads its bounded
+    context from this object - the ONLY channel between stages.
+    """
+
+    def __init__(self, target: str):
+        self.target = (target or "").strip()
+        self.stage = 0                     # currently executing stage (1-4)
+        self.stage_outputs = {}            # num -> structured report text
+        self.completed_stages = []         # successfully finished stage nums
+        self.failed_stage = None           # num that aborted the pipeline
+        self.error = ""
+        self.started_at = time.time()
+        self.finished_at = None
+
+    # -------------------------------------------------- state passing
+    def record(self, num: int, output: str, ok: bool,
+               error: str = "") -> None:
+        self.stage = num
+        if ok:
+            self.stage_outputs[num] = output or "(no output)"
+            self.completed_stages.append(num)
+        else:
+            self.failed_stage = num
+            self.error = error or (output or "stage failed")
+
+    def bounded_context(self) -> str:
+        """Bounded context for the NEXT stage: prior stage outputs only."""
+        blocks = []
+        for num in sorted(self.stage_outputs):
+            title = PIPELINE_STAGES[num - 1]["title"]
+            blocks.append("[STAGE %d OUTPUT - %s]\n%s" % (
+                num, title,
+                _pipeline_bounded(self.stage_outputs[num])))
+        return "\n\n".join(blocks) if blocks else "(no prior stage output)"
+
+    def final_report(self) -> str:
+        """Validated report assembled from the state after all stages."""
+        lines = ["# Autonomous Pipeline Report: %s" % (self.target or "?")]
+        total = time.time() - self.started_at
+        lines.append("Stages completed: %d/4 in %.0fs" % (
+            len(self.completed_stages), total))
+        for num in sorted(self.stage_outputs):
+            title = PIPELINE_STAGES[num - 1]["title"]
+            lines.append("\n---\n\n## Stage %d: %s\n\n%s" % (
+                num, title, _pipeline_bounded(self.stage_outputs[num],
+                                              limit=6000)))
+        if self.failed_stage is not None:
+            lines.append("\n---\n\n## Pipeline aborted at Stage %d\n\n%s" % (
+                self.failed_stage, self.error[:1500]))
+        return "\n".join(lines)
+
+    def to_dict(self) -> dict:
+        return {
+            "target": self.target,
+            "stage": self.stage,
+            "completed_stages": list(self.completed_stages),
+            "failed_stage": self.failed_stage,
+            "error": self.error[:500],
+            "elapsed": round(time.time() - self.started_at, 1),
+        }
+
+
+def _pipeline_stage_prompt(state: PipelineState, spec: dict) -> str:
+    """Build Stage N's directive: goal + Stage N-1 bounded context."""
+    if spec["num"] == 1:
+        context_block = ("TARGET: %s\n(Stage 1 starts from zero - "
+                         "discover everything yourself.)" % state.target)
+    else:
+        context_block = (
+            "TARGET: %s\n\nBOUNDED CONTEXT (structured outputs of the "
+            "previous stages - your ONLY source of truth):\n\n%s"
+            % (state.target, state.bounded_context()))
+    return (
+        "[PIPELINE STAGE %d/4] %s\n\n"
+        "GOAL: %s\n"
+        "TOOLS TO USE: %s\n\n"
+        "RULES:\n"
+        "- Work ONLY inside this stage's goal; later stages handle the rest.\n"
+        "- Base every claim on tool results or the bounded context above; "
+        "never invent targets, ports or findings.\n"
+        "- Non-destructive actions only: no DoS, no data destruction, no "
+        "irreversible changes.\n"
+        "- Finish with a structured markdown report under the heading "
+        "'### STAGE %d REPORT' so the next stage can consume it.\n\n"
+        "%s" % (spec["num"], spec["title"], spec["goal"], spec["tools"],
+                spec["num"], context_block))
+
+
+
 def _valid_port(num, exclude_years=True):
     """True when num is a plausible TCP/UDP port (years filtered out so prose
     like 'in 2026' is never mistaken for a port)."""
@@ -2919,6 +3069,78 @@ class Agent:
     def cancel_agent(self, agent_id=""):
         """Cancel one tracked sub-agent (or all active children)."""
         return self._orchestrator.cancel_agent(agent_id or "")
+
+    # ------------------------------------ 4-stage autonomous pipeline
+
+    def run_autonomous_pipeline(self, target, stop_event=None, model=None):
+        """Run the full engagement as a high-level autonomous mode: FOUR
+        strict sequential stages, where the structured output of Stage N is
+        distilled into a bounded context object (PipelineState) that is
+        mechanically injected into Stage N+1's directive.
+
+        Stages (PIPELINE_STAGES):
+          1. Reconnaissance & Surface Mapping
+          2. Hypothesis Generation & Vulnerability Modeling
+          3. Deep Technical Analysis & Targeted Testing
+          4. Proof-of-Concept Execution & Validated Reporting
+
+        Strict sequencing is enforced: Stage N+1 starts ONLY after Stage N
+        recorded its output into the PipelineState; if a stage fails (LLM
+        error, cancellation or empty output), the pipeline aborts and the
+        remaining stages are NOT executed.
+
+        Yields run_stream-compatible events plus pipeline events:
+          pipeline_start  -> {target, stages}
+          stage_start     -> {num, title, goal}
+          stage_complete  -> {num, title, output, state}
+          pipeline_done   -> {report, state}
+        """
+        target = (target or "").strip()
+        if not target:
+            yield {"type": "error", "content": "(pipeline needs a target)"}
+            return
+        state = PipelineState(target)
+        yield {"type": "pipeline_start", "target": target,
+               "stages": [s["title"] for s in PIPELINE_STAGES],
+               "state": state.to_dict()}
+        report = ""
+        for spec in PIPELINE_STAGES:
+            num = spec["num"]
+            if stop_event is not None and stop_event.is_set():
+                state.record(num, "", False, "cancelled before stage start")
+                break
+            prompt = _pipeline_stage_prompt(state, spec)
+            yield {"type": "stage_start", "num": num, "title": spec["title"],
+                   "goal": spec["goal"], "state": state.to_dict()}
+            output, error = "", ""
+            try:
+                for ev in self.run_stream(prompt, stop_event=stop_event,
+                                          model=model):
+                    if ev.get("type") == "final":
+                        output = ev.get("content", "")
+                    else:
+                        yield ev
+            except RunCancelled:
+                state.record(num, "", False, "cancelled by user")
+                break
+            except Exception as exc:
+                error = "%s: %s" % (type(exc).__name__, exc)
+            if not error and (not output or not output.strip()
+                              or output.startswith("[LLM error]")):
+                error = "stage %d produced no usable output" % num
+            if error:
+                state.record(num, output, False, error)
+                yield {"type": "error", "stage": num, "content": error,
+                       "state": state.to_dict()}
+                break
+            state.record(num, output, True)
+            yield {"type": "stage_complete", "num": num,
+                   "title": spec["title"], "output": output,
+                   "state": state.to_dict()}
+        state.finished_at = time.time()
+        report = state.final_report()
+        yield {"type": "pipeline_done", "report": report,
+               "state": state.to_dict()}
 
     # ------------------------------------------------------------ helpers
 
