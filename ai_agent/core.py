@@ -2799,9 +2799,87 @@ class Agent:
         depth = self.spawn_depth + 1
         if depth >= self.max_spawn_depth:
             return "Error: sub-agent depth limit reached."
+        # Hypothesis wiring: when a verification task references a
+        # hypothesis plan and no criteria were declared, auto-inject the
+        # plan's success criteria so check_agent_status(validate=true)
+        # cross-checks exactly what the hypothesis requires.
+        success_criteria, task = self._wire_hypothesis_criteria(
+            task, success_criteria)
         return self._orchestrator.spawn(
             task, wait=wait, success_criteria=success_criteria,
             capabilities=capabilities, timeout=timeout, depth=depth)
+
+    def _wire_hypothesis_criteria(self, task, success_criteria):
+        """Auto-inject hypothesis success criteria into a spawn request.
+
+        If the task embeds a chain_to_verification_plan JSON (a plan
+        dict inside a 'plans' payload or a bare plan with
+        'verification_task' + 'success_criteria') and success_criteria
+        is empty, the plan's criteria and its verification_task are
+        adopted. Anything unparseable passes through untouched.
+        """
+        if success_criteria:
+            return success_criteria, task
+        task = task or ""
+        stripped = task.strip()
+        if not (stripped.startswith("{") or stripped.startswith("[")):
+            return success_criteria, task
+        try:
+            decoded = json.loads(stripped)
+        except (json.JSONDecodeError, ValueError):
+            return success_criteria, task
+        plan = None
+        if isinstance(decoded, dict) and "verification_task" in decoded:
+            plan = decoded
+        elif isinstance(decoded, dict) and "plans" in decoded:
+            plans = decoded.get("plans")
+            if isinstance(plans, list) and plans:
+                plan = plans[0]
+        elif isinstance(decoded, list) and decoded:
+            first = decoded[0]
+            if isinstance(first, dict) and "verification_task" in first:
+                plan = first
+        if isinstance(plan, dict) and plan.get("verification_task") \
+                and plan.get("success_criteria"):
+            wired_task = str(plan["verification_task"])
+            criteria = list(plan["success_criteria"])
+            return criteria, wired_task
+        return success_criteria, task
+
+    def spawn_verification_agents(self, hypotheses_json, wait=False,
+                                  capabilities=None, timeout=None):
+        """Spawn verification sub-agents for hypothesis plans (async).
+
+        Accepts the hypotheses JSON from generate_security_hypotheses,
+        chains it through the verification-plan mapper, and spawns ONE
+        tracked sub-agent per plan (bounded by the orchestrator caps; a
+        full plan list that exceeds the caps is rejected with a clear
+        error rather than silently truncated - spawn in batches).
+        success_criteria come from each plan automatically.
+        """
+        if not self.allow_subagents:
+            return "Error: sub-agents are disabled."
+        raw = chain_to_verification_plan(hypotheses_json)
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return raw
+        if "plans" not in data:
+            return raw
+        plans = data["plans"]
+        if not plans:
+            return raw
+        results = []
+        for plan in plans[:1] if len(plans) == 1 else plans:
+            task = json.dumps(plan, ensure_ascii=False)
+            results.append(self.spawn_agent(
+                task, wait=wait, success_criteria=plan["success_criteria"],
+                capabilities=capabilities, timeout=timeout))
+            if "Error" in results[-1][:40]:
+                break
+        if len(results) == 1:
+            return results[0]
+        return "\n".join(results)
 
     def spawn_agents(self, tasks, wait=False, success_criteria=None,
                      capabilities=None, timeout=None):

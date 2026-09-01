@@ -292,6 +292,141 @@ def generate_security_hypotheses(target_scope, attack_surface_json,
     })
 
 
+# Per-rule checklist: what a sub-agent must produce for the hypothesis
+# to count as verified (feeds success_criteria + verification loop).
+_VERIFY_STEPS = {
+    "state_flaw": [
+        "captured happy-path request sequence for every state transition",
+        "replayed/reordered transition evidence (before/after state)",
+        "server response proving invalid transition accepted or rejected",
+    ],
+    "race": [
+        "captured single valid request",
+        "concurrent burst evidence: N requests, K successes",
+        "persisted-state diff showing double-application or single apply",
+    ],
+    "authz": [
+        "account B object id used with account A session",
+        "cross-principal response body (or clean 403 denial)",
+        "verb/version/content-type alternates attempted",
+    ],
+    "multi_step": [
+        "full captured flow sequence",
+        "skipped/reordered step submission evidence",
+        "final state showing control bypassed or enforced",
+    ],
+    "mass_assign": [
+        "injected attribute evidence per request channel (body/query/JSON)",
+        "persisted-state diff after injection",
+        "privileged behavior (or absence) demonstrated",
+    ],
+    "session": [
+        "cross-context token consumption evidence",
+        "post-2FA endpoint direct-access response",
+        "verification marker state (set or not set)",
+    ],
+}
+
+
+def chain_to_verification_plan(hypotheses_json):
+    """Map hypotheses into executable verification tasks.
+
+    Args:
+        hypotheses_json: JSON list/text of hypothesis objects as produced
+            by generate_security_hypotheses (or a single object, or the
+            full result dict returned by it).
+
+    Returns:
+        JSON string {"plan_count", "plans": [{hypothesis_id,
+        vulnerability_type, verification_task, success_criteria,
+        proposed_test_strategy, confidence_score}]} where
+        verification_task is a ready-to-spawn sub-agent task string and
+        success_criteria are the observable deliverables the parent can
+        validate against the child's output.
+
+    Unknown/missing fields degrade gracefully: the plan still carries a
+    generic validation task with the hypothesis payload embedded.
+    """
+    data = _parse_surface(hypotheses_json)
+    if data is None:
+        return json.dumps({
+            "error": "hypotheses_json is not valid JSON.",
+            "example": '[{"hypothesis_id": "HYP-xxxx", "vulnerability_type": '
+                       '"...", "target_component": "...", '
+                       '"proposed_test_strategy": "..."}]',
+        })
+    # accept a full result dict too
+    if isinstance(data, dict):
+        data = data.get("hypotheses") if "hypotheses" in data else [data]
+    if not isinstance(data, list):
+        return json.dumps({
+            "error": "hypotheses_json must be a list of hypothesis objects "
+                     "or a generate result dict.",
+        })
+
+    plans = []
+    for h in data:
+        if not isinstance(h, dict):
+            continue
+        htype = str(h.get("vulnerability_type", ""))
+        rule_id = _rule_id_from_type(htype)
+        steps = _VERIFY_STEPS.get(rule_id, [
+            "reproduction evidence for the claimed condition",
+            "before/after state or response diff",
+            "explicit confirm/reject verdict with evidence",
+        ])
+        component = str(h.get("target_component", "(unknown component)"))
+        hid = str(h.get("hypothesis_id", "HYP-unknown"))
+        strategy = str(h.get("proposed_test_strategy", "") or htype)
+        success_criteria = [
+            "evidence: %s" % s for s in steps]
+        plans.append({
+            "hypothesis_id": hid,
+            "vulnerability_type": htype or "(unspecified)",
+            "verification_task": (
+                "Validate hypothesis %s on component '%s': %s. "
+                "Follow the test strategy exactly; collect evidence for "
+                "every criterion. End with VERDICT: confirmed|refuted|"
+                "inconclusive plus the evidence list."
+                % (hid, component, strategy or htype)),
+            "success_criteria": success_criteria,
+            "proposed_test_strategy": strategy,
+            "confidence_score": float(h.get("confidence_score", 0.0) or 0.0),
+        })
+    if not plans:
+        return json.dumps({
+            "plan_count": 0,
+            "note": "no usable hypothesis objects found in input.",
+        })
+    plans.sort(key=lambda p: -p["confidence_score"])
+    return json.dumps({
+        "plan_count": len(plans),
+        "plans": plans,
+        "note": ("feed each plan.verification_task to spawn_agent with "
+                 "plan.success_criteria; validate outputs with "
+                 "check_agent_status(id, validate=true) before reporting."),
+    })
+
+
+def _rule_id_from_type(vuln_type):
+    lowered = (vuln_type or "").lower()
+    for rid in ("race", "state", "authz", "multi_step", "mass_assign",
+                "session"):
+        if rid in lowered:
+            return {"state": "state_flaw"}.get(rid, rid)
+    if "authorization" in lowered or "idor" in lowered:
+        return "authz"
+    if "business-logic" in lowered or "flow" in lowered:
+        return "multi_step"
+    if "mass-assignment" in lowered or "client-trusted" in lowered:
+        return "mass_assign"
+    if "confusion" in lowered or "verification-skip" in lowered:
+        return "session"
+    if "race" in lowered:
+        return "race"
+    return "unknown"
+
+
 def tool_generate_security_hypotheses(target_scope="", attack_surface_json="",
                                       max_hypotheses=8):
     """Tool wrapper: generate logic-flaw hypotheses, render as ranked text."""
@@ -315,5 +450,26 @@ def tool_generate_security_hypotheses(target_scope="", attack_surface_json="",
         lines.append("component: %s" % h["target_component"])
         lines.append("reasoning: %s" % h["logic_reasoning"])
         lines.append("test plan: %s" % h["proposed_test_strategy"])
+        lines.append("")
+    return "\n".join(lines)
+
+
+def tool_chain_to_verification_plan(hypotheses_json):
+    """Tool wrapper: map hypotheses to sub-agent verification plans."""
+    raw = chain_to_verification_plan(hypotheses_json)
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    if "plans" not in data:
+        return json.dumps(data, indent=2)
+    lines = ["Verification plans for %d hypothesis(es):" % len(data["plans"])]
+    lines.append("")
+    for p in data["plans"]:
+        lines.append("## %s  [confidence %.2f]  %s"
+                     % (p["hypothesis_id"], p["confidence_score"],
+                        p["vulnerability_type"]))
+        lines.append("task:    %s" % p["verification_task"])
+        lines.append("criteria: %s" % "; ".join(p["success_criteria"]))
         lines.append("")
     return "\n".join(lines)

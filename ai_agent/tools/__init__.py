@@ -58,6 +58,7 @@ from .skills import (
 )
 from .hypothesis_engine import (
     tool_generate_security_hypotheses,
+    tool_chain_to_verification_plan,
 )
 from .cloud_sec import (
     aws_s3_enum,
@@ -779,6 +780,22 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                  tool_generate_security_hypotheses(
                      target_scope or "", attack_surface_json or "",
                      int(max_hypotheses or 8))),
+        Tool("chain_to_verification_plan", "Map security hypotheses (from "
+             "generate_security_hypotheses) into executable verification "
+             "plans: each plan carries a ready-to-spawn verification_task "
+             "for spawn_agent plus observable success_criteria that "
+             "check_agent_status(validate=true) cross-checks. Chain order: "
+             "recon -> generate_security_hypotheses -> "
+             "chain_to_verification_plan -> spawn_agent(plan_json) -> "
+             "check_agent_status(validate=true). Plans are ranked by "
+             "confidence.",
+             {"type": "object",
+              "properties": {"hypotheses_json": _str_prop(
+                  "JSON hypotheses from generate_security_hypotheses (list, "
+                  "single object, or its full result dict)")},
+              "required": ["hypotheses_json"]},
+             lambda hypotheses_json="": tool_chain_to_verification_plan(
+                 hypotheses_json or "")),
         Tool("remember", "Save a fact/note to persistent memory.",
              {"type": "object",
               "properties": {"key": _str_prop("short key, e.g. 'target_ip'"),
