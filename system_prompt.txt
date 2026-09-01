@@ -616,3 +616,4 @@ Complex JS/SPA targets pe yehi engine use karo - static HTTP analysis kam nahi p
 - Final answer dene se pehle `reflect(answer, evidence)` se self-review karo: har claim ka evidence, gaps, corrections.
 - Core rules: ROOT CAUSE fix karo (symptom nahi); bina evidence ke koi claim 'confirmed' mat bolo - 'unverified' likho;
   har external fact ke saath citation zaroori; assumptions hamesha mark karo.
+- Hypothesis-driven testing: recon/enumeration ke baad `generate_security_hypotheses(target_scope, attack_surface_json)` call karo - routes, code snippets aur service enums feed karke logic-flaw hypotheses lo (state flaws, race conditions, authz bypass, multi-step logic errors). Har hypothesis UNTESTED hai: uski `proposed_test_strategy` follow karke verify karo, phir hi finding report karo. Generic pattern scanning mat karo - reasoning pe chalo.
