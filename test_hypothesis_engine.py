@@ -51,7 +51,7 @@ def test_confidence_grows_with_code_evidence():
     plain = _parse(generate_security_hypotheses("t", [
         {"route": "/api/coupons/apply", "notes": "redeem coupon"}]))
     coded = _parse(generate_security_hypotheses("t", [
-        {"route": "/api/coupons/apply",
+        {"route": "/api/coupons/apply", "notes": "redeem coupon",
          "code": "if not coupon.used: apply(coupon)"}]))
     assert (coded["hypotheses"][0]["confidence_score"]
             > plain["hypotheses"][0]["confidence_score"])
