@@ -105,6 +105,12 @@ from .capabilities import (
     tool_deserialization_check, tool_smuggling_detect, tool_oauth_check,
     tool_cloud_meta_test, tool_lockfile_scan, tool_ad_svc_probe,
 )
+from .active_directory import (
+    smb_enum,
+    ldap_search_anonymous,
+    kerberos_ticket_check,
+    subnet_sweep,
+)
 from .scope import (
     tool_set_scope, tool_show_scope, tool_check_scope,
 )
@@ -1565,6 +1571,59 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
               "required": ["host"]},
              lambda host="", ports="", timeout=3:
                  tool_ad_svc_probe(host or "", ports or "", int(timeout or 3))),
+        Tool("smb_enum", "Active Directory / SMB enumeration: probe an SMB "
+             "server (default port 445) for reachability, negotiated SMB1/SMB2 "
+             "protocol dialects, signing requirements, null-session anonymous "
+             "access (SMB1 session setup + tree connect), accessible anonymous "
+             "shares (IPC$, NETLOGON, SYSVOL, ADMIN$, C$), plus adjacent "
+             "NetBIOS (139) and MSRPC (135) presence.",
+             {"type": "object",
+              "properties": {"target_ip": _str_prop("IP address or hostname to probe"),
+                             "port": {"type": "integer", "default": 445,
+                                      "description": "SMB TCP port"}},
+              "required": ["target_ip"]},
+             lambda target_ip="", port=445:
+                 smb_enum(target_ip or "", int(port or 445))),
+        Tool("ldap_search_anonymous", "Anonymous LDAP enumeration on port 389: "
+             "perform an anonymous bind, then query the root DSE (or a supplied "
+             "base DN) for naming contexts, default/root domain naming contexts, "
+             "supported LDAP versions and SASL mechanisms, server DNS host, and "
+             "any exposed directory entries. Returns structured JSON; never raises.",
+             {"type": "object",
+              "properties": {"target_ip": _str_prop("IP address or hostname"),
+                             "base_dn": _str_prop("base DN to search (empty = root DSE)", "")},
+              "required": ["target_ip"]},
+             lambda target_ip="", base_dn="":
+                 ldap_search_anonymous(target_ip or "", base_dn or "")),
+        Tool("kerberos_ticket_check", "Kerberos KDC probing on port 88: send raw "
+             "AS-REQ packets for given usernames against the supplied domain/realm "
+             "and classify KDC responses (AS-REP vs KRB-ERROR codes) to detect "
+             "AS-REP roastable accounts (pre-auth disabled, hashcat mode 18200) "
+             "and enumerate valid usernames via PREAUTH_REQUIRED responses.",
+             {"type": "object",
+              "properties": {"target_ip": _str_prop("IP address of the KDC / DC"),
+                             "domain": _str_prop("AD domain/realm (e.g. corp.local)"),
+                             "usernames": _str_prop("comma-separated usernames to probe", "Administrator")},
+              "required": ["target_ip", "domain"]},
+             lambda target_ip="", domain="", usernames="Administrator":
+                 kerberos_ticket_check(target_ip or "", domain or "", usernames or "Administrator")),
+        Tool("subnet_sweep", "Rapid parallel internal network host discovery: sweep "
+             "an IPv4 CIDR block for hosts with common enterprise service ports "
+             "(default 80, 445, 3389, 22) using non-blocking concurrent TCP "
+             "connects. Returns per-host open ports for pivot mapping.",
+             {"type": "object",
+              "properties": {"subnet_cidr": _str_prop("IPv4 CIDR e.g. 10.10.10.0/24"),
+                             "ports": _str_prop("comma-separated ports", "80,445,3389,22"),
+                             "max_hosts": {"type": "integer", "default": 8192,
+                                           "description": "cap on addresses swept"}, 
+                             "workers": {"type": "integer", "default": 200,
+                                         "description": "concurrent connections"}, 
+                             "timeout": {"type": "number", "default": 1.5,
+                                         "description": "connect timeout seconds"}},
+              "required": ["subnet_cidr"]},
+             lambda subnet_cidr="", ports="", max_hosts=8192, workers=200, timeout=1.5:
+                 subnet_sweep(subnet_cidr or "", ports or "",
+                             max_hosts, workers, timeout)),
 
 
         # ---- findings & reporting ----
