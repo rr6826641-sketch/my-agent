@@ -36,6 +36,10 @@ from .terminal import (
     tool_start_session, tool_send_input, tool_view_session_output,
     tool_wait_for_pattern, tool_kill_session, tool_list_sessions,
 )
+from .pty_terminal import (
+    pty_start_session, pty_send_input, pty_read_output, pty_kill_session,
+    pty_status,
+)
 from .memory import (
     tool_memory_save, tool_memory_get, tool_memory_list, tool_memory_delete,
 )
@@ -486,6 +490,90 @@ def create_tools(memory, knowledge=None, institutional=None,
               "required": []},
              lambda active_only=False:
                  tool_list_sessions(active_only=bool(active_only))),
+
+        # ---- persistent PTY sessions (real pseudo-terminal) ----
+        Tool("pty_start_session",
+             "Start a long-running interactive process on a REAL "
+             "pseudo-terminal (ConPTY on Windows, pty on POSIX) and return "
+             "a unique session_id. The PTY stays alive in the background "
+             "across tool calls. Use for TUI programs, REPLs, ssh, mysql "
+             "clis, top/htop, or anything that needs isatty()/colors. "
+             "Read output with pty_read_output, type with pty_send_input, "
+             "tear down with pty_kill_session, inspect with pty_status.",
+             {"type": "object",
+              "properties": {"command": _str_prop(
+                  "command line to start (e.g. 'python -i' or 'ssh user@host')"),
+                  "cwd": _str_prop("working directory", None),
+                  "name": _str_prop("friendly label"),
+                  "env": _str_prop("extra env vars as KEY=VALUE;...", None),
+                  "shell": {"type": "boolean", "default": True,
+                             "description": "run via shell"}},
+              "required": ["command"]},
+             lambda command="", cwd=None, name=None, env=None, shell=True:
+                 pty_start_session(command, cwd=cwd or None, name=name or None,
+                                   env=env or None, shell=bool(shell))),
+        Tool("pty_send_input",
+             "Send raw interactive input to a PTY session's stdin: typed "
+             "text, passwords, answers to prompts, or control characters. "
+             "Raw bytes pass through literally (press_enter defaults to "
+             "false, so '\\x03' reaches the program as a real Ctrl+C). "
+             "Named signals also work: '!signal:ctrl_c', '!signal:enter', "
+             "'!signal:esc', '!signal:ctrl_d'. Sending Ctrl+C does NOT "
+             "kill the background session.",
+             {"type": "object",
+              "properties": {"session_id": _str_prop(
+                  "session id from pty_start_session"),
+                  "input_data": _str_prop(
+                      "raw input to type, e.g. 'print(1+1)' or '\\x03' for "
+                      "Ctrl+C; or '!signal:ctrl_c'"),
+                  "press_enter": {"type": "boolean", "default": False,
+                                   "description": "append newline after the "
+                                                  "input (enable for typed "
+                                                  "commands that need Enter)"}},
+              "required": ["session_id", "input_data"]},
+             lambda session_id="", input_data="", press_enter=False:
+                 pty_send_input(session_id, input_data=input_data,
+                                press_enter=bool(press_enter))),
+        Tool("pty_read_output",
+             "Fetch accumulated stdout/stderr of a PTY session without "
+             "blocking or terminating it. Waits up to `timeout` seconds "
+             "for NEW output (returns early as soon as any arrives), then "
+             "returns the buffer tail. Safe to call repeatedly to stream "
+             "a running process's output across tool calls.",
+             {"type": "object",
+              "properties": {"session_id": _str_prop(
+                  "session id from pty_start_session"),
+                  "timeout": {"type": "number", "default": 2.0,
+                               "description": "max seconds to wait for new "
+                                              "output (0 = snapshot only)"},
+                  "tail": {"type": "integer", "default": 4000,
+                            "description": "max chars per stream"},
+                  "clear": {"type": "boolean", "default": False,
+                             "description": "clear buffers after read"},
+                  "include_stderr": {"type": "boolean", "default": True}},
+              "required": ["session_id"]},
+             lambda session_id="", timeout=2.0, tail=4000, clear=False,
+                    include_stderr=True:
+                 pty_read_output(session_id, timeout=timeout, tail=int(tail),
+                                 clear=bool(clear),
+                                 include_stderr=bool(include_stderr))),
+        Tool("pty_kill_session",
+             "Terminate a PTY session's whole process tree and clean up "
+             "its process handles and ledger entry.",
+             {"type": "object",
+              "properties": {"session_id": _str_prop(
+                  "session id from pty_start_session")},
+              "required": ["session_id"]},
+             lambda session_id="": pty_kill_session(session_id)),
+        Tool("pty_status",
+             "Dump the PTY session ledger: session id, pid, status "
+             "(running/exited/killed), uptime and output byte counts. "
+             "Pass active_only=true for just running sessions.",
+             {"type": "object",
+              "properties": {"active_only": {"type": "boolean",
+                                               "default": False}},
+              "required": []},
+             lambda active_only=False: pty_status(active_only=bool(active_only))),
         Tool("web_search",
              "Search the web (DuckDuckGo) and return top results with links "
              "and snippets.",
