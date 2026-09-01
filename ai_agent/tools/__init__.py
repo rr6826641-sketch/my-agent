@@ -1717,11 +1717,13 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
               "required": ["findings_list"]},
              lambda findings_list="":
                  correlate_findings(findings_list or "")),
-        Tool("calc_cvss_score", "Calculate a CVSS v3.1 base score, per-metric "
-             "ratings and severity level (Critical/High/Medium/Low/None) from "
-             "a vector string such as 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' "
-             "or a metrics object {AV, AC, PR, UI, S, C, I, A}. Implements the "
-             "official FIRST CVSS v3.1 formula including scope-changed impact.",
+        Tool("calc_cvss_score", "Calculate a CVSS v3.1 score (base + temporal "
+             "+ environmental), per-metric ratings and severity level "
+             "(Critical/High/Medium/Low/None) from a vector string such as "
+             "'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' (temporal E/RL/RC "
+             "and environmental CR/IR/AR/MAV/MAC/MPR/MUI/MS/MC/MI/MA metrics "
+             "may be appended) or a metrics object. Implements the official "
+             "FIRST CVSS v3.1 formula including scope-changed impact.",
              {"type": "object",
               "properties": {"vector_string_or_metrics": _str_prop("CVSS vector string or JSON object with metrics AV/AC/PR/UI/S/C/I/A")},
               "required": ["vector_string_or_metrics"]},
@@ -1737,10 +1739,15 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
              {"type": "object",
               "properties": {"target_name": _str_prop("assessed target / engagement name"),
                              "executive_summary": _str_prop("summary paragraph (auto-generated if empty)", ""),
-                             "findings_json": _str_prop("JSON array of finding objects (raw or correlated)")},
+                             "findings_json": _str_prop("JSON array of finding objects (raw or correlated)"),
+                             "report_title": _str_prop("custom cover title (default 'Penetration Test Report')", ""),
+                             "author": _str_prop("report author", "HackerAI Agent"),
+                             "organization": _str_prop("client / organization name for the cover", ""),
+                             "logo_url": _str_prop("markdown image URL for the logo header", ""),
+                             "classification": _str_prop("data classification label", "Confidential")},
               "required": ["target_name", "findings_json"]},
-             lambda target_name="", executive_summary="", findings_json="":
-                 generate_markdown_report(target_name or "", executive_summary or "", findings_json or "")),
+             lambda target_name="", executive_summary="", findings_json="", report_title="", author="HackerAI Agent", organization="", logo_url="", classification="Confidential":
+                 generate_markdown_report(target_name or "", executive_summary or "", findings_json or "", report_title or "", author or "HackerAI Agent", organization or "", logo_url or "", classification or "Confidential")),
 
         # ---- scope enforcement ----
         Tool("set_scope", "Set the engagement scope: comma-separated domains, "

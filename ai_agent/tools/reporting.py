@@ -588,7 +588,7 @@ def tool_write_report(target="", author="HackerAI Agent",
 # ---------------------------------------------------------------------------
 
 # field aliases used by nmap / nuclei / nikto / http probe outputs
-_ALIAS_HOST = ("host", "target", "ip", "ip_address", "address", "url", "asset", "hostname")
+_ALIAS_HOST = ("host", "target", "ip", "ip_address", "address", "asset", "hostname")
 _ALIAS_TITLE = ("title", "name", "vuln", "vulnerability", "issue", "id", "plugin_id", "template_id", "message", "banner")
 _ALIAS_SEV = ("severity", "risk", "risk_factor", "impact", "level", "cvss_severity")
 _ALIAS_PORT = ("port", "port_id", "port_number")
@@ -596,7 +596,7 @@ _ALIAS_SERVICE = ("service", "protocol", "service_name", "scheme")
 _ALIAS_EVIDENCE = ("evidence", "output", "matched_at", "description", "data", "excerpt", "method")
 _ALIAS_CVE = ("cve", "cves", "references", "cwe")
 _ALIAS_TOOL = ("scanner", "tool", "source", "engine")
-_ALIAS_URL = ("url", "site", "endpoint", "path", "matched_at", "location")
+_ALIAS_URL = ("url", "site", "endpoint", "path", "matched_at", "location", "matched")
 
 _SEV_ALIASES = {
     "crit": "critical", "critical": "critical", "c": "critical",
@@ -653,7 +653,25 @@ def _norm_host(v):
     return s.split("/")[0] if "/" in s and not s.startswith("/") else s
 
 
+def _unwrap_nuclei_info(f):
+    """Nuclei JSON puts name/severity/description/cve inside a nested 'info'
+    object - hoist them to top level so the alias lookup finds them."""
+    info = f.get("info")
+    if isinstance(info, dict):
+        f.setdefault("title", info.get("name") or "")
+        f.setdefault("severity", info.get("severity") or "")
+        if info.get("description") and not f.get("evidence"):
+            f["evidence"] = info["description"]
+        refs = info.get("reference") or info.get("references") or info.get("classification", {}).get("cve-id")
+        if refs and not f.get("cve"):
+            f["cve"] = ", ".join(refs) if isinstance(refs, list) else str(refs)
+    elif isinstance(info, str):
+        f.setdefault("title", info)
+    return f
+
+
 def _title_from_finding(f):
+    f = _unwrap_nuclei_info(f)
     title = str(_fget(f, _ALIAS_TITLE)).strip()
     if not title:
         service = _fget(f, _ALIAS_SERVICE)
@@ -687,15 +705,31 @@ def correlate_findings(findings_list=""):
             return False
         return n1 == n2 or (len(n1) >= 5 and n1 in n2) or (len(n2) >= 5 and n2 in n1)
 
+    def _url_path(u):
+        s = str(u or "").strip()
+        if "://" in s:
+            try:
+                from urllib.parse import urlparse
+                return (urlparse(s).path or "").rstrip("/").lower()
+            except Exception:
+                return ""
+        return (s if s.startswith("/") else "").rstrip("/").lower()
+
     seen = []
     for f in items:
+        raw_url = _fget(f, _ALIAS_URL)
         host = _norm_host(_fget(f, _ALIAS_HOST))
+        if not host and raw_url:
+            host = _norm_host(raw_url)
         title = _title_from_finding(f)
         sev = _norm_sev(_fget(f, _ALIAS_SEV))
         port = str(_fget(f, _ALIAS_PORT) or "")
+        path = _url_path(_fget(f, _ALIAS_URL))
         existing = next((r for r in seen
                          if r["asset"].lower() == host.lower()
-                         and _same_vuln(r["title"], title)), None)
+                         and _same_vuln(r["title"], title)
+                         and (not path or not r.get("path")
+                              or path == r["path"])), None)
         if existing is not None:
             src = str(_fget(f, _ALIAS_TOOL) or "unknown")
             if src and src not in existing["corroborated_by"]:
@@ -713,6 +747,7 @@ def correlate_findings(findings_list=""):
             "risk_vector": RISK_VECTORS[sev],
             "cvss_base": calc_cvss_score(RISK_VECTORS[sev])["base_score"],
             "port": port,
+            "path": path,
             "service": str(_fget(f, _ALIAS_SERVICE) or ""),
             "url": str(_fget(f, _ALIAS_URL) or ""),
             "cve": _fget(f, _ALIAS_CVE),
@@ -765,6 +800,10 @@ _CVSS_REQUIRED = ("AV", "AC", "PR", "UI", "S", "C", "I", "A")
 
 def _parse_cvss_vector(vector):
     metrics = {}
+    _optional = {"E": "HFPU", "RL": "OTWU", "RC": "CRU",
+                 "CR": "LMH", "IR": "LMH", "AR": "LMH",
+                 "MAV": "NALP", "MAC": "LH", "MPR": "NLH", "MUI": "NR",
+                 "MS": "UC", "MC": "NLH", "MI": "NLH", "MA": "NLH"}
     for part in str(vector or "").strip().split("/"):
         part = part.strip()
         if not part or part.upper().startswith("CVSS"):
@@ -773,6 +812,8 @@ def _parse_cvss_vector(vector):
             k, v = part.split(":", 1)
             k, v = k.strip().upper(), v.strip().upper()
             if k in _CVSS_REQUIRED and v in _CVSS_NAMES.get(k, {}):
+                metrics[k] = v
+            elif k in _optional and v in _optional[k]:
                 metrics[k] = v
     return metrics
 
@@ -853,18 +894,63 @@ def calc_cvss_score(vector_string_or_metrics=""):
                 name = _CVSS_NAMES[k][val]
             ratings[k.lower()] = "%s (%s)" % (name, val)
         ratings["scope"] = _CVSS_NAMES["S"][scope]
+
+        # --- temporal metrics (optional, v3.1 spec section 8.1) ---
+        e, rl, rc = m.get("E", "X"), m.get("RL", "X"), m.get("RC", "X")
+        _t_weights = {"E": {"X": 1.0, "H": 1.0, "F": 0.97, "P": 0.94, "U": 0.91},
+                      "RL": {"X": 1.0, "O": 1.0, "T": 0.96, "W": 0.97, "U": 1.0},
+                      "RC": {"X": 1.0, "C": 1.0, "R": 0.96, "U": 0.92}}
+        temporal = _roundup(score * _t_weights["E"][e] * _t_weights["RL"][rl] * _t_weights["RC"][rc]) if score > 0 else 0.0
+
+        # --- environmental metrics (optional, v3.1 spec section 8.2) ---
+        cr, ir, ar = m.get("CR", "X"), m.get("IR", "X"), m.get("AR", "X")
+        mav, mac, mpr, mui = m.get("MAV", av), m.get("MAC", ac), m.get("MPR", pr), m.get("MUI", ui)
+        msc, mci, mii, mai = m.get("MS", scope), m.get("MC", c), m.get("MI", i), m.get("MA", a)
+        env_modified = any(m.get(k) for k in ("CR", "IR", "AR", "MAV", "MAC", "MPR", "MUI",
+                                              "MS", "MC", "MI", "MA"))
+        _req_w = {"X": 1.0, "L": 0.5, "M": 1.0, "H": 1.5}
+        if not env_modified:
+            environmental = temporal
+        else:
+            miss = 1.0 - (_CVSS_WEIGHTS["CIA"].get(mci, 0.0) or 0.0) * \
+                        (_CVSS_WEIGHTS["CIA"].get(mii, 0.0) or 0.0) * \
+                        (_CVSS_WEIGHTS["CIA"].get(mai, 0.0) or 0.0)
+            if miss == 1.0 and (mci == "N" and mii == "N" and mai == "N"):
+                miss = 0.0
+            m_impact = (6.42 * miss) if msc == "U" else (7.52 * (miss - 0.029)) - (3.25 * ((miss - 0.02) ** 15))
+            m_expl = 8.22 * _CVSS_WEIGHTS["AV"][mav] * _CVSS_WEIGHTS["AC"][mac] * \
+                     _CVSS_WEIGHTS["PR"][msc][mpr] * _CVSS_WEIGHTS["UI"][mui]
+            if m_impact <= 0:
+                environmental = 0.0
+            else:
+                min_impact = min(m_impact * (1 - (1 - _req_w[cr]) * (1 - _req_w[ir]) * (1 - _req_w[ar])), 10.0)
+                env_raw = (min_impact + m_expl) if msc == "U" else (1.08 * (min_impact + m_expl))
+                environmental = _roundup(min(_roundup(env_raw), 10.0))
+
+        full_vector = vector
+        if e != "X" or rl != "X" or rc != "X":
+            full_vector += "/" + "/".join("%s:%s" % (k, v) for k, v in (("E", e), ("RL", rl), ("RC", rc)) if v != "X")
+        if env_modified:
+            env_parts = ["%s:%s" % (k, m[k]) for k in ("CR", "IR", "AR", "MAV", "MAC", "MPR", "MUI", "MS", "MC", "MI", "MA") if k in m]
+            full_vector += "/" + "/".join(env_parts)
+
         return {
             "ok": True,
             "base_score": score,
+            "temporal_score": temporal,
+            "environmental_score": environmental,
             "severity": _cvss_severity_label(score),
             "ratings": ratings,
-            "vector_string": vector,
+            "temporal_metrics": {"exploitability": e, "remediation_level": rl, "report_confidence": rc},
+            "vector_string": full_vector,
         }
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
 
-def generate_markdown_report(target_name="", executive_summary="", findings_json=""):
+def generate_markdown_report(target_name="", executive_summary="", findings_json="",
+                             report_title="", author="HackerAI Agent",
+                             organization="", logo_url="", classification="Confidential"):
     """Standalone Markdown pentest report from a supplied findings payload.
 
     target_name       - assessed target / engagement name
@@ -872,11 +958,21 @@ def generate_markdown_report(target_name="", executive_summary="", findings_json
     findings_json     - JSON list (or JSON string) of finding dicts; accepts
                         raw scanner output (auto-correlated via
                         correlate_findings) or pre-correlated output.
+    report_title      - custom cover/heading title (default: 'Penetration Test Report')
+    author            - report author line
+    organization      - client/organization name shown on the cover
+    logo_url          - markdown image URL rendered at the top of the report
+    classification    - data classification label (e.g. Confidential / Public)
     Returns the full Markdown text; also saves to reports/ directory.
     """
     try:
         target_name = str(target_name or "").strip() or "Untitled Target"
         executive_summary = str(executive_summary or "").strip()
+        report_title = str(report_title or "").strip() or "Penetration Test Report"
+        author = str(author or "").strip() or "HackerAI Agent"
+        organization = str(organization or "").strip()
+        classification = str(classification or "").strip() or "Confidential"
+        logo_url = str(logo_url or "").strip()
 
         items, err = _coerce_findings(findings_json)
         if err:
@@ -896,10 +992,17 @@ def generate_markdown_report(target_name="", executive_summary="", findings_json
                                  % (target_name, len(findings), worst))
 
         L = []
-        L.append("# Penetration Test Report - %s" % target_name)
+        if logo_url:
+            L.append("![logo](%s)" % logo_url)
+            L.append("")
+        L.append("# %s - %s" % (report_title, target_name))
+        L.append("")
+        L.append("> **Classification:** %s" % classification)
         L.append("")
         L.append("**Date:** %s  " % now)
-        L.append("**Prepared by:** HackerAI Agent")
+        L.append("**Prepared by:** %s  " % author)
+        if organization:
+            L.append("**Prepared for:** %s  " % organization)
         L.append("")
         L.append("---")
         L.append("")
@@ -968,7 +1071,7 @@ def generate_markdown_report(target_name="", executive_summary="", findings_json
         L.append("")
         L.append("---")
         L.append("")
-        L.append("*Report generated by HackerAI Agent on %s*" % now)
+        L.append("*Report generated by %s on %s*" % (author, now))
 
         report = "\n".join(L)
 
