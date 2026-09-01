@@ -16,6 +16,12 @@ from .orchestration import (
 from .tools import create_tools, execute_tool
 from .tools.workspace import WorkspaceIndex
 
+# Sub-agent execution ledger lives next to the campaign lorebook in the
+# project's rpg/lorebook.db (typed progress logs + resumable transcripts).
+_SUBAGENT_DB_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "rpg", "lorebook.db")
+
 # --------------------------------------------------------------------------
 # Parallel Tool Execution Maximizer
 #
@@ -1739,6 +1745,7 @@ class Agent:
             max_siblings=DEFAULT_MAX_SIBLINGS,
             max_children=DEFAULT_MAX_CHILDREN,
             max_depth=max_spawn_depth,
+            db_path=_SUBAGENT_DB_PATH,
             make_child=(lambda task, depth:
                         self._make_subagent(task, depth=depth))
             if allow_subagents else None,

@@ -36,6 +36,8 @@ Core guarantees:
 """
 
 import json
+import os
+import sqlite3
 import threading
 import time
 import uuid
@@ -71,6 +73,149 @@ TRANSCRIPT_MAX_ENTRIES = 600
 TRANSCRIPT_ENTRY_LIMIT = 2000
 OUTPUT_LIMIT = 50000
 LEDGER_LIMIT = 200
+
+
+class LedgerStore:
+    """SQLite-backed execution ledger for sub-agents.
+
+    Persists typed progress logs, execution state and resumable
+    transcripts into rpg/lorebook.db (tables subagent_runs,
+    subagent_ledger, subagent_transcript) so the parent agent can poll
+    completion status asynchronously and resume children across restarts.
+    Every operation is best-effort and thread-safe: persistence failures
+    never break the interaction loop.
+    """
+
+    def __init__(self, db_path):
+        self.db_path = db_path
+        self._lock = threading.Lock()
+        folder = os.path.dirname(os.path.abspath(db_path))
+        if folder:
+            os.makedirs(folder, exist_ok=True)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS subagent_runs ("
+            " agent_id TEXT PRIMARY KEY,"
+            " parent TEXT NOT NULL DEFAULT '',"
+            " task TEXT NOT NULL DEFAULT '',"
+            " status TEXT NOT NULL DEFAULT 'queued',"
+            " phase TEXT NOT NULL DEFAULT '',"
+            " persona TEXT,"
+            " depth INTEGER NOT NULL DEFAULT 0,"
+            " success_criteria TEXT NOT NULL DEFAULT '',"
+            " capabilities TEXT NOT NULL DEFAULT '',"
+            " capability_report TEXT NOT NULL DEFAULT '{}',"
+            " verified INTEGER NOT NULL DEFAULT 0,"
+            " validation_note TEXT NOT NULL DEFAULT '',"
+            " tool_calls INTEGER NOT NULL DEFAULT 0,"
+            " run_count INTEGER NOT NULL DEFAULT 0,"
+            " output TEXT, error TEXT, meta TEXT,"
+            " created_at REAL, started_at REAL, finished_at REAL,"
+            " updated_at TEXT NOT NULL DEFAULT '')")
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS subagent_ledger ("
+            " entry_id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " agent_id TEXT NOT NULL, ts TEXT NOT NULL,"
+            " phase TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '')")
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS subagent_transcript ("
+            " entry_id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " agent_id TEXT NOT NULL, seq INTEGER NOT NULL,"
+            " ts TEXT NOT NULL, kind TEXT NOT NULL,"
+            " content TEXT NOT NULL)")
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_subagent_ledger_agent"
+            " ON subagent_ledger(agent_id)")
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_subagent_transcript_agent"
+            " ON subagent_transcript(agent_id)")
+        self._conn.commit()
+
+    def upsert_run(self, record):
+        """Insert or refresh one child's execution-state row."""
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO subagent_runs (agent_id, parent, task, status,"
+                " phase, persona, depth, success_criteria, capabilities,"
+                " capability_report, verified, validation_note, tool_calls,"
+                " run_count, output, error, meta, created_at, started_at,"
+                " finished_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+                " ?, ?, ?, ?, ?)"
+                " ON CONFLICT(agent_id) DO UPDATE SET"
+                " status=excluded.status, phase=excluded.phase,"
+                " tool_calls=excluded.tool_calls, run_count=excluded.run_count,"
+                " verified=excluded.verified,"
+                " validation_note=excluded.validation_note,"
+                " output=excluded.output, error=excluded.error,"
+                " finished_at=excluded.finished_at,"
+                " started_at=excluded.started_at,"
+                " capability_report=excluded.capability_report,"
+                " updated_at=excluded.updated_at",
+                (record.agent_id, record.parent, record.task, record.status,
+                 record.phase, json.dumps(record.persona) if record.persona
+                 else None, record.depth,
+                 json.dumps(record.success_criteria),
+                 json.dumps(record.capabilities),
+                 json.dumps(record.capability_report),
+                 1 if record.verified else 0, record.validation_note,
+                 record.tool_calls, record.run_count, record.output,
+                 record.error, json.dumps(record.extra),
+                 record.created_at, record.started_at, record.finished_at,
+                 _clock()))
+            self._conn.commit()
+
+    def append_ledger(self, agent_id, ts, phase, note):
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO subagent_ledger (agent_id, ts, phase, note)"
+                " VALUES (?, ?, ?, ?)", (agent_id, ts, phase, str(note)))
+            self._conn.commit()
+
+    def append_line(self, agent_id, seq, ts, kind, content):
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO subagent_transcript (agent_id, seq, ts, kind,"
+                " content) VALUES (?, ?, ?, ?, ?)",
+                (agent_id, seq, ts, kind, content))
+            self._conn.commit()
+
+    def load_transcript(self, agent_id):
+        """Persisted transcript entries (oldest first) for one child."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT ts, kind, content FROM subagent_transcript"
+                " WHERE agent_id = ? ORDER BY entry_id", (agent_id,)).fetchall()
+        return [{"ts": r["ts"], "kind": r["kind"], "content": r["content"]}
+                for r in rows]
+
+    def load_ledger(self, agent_id):
+        """Persisted typed progress-log entries (oldest first)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT ts, phase, note FROM subagent_ledger"
+                " WHERE agent_id = ? ORDER BY entry_id", (agent_id,)).fetchall()
+        return [{"ts": r["ts"], "phase": r["phase"], "note": r["note"]}
+                for r in rows]
+
+    def load_run(self, agent_id):
+        """Persisted execution state row for one child (or None)."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM subagent_runs WHERE agent_id = ?",
+                (agent_id,)).fetchone()
+        return dict(row) if row is not None else None
+
+    def list_runs(self, limit=50):
+        """Most recent persisted runs (newest first, capped)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT agent_id, parent, task, status, phase, verified,"
+                " updated_at FROM subagent_runs ORDER BY updated_at DESC"
+                " LIMIT ?", (int(limit),)).fetchall()
+        return [dict(r) for r in rows]
 
 
 def _now():
@@ -146,6 +291,7 @@ class SubAgentRecord:
         self.ledger = []                 # {ts, phase, note}
         self.transcript = []             # {ts, kind, content}
         self.child = None                # the running Agent instance
+        self.store = None                # optional LedgerStore (SQLite)
         self.thread = None
         self.cancel_event = threading.Event()
 
@@ -155,6 +301,13 @@ class SubAgentRecord:
             self.ledger = self.ledger[-(LEDGER_LIMIT // 2):]
         self.ledger.append({"ts": _clock(), "phase": phase, "note": note})
         self.phase = phase
+        store = self.store
+        if store is not None:
+            try:
+                store.append_ledger(self.agent_id, self.ledger[-1]["ts"],
+                                    phase, note)
+            except Exception:
+                pass
 
     def line(self, kind, content):
         if len(self.transcript) >= TRANSCRIPT_MAX_ENTRIES:
@@ -162,8 +315,15 @@ class SubAgentRecord:
         text = str(content)
         if len(text) > TRANSCRIPT_ENTRY_LIMIT:
             text = text[:TRANSCRIPT_ENTRY_LIMIT] + "...[truncated]"
-        self.transcript.append({"ts": _clock(), "kind": kind,
-                                "content": text})
+        entry = {"ts": _clock(), "kind": kind, "content": text}
+        self.transcript.append(entry)
+        store = self.store
+        if store is not None:
+            try:
+                store.append_line(self.agent_id, len(self.transcript) - 1,
+                                  entry["ts"], kind, text)
+            except Exception:
+                pass
 
     def set_status(self, status):
         self.status = status
@@ -171,6 +331,12 @@ class SubAgentRecord:
             self.started_at = _now()
         if status in TERMINAL_STATUSES and self.finished_at is None:
             self.finished_at = _now()
+        store = self.store
+        if store is not None:
+            try:
+                store.upsert_run(self)
+            except Exception:
+                pass
 
     def is_terminal(self):
         return self.status in TERMINAL_STATUSES
@@ -228,8 +394,15 @@ class OrchestrationManager:
     def __init__(self, parent_name="agent", spawn_timeout=900,
                  max_siblings=DEFAULT_MAX_SIBLINGS,
                  max_children=DEFAULT_MAX_CHILDREN, max_depth=3,
-                 make_child=None):
+                 db_path=None, make_child=None):
         self.parent_name = parent_name
+        self.store = None
+        if db_path:
+            try:
+                self.store = LedgerStore(db_path)
+            except Exception:
+                self.store = None
+        self.db_path = db_path
         self.spawn_timeout = spawn_timeout
         self.max_siblings = max_siblings
         self.max_children = max_children
@@ -239,6 +412,63 @@ class OrchestrationManager:
         self._lock = threading.RLock()
         self._records = {}
         self._order = []
+        self._hydrate_from_store()
+
+    def _hydrate_from_store(self):
+        """Auto-restore this agent's recent persisted children (read-only)
+        after a restart, so check_status / fetch_transcript /
+        continue_agent see the full registry without any parent action.
+        Children persisted mid-run are marked timed_out (the old process
+        is gone, so the run can never finish)."""
+        store = self.store
+        if store is None:
+            return
+        try:
+            rows = store.list_runs(limit=max(self.max_children * 2, 8))
+        except Exception:
+            return
+        now = _now()
+        for row in rows:
+            aid = row.get("agent_id")
+            if not aid or aid in self._records:
+                continue
+            full = store.load_run(aid)
+            if full is None:
+                continue
+            if (full.get("parent") or "") != self.parent_name:
+                continue
+            record = SubAgentRecord(
+                aid, full.get("task") or "",
+                full.get("parent") or self.parent_name,
+                success_criteria=parse_list(full.get("success_criteria")),
+                capabilities=parse_list(full.get("capabilities")),
+                depth=full.get("depth") or 0)
+            record.store = store
+            status = full.get("status") or STATUS_ERROR
+            if status in ACTIVE_STATUSES:
+                status = STATUS_TIMED_OUT
+                record.error = ("process restarted while child was %s"
+                                % row["status"])
+            record.phase = full.get("phase") or ""
+            record.verified = bool(full.get("verified"))
+            record.validation_note = full.get("validation_note") or ""
+            record.tool_calls = full.get("tool_calls") or 0
+            record.run_count = full.get("run_count") or 0
+            record.output = full.get("output") or ""
+            record.error = full.get("error") or record.error
+            try:
+                record.capability_report = json.loads(
+                    full.get("capability_report") or "{}")
+            except ValueError:
+                record.capability_report = {}
+            record.created_at = full.get("created_at") or now
+            record.started_at = full.get("started_at")
+            record.finished_at = full.get("finished_at")
+            record.ledger = store.load_ledger(aid)
+            record.transcript = store.load_transcript(aid)
+            record.set_status(status)
+            self._records[aid] = record
+            self._order.append(aid)
 
     # ------------------------------------------------------------ helpers
     def _new_id(self):
@@ -393,7 +623,18 @@ class OrchestrationManager:
                 record.progress("error", record.error)
             record.line("error", record.error)
         finally:
+            self._persist(record)
             self._dispatch_next()
+
+    def _persist(self, record):
+        """Best-effort refresh of one child's execution-state row."""
+        store = self.store
+        if store is None:
+            return
+        try:
+            store.upsert_run(record)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------ spawn
     def spawn(self, task, wait=False, success_criteria=None,
@@ -421,6 +662,7 @@ class OrchestrationManager:
                 extra=meta or {})
             if meta and meta.get("index") is not None:
                 record.index = meta.get("index")
+            record.store = self.store
             record.progress("queued", "spawned by %s" % self.parent_name)
             self._records[agent_id] = record
             self._order.append(agent_id)
@@ -565,6 +807,21 @@ class OrchestrationManager:
         if not ids:
             return "No sub-agents spawned yet by %s." % self.parent_name
         if agent_id and agent_id not in self._records:
+            if self.store is not None:
+                row = self.store.load_run(agent_id)
+                if row is not None:
+                    return ("=== Sub-agent %s (persisted) ===\n"
+                            "status:   %s\n"
+                            "phase:    %s\n"
+                            "task:     %s\n"
+                            "verified: %s\n"
+                            "updated:  %s\n"
+                            "note:     in-memory record was pruned; this is "
+                            "the last persisted execution state from "
+                            "rpg/lorebook.db"
+                            % (agent_id, row["status"], row["phase"],
+                               _short(row["task"], 140),
+                               bool(row["verified"]), row["updated_at"]))
             return "Error: unknown sub-agent %s." % agent_id
         if agent_id:
             return self._status_detail(self._record(agent_id), validate)
@@ -639,6 +896,14 @@ class OrchestrationManager:
         if agent_id:
             record = self._record(agent_id)
             if record is None:
+                if self.store is not None:
+                    persisted = self.store.load_transcript(agent_id)
+                    if persisted:
+                        body = "\n".join(
+                            "[%s] %s: %s" % (e["ts"], e["kind"], e["content"])
+                            for e in persisted)
+                        return ("=== Transcript (persisted): %s (%d entries) "
+                                "===\n%s" % (agent_id, len(persisted), body))
                 return "Error: unknown sub-agent %s." % agent_id
             body = record.transcript_text()
             return ("=== Transcript: %s (%s, %d entries) ===\n%s"
@@ -681,6 +946,7 @@ class OrchestrationManager:
                             % _short(follow_up, 60))
             record.line("note", "parent continued the agent: %s"
                         % _short(follow_up, 200))
+            self._persist(record)
             self._dispatch_next()
         return json.dumps({
             "agent_id": agent_id,
