@@ -108,6 +108,7 @@ from .capabilities import (
 )
 from .active_directory import (
     smb_enum,
+    smb_share_enum,
     ldap_search_anonymous,
     kerberos_ticket_check,
     subnet_sweep,
@@ -1585,6 +1586,21 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
               "required": ["target_ip"]},
              lambda target_ip="", port=445:
                  smb_enum(target_ip or "", int(port or 445))),
+        Tool("smb_share_enum", "Deep anonymous SMB share enumeration: establish "
+             "an NTLMSSP null session over SMB2 (SMB1 fallback), then "
+             "TREE_CONNECT brute-force ~70 common share names (IPC$, ADMIN$, "
+             "C$, NETLOGON, SYSVOL, Backup, HR, Finance, Deploy, ...). Returns "
+             "accessible shares with types, per-share NTSTATUS errors and "
+             "findings (critical if ADMIN$/C$ open). Pass 'shares' to test a "
+             "custom list.",
+             {"type": "object",
+              "properties": {"target_ip": _str_prop("IP address or hostname"),
+                             "port": {"type": "integer", "default": 445,
+                                      "description": "SMB TCP port"},
+                             "shares": _str_prop("optional comma/space-separated custom share list", "")},
+              "required": ["target_ip"]},
+             lambda target_ip="", port=445, shares="":
+                 smb_share_enum(target_ip or "", int(port or 445), shares or "")),
         Tool("ldap_search_anonymous", "Anonymous LDAP enumeration on port 389: "
              "perform an anonymous bind, then query the root DSE (or a supplied "
              "base DN) for naming contexts, default/root domain naming contexts, "

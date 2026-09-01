@@ -581,6 +581,143 @@ def smb_enum(target_ip, port=445):
     return result
 
 
+# --- Deep SMB share enumeration (anonymous session + TREE_CONNECT brute) ---
+_SMB_SHARE_WORDLIST = (
+    "IPC$", "ADMIN$", "C$", "D$", "E$", "F$", "NETLOGON", "SYSVOL",
+    "Users", "Shared", "Shares", "Public", "Data", "Files", "FileStore",
+    "Backup", "Backups", "Archive", "HR", "Finance", "IT", "Dev",
+    "Development", "Deploy", "Release", "Source", "Code", "Projects",
+    "Docs", "Documents", "Scans", "Print$", "Fax$", "Home", "Homes",
+    "Profiles", "Roaming", "Software", "Apps", "Install", "Media",
+    "Video", "Photos", "Music", "SQL", "Database", "Exchange", "WWW",
+    "Web", "Inetpub", "Temp", "Tmp", "Transfer", "Drop", "Uploads",
+    "Download", "Common", "Company", "Groups", "Department", "Secret",
+    "Secure", "Restricted", "Management", "Admin", "Payroll",
+    "Accounting", "Legal", "Contracts", "ISO", "Images", "VMs",
+)
+
+
+def _smb1_deep_share_scan(host, port, shares, timeout=DEFAULT_TIMEOUT):
+    """SMB1 fallback: negotiate, anonymous session setup, then sequential
+    TREE_CONNECTs to every candidate share on one connection."""
+    out = {"accessible": [], "denied": {}, "session": False}
+    s = None
+    try:
+        s = socket.create_connection((host, port), timeout=timeout)
+        s.settimeout(timeout)
+        s.sendall(_netbios_wrap(_smb1_negotiate_pkt()))
+        if _netbios_unwrap(_recv_netbios_msg(s))[:4] != b"\xffSMB":
+            out["error"] = "SMB1 negotiate failed"
+            return out
+        s.sendall(_netbios_wrap(_smb1_session_setup_pkt()))
+        resp = _netbios_unwrap(_recv_netbios_msg(s))
+        if resp[:4] != b"\xffSMB" or len(resp) < 36 or resp[4] != 0x73:
+            out["error"] = "SMB1 session setup failed"
+            return out
+        if resp[5] == 0:
+            uid = int.from_bytes(resp[28:30], "little")
+            out["session"] = True
+        else:
+            out["error"] = "anonymous SMB1 session rejected (0x%08x)" % int.from_bytes(resp[5:9], "little")
+            return out
+        for share in shares:
+            pkt = bytearray(_smb1_tree_connect_pkt(host, share))
+            pkt[28:30] = uid.to_bytes(2, "little")
+            s.sendall(_netbios_wrap(bytes(pkt)))
+            r = _recv_netbios_msg(s)
+            if _smb1_response_ok(r):
+                out["accessible"].append(share)
+            else:
+                code = (int.from_bytes(r[5:9], "little")
+                        if r[:4] == b"\xffSMB" and len(r) >= 9 else 0)
+                out["denied"][share] = "0x%08x" % code
+    except (OSError, socket.timeout) as exc:
+        out["error"] = out.get("error") or "socket error: %s" % exc
+    finally:
+        if s is not None:
+            try:
+                s.close()
+            except Exception:
+                pass
+    return out
+
+
+def smb_share_enum(target_ip, port=445, shares=""):
+    """Deep anonymous SMB share enumeration: SMB2 NTLMSSP null session +
+    TREE_CONNECT brute-force over a common-share wordlist, with an SMB1
+    fallback path. Returns per-share access status and share types."""
+    if not isinstance(target_ip, str) or not target_ip.strip():
+        return _err("target_ip is required")
+    host = target_ip.strip()
+    try:
+        p = int(port)
+    except (TypeError, ValueError):
+        p = 445
+    if isinstance(shares, (list, tuple)):
+        share_list = [str(x).strip() for x in shares if str(x).strip()]
+    elif isinstance(shares, str) and shares.strip():
+        share_list = [x.strip() for x in shares.replace(",", " ").split() if x.strip()]
+    else:
+        share_list = list(_SMB_SHARE_WORDLIST)
+    result = {
+        "target": host, "port": p, "shares_tested": len(share_list),
+        "accessible": [], "share_types": {}, "errors": {}, "notes": [],
+    }
+    resp = _tcp_banner(host, p, send=_netbios_wrap(_smb2_negotiate_pkt()),
+                       read=4096)
+    sig = _netbios_unwrap(resp)[:4]
+    if not resp:
+        result["notes"].append("no response on TCP %d" % p)
+        result["findings_count"] = 0
+        return result
+    result["protocol"] = "SMB2+" if sig == b"\xfeSMB" else ("SMB1" if sig == b"\xffSMB" else "unknown")
+    if sig == b"\xfeSMB":
+        ns = _smb2_null_session_probe(host, p, share_list)
+        result["smb2_session_setup"] = ns.get("smb2_session_setup", False)
+        for k in ("ntlm_target_name", "ntlm_netbios_domain", "ntlm_dns_domain"):
+            if ns.get(k):
+                result[k] = ns[k]
+        if ns.get("smb2_session_setup"):
+            result["accessible"] = ns["smb2_anonymous_shares"]
+            result["share_types"] = ns.get("smb2_share_types", {})
+            result["errors"] = ns.get("smb2_share_errors", {})
+        else:
+            result["notes"].append(
+                "anonymous SMB2 session rejected (%s); trying SMB1 fallback"
+                % ns.get("session_status", "no session"))
+            s1 = _smb1_deep_share_scan(host, p, share_list)
+            result["smb1_fallback"] = True
+            result["accessible"] = s1["accessible"]
+            result["errors"] = s1["denied"]
+            if s1.get("error"):
+                result["notes"].append("SMB1 fallback: %s" % s1["error"])
+    else:
+        s1 = _smb1_deep_share_scan(host, p, share_list)
+        result["smb1_fallback"] = True
+        result["accessible"] = s1["accessible"]
+        result["errors"] = s1["denied"]
+        if s1.get("error"):
+            result["notes"].append("SMB1 scan: %s" % s1["error"])
+    result["accessible_count"] = len(result["accessible"])
+    result["findings"] = []
+    if result["accessible"]:
+        admin = [sh for sh in result["accessible"]
+                 if sh.upper() in ("ADMIN$", "C$", "D$", "E$")]
+        if admin:
+            result["findings"].append({
+                "severity": "critical",
+                "issue": "administrative share accessible without credentials",
+                "detail": "anonymous TREE_CONNECT succeeded on %s" % ", ".join(admin),
+            })
+        result["findings"].append({
+            "severity": "high",
+            "issue": "anonymous share enumeration succeeded",
+            "detail": "accessible shares: %s" % ", ".join(result["accessible"]),
+        })
+    result["findings_count"] = len(result["findings"])
+    return result
+
+
 # Anonymous LDAP enumeration
 def _ldap_bind_anonymous(msgid):
     bind = _ber_ctx(0, _ber_seq(_ber_int(3), _ber_octets(b""), _tlv(0x80, b"")))
