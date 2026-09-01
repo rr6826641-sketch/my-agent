@@ -61,6 +61,7 @@ from .hypothesis_engine import (
     tool_chain_to_verification_plan,
 )
 from .cve_variant import hunt_cve_variants
+from .fuzzing_feedback import adaptive_fuzz
 from .cloud_sec import (
     aws_s3_enum,
     cloud_misconfig_scan,
@@ -833,6 +834,41 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                  hunt_cve_variants(known_cve_details or "",
                                    codebase_path_or_endpoint_list or "",
                                    int(max_results or 15))),
+        Tool("adaptive_fuzz", "Adaptive feedback-loop fuzzer: send a payload "
+             "set at a target URL and parse every response - status code, "
+             "response time, headers and error/stack-trace signatures - then "
+             "MUTATE the payload list accordingly: SQL syntax error -> "
+             "switch to DB-specific evasion payloads (MySQL/PostgreSQL/"
+             "MSSQL/SQLite/Oracle fingerprinted from the error text or "
+             "headers); WAF 403/block page -> encoding, case, inline-comment "
+             "and header-based bypass mutations; reflected input -> XSS "
+             "context-breaking ladder; stack trace -> framework-targeted "
+             "format-string/type-confusion probes; 5xx -> error-state "
+             "payloads. Runs round-by-round within a time budget and returns "
+             "the full adaptation log, fingerprints (db engine, WAF) and the "
+             "final adapted payload set.",
+             {"type": "object",
+              "properties": {"target_url": _str_prop(
+                  "full URL to fuzz, e.g. https://target/item.php?id=1"),
+                             "initial_payload_set": _str_prop(
+                  "JSON array or newline-separated payload list (default: "
+                  "generic SQLi/XSS/command set)", ""),
+                             "max_rounds": {"type": "integer",
+                                 "description": "adaptation rounds 1-6 "
+                                 "(default 6)", "default": 6},
+                             "method": _str_prop("HTTP method: GET (default) "
+                                 "or POST", "GET"),
+                             "param": _str_prop("parameter name to inject "
+                                 "into (default 'q')", "q"),
+                             "request_timeout": {"type": "integer",
+                                 "description": "per-request timeout seconds "
+                                 "(default 8)", "default": 8}},
+              "required": ["target_url"]},
+             lambda target_url="", initial_payload_set="", max_rounds=6,
+                    method="GET", param="q", request_timeout=8:
+                 adaptive_fuzz(target_url or "", initial_payload_set or "",
+                               int(max_rounds or 6), method or "GET",
+                               param or "q", int(request_timeout or 8))),
         Tool("remember", "Save a fact/note to persistent memory.",
              {"type": "object",
               "properties": {"key": _str_prop("short key, e.g. 'target_ip'"),
