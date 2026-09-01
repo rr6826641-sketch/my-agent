@@ -937,6 +937,12 @@ class OrchestrationManager:
         if record.status in ACTIVE_STATUSES:
             return ("Error: sub-agent %s is still %s; wait for it to "
                     "finish first." % (agent_id, record.status))
+        if self._make_child is None:
+            return ("Error: sub-agent %s was restored from the ledger after "
+                    "a restart and no child factory is configured, so it "
+                    "cannot be resumed. Its transcript and output remain "
+                    "available read-only (fetch_agent_transcript)."
+                    % agent_id)
         with self._lock:
             record.status = STATUS_QUEUED
             record.finished_at = None
