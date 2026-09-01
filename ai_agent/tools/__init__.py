@@ -56,6 +56,9 @@ from .search import (
 from .skills import (
     tool_search_skills, tool_load_skill,
 )
+from .hypothesis_engine import (
+    tool_generate_security_hypotheses,
+)
 from .cloud_sec import (
     aws_s3_enum,
     cloud_misconfig_scan,
@@ -751,6 +754,31 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
               "properties": {"skill_id": _str_prop("skill id, e.g. 'recon_methodology'")},
               "required": ["skill_id"]},
              lambda skill_id="": tool_load_skill(skill_id)),
+        Tool("generate_security_hypotheses", "Hypothesis-driven vulnerability "
+             "discovery: reason over enumerated attack surface (endpoints, "
+             "routes, code snippets, services) and derive structured, "
+             "logic-flaw hypotheses - state flaws, race conditions, "
+             "authz bypasses, multi-step business-logic errors - each with "
+             "reasoning, a proposed test strategy and a confidence score. "
+             "NOT pattern scanning; feed recon/enumeration output from "
+             "earlier steps. Every hypothesis is UNTESTED until validated.",
+             {"type": "object",
+              "properties": {"target_scope": _str_prop(
+                  "engagement target (domain/URL/app name) the hypotheses "
+                  "belong to"),
+                             "attack_surface_json": _str_prop(
+                  "JSON list of enumerated endpoints/routes/code snippets/" 
+                  "services, e.g. [{\"route\": \"/api/orders/123\", "
+                  "\"method\": \"GET\", \"code\": \"order = db.get(id)\"}] - "
+                  "denser input yields higher-confidence hypotheses"),
+                             "max_hypotheses": {"type": "integer",
+                                 "description": "cap on returned hypotheses "
+                                 "(1-15, default 8)", "default": 8}},
+              "required": ["target_scope", "attack_surface_json"]},
+             lambda target_scope="", attack_surface_json="", max_hypotheses=8:
+                 tool_generate_security_hypotheses(
+                     target_scope or "", attack_surface_json or "",
+                     int(max_hypotheses or 8))),
         Tool("remember", "Save a fact/note to persistent memory.",
              {"type": "object",
               "properties": {"key": _str_prop("short key, e.g. 'target_ip'"),
