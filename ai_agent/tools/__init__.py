@@ -104,6 +104,9 @@ from .reporting import (
     tool_verify_finding, tool_verify_all_findings,
     correlate_findings, calc_cvss_score, generate_markdown_report,
 )
+from .attack_chains import (
+    build_attack_chains, render_chain_graph, visualize_attack_chains,
+)
 from .webtests import (
     tool_sqli_test, tool_xss_test, tool_cmd_inject_test,
     tool_path_traversal_test, tool_ssrf_test, tool_open_redirect_test,
@@ -1866,6 +1869,28 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
               "required": ["findings_list"]},
              lambda findings_list="":
                  correlate_findings(findings_list or "")),
+        Tool("build_attack_chains", "Attack-Chain Graph Correlator: reconstruct "
+             "linked attack paths from raw findings instead of flat lists. "
+             "Example: Null SMB Session -> Unencrypted Share Read -> Hardcoded "
+             "Credential -> Local Admin PrivEsc -> Domain Controller Compromise. "
+             "Each chain carries chain_id, entry_point, intermediate_pivots, "
+             "final_impact, composite_risk_score (series-system risk compounding "
+             "across hops) and a remediation_choke_point (the single highest-impact "
+             "hop whose fix collapses every path through it). Raw scanner JSON is "
+             "accepted and auto-deduplicated first.",
+             {"type": "object",
+              "properties": {"findings_list": _str_prop("JSON array of finding objects (raw scanner output accepted)")},
+              "required": ["findings_list"]},
+             lambda findings_list="":
+                 build_attack_chains(findings_list or "")),
+        Tool("visualize_attack_chains", "Build attack chains from findings and "
+             "return an ASCII/Markdown graph visualization of the attack paths "
+             "(chain table + ASCII graph blocks) ready to embed in reports.",
+             {"type": "object",
+              "properties": {"findings_list": _str_prop("JSON array of finding objects (raw scanner output accepted)")},
+              "required": ["findings_list"]},
+             lambda findings_list="":
+                 visualize_attack_chains(findings_list or "")),
         Tool("calc_cvss_score", "Calculate a CVSS v3.1 score (base + temporal "
              "+ environmental), per-metric ratings and severity level "
              "(Critical/High/Medium/Low/None) from a vector string such as "
@@ -1883,8 +1908,11 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
              "executive summary, risk matrix with CVSS score bands, findings "
              "summary table, detailed findings with proof-of-concept evidence "
              "and remediation strategies, plus remediation priorities. Findings "
-             "are auto-correlated and deduplicated first; the report is saved "
-             "to the reports/ directory and returned as Markdown.",
+             "are auto-correlated and deduplicated first and the reconstructed "
+             "attack-chain graph (linked attack paths with composite risk scores "
+             "and an ASCII/Markdown visualization) is embedded as its own report "
+             "section. The report is saved to the reports/ directory and returned "
+             "as Markdown.",
              {"type": "object",
               "properties": {"target_name": _str_prop("assessed target / engagement name"),
                              "executive_summary": _str_prop("summary paragraph (auto-generated if empty)", ""),

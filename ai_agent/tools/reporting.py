@@ -686,8 +686,13 @@ def correlate_findings(findings_list=""):
     findings_list - JSON string (or list) of finding dicts from Nmap, Nuclei,
                     Nikto, HTTP probes, or any mix of the above. Field names
                     are normalized via aliases.
-    Returns a dict (never raises):
-      {ok, total_input, unique, duplicates, by_severity, findings, risk_matrix}
+    Returns a dict (never raises). In addition to the flat deduped
+    findings list it now constructs linked attack paths (chains):
+      {ok, total_input, unique, duplicates, by_severity, findings,
+       risk_matrix, attack_chains, chain_graph}
+    attack_chains carries the structured chain dicts from
+    build_attack_chains(); chain_graph is the ready-to-embed ASCII/Markdown
+    visualization block for reports.
     """
     try:
         items, err = _coerce_findings(findings_list)
@@ -766,6 +771,25 @@ def correlate_findings(findings_list=""):
     for r in out:
         counts[r["severity"]] += 1
     dupes = sum(r["duplicate_count"] for r in out)
+
+    # Attack-Chain Graph Correlator: reconstruct linked attack paths from
+    # the deduped findings instead of returning only a flat list. Each
+    # chain carries chain_id / entry_point / intermediate_pivots /
+    # final_impact / composite_risk_score / remediation_choke_point.
+    # Deferred import avoids a circular import (attack_chains imports
+    # correlate_findings from this module).
+    try:
+        from .attack_chains import build_attack_chains
+        chains_result = build_attack_chains(items)
+        chains = chains_result.get("chains", []) if chains_result.get("ok") else []
+        chain_graph = ""
+        if chains:
+            from .attack_chains import render_chain_graph
+            chain_graph = render_chain_graph(chains_result)
+    except Exception:
+        chains = []
+        chain_graph = ""
+
     return {
         "ok": True,
         "total_input": len(items),
@@ -774,6 +798,8 @@ def correlate_findings(findings_list=""):
         "by_severity": counts,
         "risk_matrix": {s: counts[s] for s in SEVERITIES},
         "findings": out,
+        "attack_chains": chains,
+        "chain_graph": chain_graph,
     }
 
 
@@ -1062,12 +1088,24 @@ def generate_markdown_report(target_name="", executive_summary="", findings_json
         else:
             L.append("_No findings were supplied._")
             L.append("")
-        L.append("## 5. Remediation Priorities")
+        if correlated.get("chain_graph"):
+            L.append("## 5. Attack-Chain Graph")
+            L.append("")
+            L.append(correlated["chain_graph"].rstrip())
+            L.append("")
+            L.append("## 6. Remediation Priorities")
+        else:
+            L.append("## 5. Remediation Priorities")
         L.append("")
         L.append("1. **Critical:** patch immediately; active exploitation likely.")
         L.append("2. **High:** fix in the next release cycle as top priority.")
         L.append("3. **Medium:** schedule remediation and harden configurations.")
         L.append("4. **Low:** address during routine hardening and maintenance.")
+        if correlated.get("chain_graph"):
+            L.append("")
+            L.append("**Single highest-leverage fix:** remediate the choke "
+                     "point hops flagged in the Attack-Chain Graph above - "
+                     "they collapse every downstream attack path.")
         L.append("")
         L.append("---")
         L.append("")
