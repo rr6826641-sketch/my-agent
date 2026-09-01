@@ -94,6 +94,7 @@ from .reporting import (
     tool_add_finding, tool_list_findings, tool_update_finding,
     tool_delete_finding, tool_write_report,
     tool_verify_finding, tool_verify_all_findings,
+    correlate_findings, calc_cvss_score, generate_markdown_report,
 )
 from .webtests import (
     tool_sqli_test, tool_xss_test, tool_cmd_inject_test,
@@ -1704,6 +1705,42 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
               "required": ["target"]},
              lambda target="", author="HackerAI Agent", output_path="", include_open_only=False, include_remediation=True:
                  tool_write_report(target or "", author or "HackerAI Agent", output_path or "", bool(include_open_only), bool(include_remediation))),
+        Tool("correlate_findings", "Correlate & deduplicate raw vulnerability scan "
+             "results from multiple scanners (Nmap, Nuclei, Nikto, HTTP probes "
+             "or any mix - field names are auto-normalized). Merges duplicate "
+             "findings, tracks which scanners corroborate each one, upgrades "
+             "severity if any source rates higher, and maps every unique "
+             "finding to a unified CVSS v3.1 risk vector. Returns structured "
+             "JSON with per-severity counts and a risk matrix.",
+             {"type": "object",
+              "properties": {"findings_list": _str_prop("JSON array of finding objects (raw scanner output accepted)")},
+              "required": ["findings_list"]},
+             lambda findings_list="":
+                 correlate_findings(findings_list or "")),
+        Tool("calc_cvss_score", "Calculate a CVSS v3.1 base score, per-metric "
+             "ratings and severity level (Critical/High/Medium/Low/None) from "
+             "a vector string such as 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' "
+             "or a metrics object {AV, AC, PR, UI, S, C, I, A}. Implements the "
+             "official FIRST CVSS v3.1 formula including scope-changed impact.",
+             {"type": "object",
+              "properties": {"vector_string_or_metrics": _str_prop("CVSS vector string or JSON object with metrics AV/AC/PR/UI/S/C/I/A")},
+              "required": ["vector_string_or_metrics"]},
+             lambda vector_string_or_metrics="":
+                 calc_cvss_score(vector_string_or_metrics or "")),
+        Tool("generate_markdown_report", "Generate a standalone professional "
+             "Markdown penetration test report from a supplied findings payload: "
+             "executive summary, risk matrix with CVSS score bands, findings "
+             "summary table, detailed findings with proof-of-concept evidence "
+             "and remediation strategies, plus remediation priorities. Findings "
+             "are auto-correlated and deduplicated first; the report is saved "
+             "to the reports/ directory and returned as Markdown.",
+             {"type": "object",
+              "properties": {"target_name": _str_prop("assessed target / engagement name"),
+                             "executive_summary": _str_prop("summary paragraph (auto-generated if empty)", ""),
+                             "findings_json": _str_prop("JSON array of finding objects (raw or correlated)")},
+              "required": ["target_name", "findings_json"]},
+             lambda target_name="", executive_summary="", findings_json="":
+                 generate_markdown_report(target_name or "", executive_summary or "", findings_json or "")),
 
         # ---- scope enforcement ----
         Tool("set_scope", "Set the engagement scope: comma-separated domains, "
