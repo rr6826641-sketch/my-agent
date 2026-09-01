@@ -16,9 +16,14 @@ Exposed tools:
 State ledger: every PTY session is tracked in a thread-safe ledger
 (session id -> pid, command, status, timestamps, output byte counts)
 with a capped finished-history, isolated from the plain (non-PTY)
-session engine in terminal.py.
+session engine in terminal.py. The ledger is mirrored to
+~/.hackerai/pty_session_ledger.json (atomic writes); on agent restart
+sessions recorded as 'running' are marked 'stale' since their pty
+handles no longer exist in this process.
 """
 
+import json
+import os
 import re
 import threading
 import time
@@ -40,6 +45,51 @@ _PTY_LEDGER = {}                     # session_id -> ledger dict
 _PTY_LEDGER_LOCK = threading.RLock()
 _PTY_HISTORY = []                    # finished/killed records (capped)
 _PTY_HISTORY_MAX = 50
+_PTY_LEDGER_DIRNAME = ".hackerai"
+_PTY_LEDGER_FILENAME = "pty_session_ledger.json"
+
+
+def _ledger_path():
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    return os.path.join(base, _PTY_LEDGER_DIRNAME, _PTY_LEDGER_FILENAME)
+
+
+def _load_persisted_history():
+    """Load the finished-history from disk; mark 'running' rows stale."""
+    try:
+        with open(_ledger_path(), "r", encoding="utf-8") as f:
+            recs = json.load(f)
+        if not isinstance(recs, list):
+            return []
+        for rec in recs:
+            if rec.get("status") == "running":
+                # agent restarted: the pty belongs to the old process
+                rec["status"] = "stale"
+        return recs[-_PTY_HISTORY_MAX:]
+    except Exception:
+        return []
+
+
+def _persist_ledger():
+    """Mirror the PTY ledger (active + history) to disk atomically."""
+    try:
+        recs = []
+        with _PTY_LEDGER_LOCK:
+            for sid in sorted(_PTY_LEDGER):
+                recs.append(dict(_PTY_LEDGER[sid]))
+            recs.extend(_PTY_HISTORY)
+            recs = recs[-_PTY_HISTORY_MAX:]
+        path = _ledger_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(recs, f, indent=2)
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
+
+_PTY_HISTORY.extend(_load_persisted_history())
 
 
 def _ledger_entry(sess, status):
@@ -59,22 +109,27 @@ def _ledger_entry(sess, status):
 def _pty_register(sess):
     with _PTY_LEDGER_LOCK:
         _PTY_LEDGER[sess.session_id] = _ledger_entry(sess, "running")
+    _persist_ledger()
 
 
 def _pty_refresh(sess):
     """Sync one session's live state into the ledger; return its status."""
+    changed = False
     with _PTY_LEDGER_LOCK:
         entry = _PTY_LEDGER.get(sess.session_id)
         if entry is None:
             entry = _ledger_entry(sess, "running")
             _PTY_LEDGER[sess.session_id] = entry
-        if sess.exited:
+        if sess.exited and entry["status"] == "running":
             entry["status"] = ("exited(%s)" % sess.exit_code
                                if sess.exit_code is not None else "exited")
             entry["ended_at"] = sess.ended_at or time.time()
             entry["exit_code"] = sess.exit_code
+            changed = True
         entry["output_bytes"] = sess.out.raw_size() + sess.err.raw_size()
-        return entry["status"]
+    if changed:
+        _persist_ledger()
+    return entry["status"]
 
 
 def _pty_remove(sess, status):
@@ -87,6 +142,7 @@ def _pty_remove(sess, status):
         entry["output_bytes"] = sess.out.raw_size() + sess.err.raw_size()
         _PTY_HISTORY.append(entry)
         del _PTY_HISTORY[:-_PTY_HISTORY_MAX]
+    _persist_ledger()
     return entry
 
 
