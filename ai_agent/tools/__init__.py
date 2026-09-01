@@ -106,6 +106,7 @@ from .reporting import (
 )
 from .attack_chains import (
     build_attack_chains, render_chain_graph, visualize_attack_chains,
+    visualize_merged_chains, populate_cve_table,
 )
 from .webtests import (
     tool_sqli_test, tool_xss_test, tool_cmd_inject_test,
@@ -1884,13 +1885,40 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
              lambda findings_list="":
                  build_attack_chains(findings_list or "")),
         Tool("visualize_attack_chains", "Build attack chains from findings and "
-             "return an ASCII/Markdown graph visualization of the attack paths "
-             "(chain table + ASCII graph blocks) ready to embed in reports.",
+             "return a graph visualization of the attack paths (chain table + "
+             "per-chain graph blocks) ready to embed in reports. fmt selects "
+             "the graph format: ascii (default), mermaid or graphviz. "
+             "per_asset=true keeps each chain scoped to its own asset.",
              {"type": "object",
-              "properties": {"findings_list": _str_prop("JSON array of finding objects (raw scanner output accepted)")},
+              "properties": {"findings_list": _str_prop("JSON array of finding objects (raw scanner output accepted)"),
+                             "fmt": _str_prop("graph format: ascii | mermaid | graphviz"),
+                             "per_asset": {"type": "boolean", "description": "scope each chain to its entry asset"}},
               "required": ["findings_list"]},
-             lambda findings_list="":
-                 visualize_attack_chains(findings_list or "")),
+             lambda findings_list="", fmt="ascii", per_asset=False:
+                 visualize_attack_chains(findings_list or "", fmt=fmt,
+                                         per_asset=per_asset)),
+        Tool("visualize_merged_chains", "Build attack chains from findings, merge "
+             "chains that share pivot hops into convergence clusters (multiple "
+             "entry points funnelling through common stepping stones) and return "
+             "a merged-branch graph block. fmt: mermaid (default), ascii or "
+             "graphviz.",
+             {"type": "object",
+              "properties": {"findings_list": _str_prop("JSON array of finding objects (raw scanner output accepted)"),
+                             "fmt": _str_prop("graph format: mermaid | ascii | graphviz"),
+                             "per_asset": {"type": "boolean", "description": "scope each chain to its entry asset"}},
+              "required": ["findings_list"]},
+             lambda findings_list="", fmt="mermaid", per_asset=False:
+                 visualize_merged_chains(findings_list or "", fmt=fmt,
+                                         per_asset=per_asset)),
+        Tool("populate_cve_table", "Fetch real CVSS v3.1 base scores from the NVD "
+             "API for the given CVE ids and persist chain-hop entries to "
+             "cve_nodes.json, so future attack-chain builds use CVE-specific, "
+             "CVSS-weighted hops without re-fetching. Accepts a comma-separated "
+             "string or JSON list of CVE ids.",
+             {"type": "object",
+              "properties": {"cve_ids": _str_prop("CVE ids, e.g. 'CVE-2021-44228, CVE-2015-1631'")},
+              "required": ["cve_ids"]},
+             lambda cve_ids="": populate_cve_table(cve_ids or "")),
         Tool("calc_cvss_score", "Calculate a CVSS v3.1 score (base + temporal "
              "+ environmental), per-metric ratings and severity level "
              "(Critical/High/Medium/Low/None) from a vector string such as "
@@ -1910,8 +1938,10 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
              "and remediation strategies, plus remediation priorities. Findings "
              "are auto-correlated and deduplicated first and the reconstructed "
              "attack-chain graph (linked attack paths with composite risk scores "
-             "and an ASCII/Markdown visualization) is embedded as its own report "
-             "section. The report is saved to the reports/ directory and returned "
+             "and a graph visualization) is embedded as its own report section. "
+             "chain_fmt selects the chain graph format: ascii (default), mermaid "
+             "or graphviz; per_asset=true scopes each chain to its own asset. "
+             "The report is saved to the reports/ directory and returned "
              "as Markdown.",
              {"type": "object",
               "properties": {"target_name": _str_prop("assessed target / engagement name"),
@@ -1921,10 +1951,12 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                              "author": _str_prop("report author", "HackerAI Agent"),
                              "organization": _str_prop("client / organization name for the cover", ""),
                              "logo_url": _str_prop("markdown image URL for the logo header", ""),
-                             "classification": _str_prop("data classification label", "Confidential")},
+                             "classification": _str_prop("data classification label", "Confidential"),
+                             "chain_fmt": _str_prop("chain graph format: ascii | mermaid | graphviz", "ascii"),
+                             "per_asset": {"type": "boolean", "description": "scope each attack chain to its entry asset"}},
               "required": ["target_name", "findings_json"]},
-             lambda target_name="", executive_summary="", findings_json="", report_title="", author="HackerAI Agent", organization="", logo_url="", classification="Confidential":
-                 generate_markdown_report(target_name or "", executive_summary or "", findings_json or "", report_title or "", author or "HackerAI Agent", organization or "", logo_url or "", classification or "Confidential")),
+             lambda target_name="", executive_summary="", findings_json="", report_title="", author="HackerAI Agent", organization="", logo_url="", classification="Confidential", chain_fmt="ascii", per_asset=False:
+                 generate_markdown_report(target_name or "", executive_summary or "", findings_json or "", report_title or "", author or "HackerAI Agent", organization or "", logo_url or "", classification or "Confidential", chain_fmt=chain_fmt, per_asset=per_asset)),
 
         # ---- scope enforcement ----
         Tool("set_scope", "Set the engagement scope: comma-separated domains, "

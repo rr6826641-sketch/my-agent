@@ -412,7 +412,48 @@ class OrchestrationManager:
         self._lock = threading.RLock()
         self._records = {}
         self._order = []
+        # keep-alive watchdog (started lazily on first spawn)
+        self._watchdog = None
+        self._watchdog_stop = threading.Event()
+        self._watchdog_interval = 5.0
         self._hydrate_from_store()
+
+    # ------------------------------------------------------- keep-alive
+    def _watchdog_loop(self):
+        """Background keep-alive: periodically sweep timed-out children,
+        dispatch queued ones and heartbeat running records to the store.
+        Lets orchestration self-heal (timeout enforcement + queue drain)
+        even when the parent stops polling for status. Reentrancy-safe:
+        every shared-state access re-enters the manager's RLock."""
+        while not self._watchdog_stop.wait(self._watchdog_interval):
+            try:
+                self._sweep()
+                self._dispatch_next()
+                with self._lock:
+                    running = [r for r in self._records.values()
+                               if r.status == STATUS_RUNNING]
+                for r in running:
+                    self._persist(r)
+            except Exception:
+                pass  # watchdog must never die
+
+    def _ensure_watchdog(self):
+        """Start the watchdog thread once, on the first spawn."""
+        with self._lock:
+            if self._watchdog is not None and self._watchdog.is_alive():
+                return
+            self._watchdog_stop.clear()
+            self._watchdog = threading.Thread(
+                target=self._watchdog_loop, daemon=True,
+                name="orchestration-watchdog")
+            self._watchdog.start()
+
+    def shutdown(self, join_timeout=2.0):
+        """Stop the keep-alive watchdog (call on agent teardown)."""
+        self._watchdog_stop.set()
+        wd = self._watchdog
+        if wd is not None and wd is not threading.current_thread():
+            wd.join(timeout=join_timeout)
 
     def _hydrate_from_store(self):
         """Auto-restore this agent's recent persisted children (read-only)
@@ -667,6 +708,7 @@ class OrchestrationManager:
             self._records[agent_id] = record
             self._order.append(agent_id)
             self._dispatch_next()
+        self._ensure_watchdog()
         if wait:
             return self.sync_result(agent_id)
         return json.dumps({

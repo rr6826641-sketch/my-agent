@@ -680,7 +680,7 @@ def _title_from_finding(f):
     return title[:200]
 
 
-def correlate_findings(findings_list=""):
+def correlate_findings(findings_list="", chain_fmt="ascii", per_asset=False):
     """Aggregate raw scanner output, deduplicate and map to unified risk vectors.
 
     findings_list - JSON string (or list) of finding dicts from Nmap, Nuclei,
@@ -691,8 +691,11 @@ def correlate_findings(findings_list=""):
       {ok, total_input, unique, duplicates, by_severity, findings,
        risk_matrix, attack_chains, chain_graph}
     attack_chains carries the structured chain dicts from
-    build_attack_chains(); chain_graph is the ready-to-embed ASCII/Markdown
+    build_attack_chains(); chain_graph is the ready-to-embed graph
     visualization block for reports.
+    chain_fmt  - "ascii" (default), "mermaid" or "graphviz"
+    per_asset  - when True chains branch only through the entry point's
+                 own asset (single-asset escalation paths)
     """
     try:
         items, err = _coerce_findings(findings_list)
@@ -780,12 +783,12 @@ def correlate_findings(findings_list=""):
     # correlate_findings from this module).
     try:
         from .attack_chains import build_attack_chains
-        chains_result = build_attack_chains(items)
+        chains_result = build_attack_chains(items, per_asset=per_asset)
         chains = chains_result.get("chains", []) if chains_result.get("ok") else []
         chain_graph = ""
         if chains:
             from .attack_chains import render_chain_graph
-            chain_graph = render_chain_graph(chains_result)
+            chain_graph = render_chain_graph(chains_result, fmt=chain_fmt)
     except Exception:
         chains = []
         chain_graph = ""
@@ -976,7 +979,8 @@ def calc_cvss_score(vector_string_or_metrics=""):
 
 def generate_markdown_report(target_name="", executive_summary="", findings_json="",
                              report_title="", author="HackerAI Agent",
-                             organization="", logo_url="", classification="Confidential"):
+                             organization="", logo_url="", classification="Confidential",
+                             chain_fmt="ascii", per_asset=False):
     """Standalone Markdown pentest report from a supplied findings payload.
 
     target_name       - assessed target / engagement name
@@ -989,6 +993,10 @@ def generate_markdown_report(target_name="", executive_summary="", findings_json
     organization      - client/organization name shown on the cover
     logo_url          - markdown image URL rendered at the top of the report
     classification    - data classification label (e.g. Confidential / Public)
+    chain_fmt         - attack-chain graph format: "ascii" (default),
+                        "mermaid" or "graphviz"
+    per_asset         - when True attack chains show single-asset escalation
+                        paths instead of mixed paths across hosts
     Returns the full Markdown text; also saves to reports/ directory.
     """
     try:
@@ -1004,7 +1012,11 @@ def generate_markdown_report(target_name="", executive_summary="", findings_json
         if err:
             return "generate_markdown_report: %s" % err
 
-        correlated = correlate_findings(items)
+        chain_fmt = str(chain_fmt or "ascii").strip().lower()
+        if chain_fmt not in ("ascii", "mermaid", "graphviz"):
+            chain_fmt = "ascii"
+        correlated = correlate_findings(items, chain_fmt=chain_fmt,
+                                        per_asset=per_asset)
         if not correlated.get("ok"):
             return "generate_markdown_report: correlation failed: %s" % correlated.get("error")
         findings = correlated["findings"]
