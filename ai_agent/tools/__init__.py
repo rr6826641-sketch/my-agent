@@ -60,6 +60,7 @@ from .hypothesis_engine import (
     tool_generate_security_hypotheses,
     tool_chain_to_verification_plan,
 )
+from .cve_variant import hunt_cve_variants
 from .cloud_sec import (
     aws_s3_enum,
     cloud_misconfig_scan,
@@ -800,6 +801,38 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
               "required": ["hypotheses_json"]},
              lambda hypotheses_json="": tool_chain_to_verification_plan(
                  hypotheses_json or "")),
+        Tool("hunt_cve_variants", "CVE Variant & Structural Sibling Hunter: "
+             "extract the root-cause family of a known CVE (unchecked length "
+             "parameter, unsafe deserialization, insecure regex/ReDoS, "
+             "command/SQL injection, XXE, SSRF, SSTI, XSS, path traversal, "
+             "open redirect, auth bypass, race condition) from an id, free-text "
+             "description or {id, description, cwes} JSON, then scan a target "
+             "surface for STRUCTURALLY SIMILAR sinks - the same dangerous "
+             "operation fed by tainted user input at a different location. "
+             "Target surface is either a codebase directory (source files are "
+             "pattern-scanned, vendored trees ignored) or an endpoint list "
+             "(JSON array or plain URL list; embedded code snippets are also "
+             "scanned). Each candidate carries an evidence snippet, matched "
+             "pattern, confidence score and a verification hint. Candidates "
+             "are UNTESTED until validated.",
+             {"type": "object",
+              "properties": {"known_cve_details": _str_prop(
+                  "CVE id, free-text root-cause description, or JSON "
+                  "{'id': 'CVE-2021-44228', 'description': ..., 'cwes': [...]}"),
+                             "codebase_path_or_endpoint_list": _str_prop(
+                  "codebase directory path, OR JSON array / plain-text list "
+                  "of endpoints ([{'route': '/api/x', 'method': 'GET', "
+                  "'code': ...}] or newline URLs)"),
+                             "max_results": {"type": "integer",
+                                 "description": "cap on returned candidates "
+                                 "(1-50, default 15)", "default": 15}},
+              "required": ["known_cve_details",
+                           "codebase_path_or_endpoint_list"]},
+             lambda known_cve_details="", codebase_path_or_endpoint_list="",
+                    max_results=15:
+                 hunt_cve_variants(known_cve_details or "",
+                                   codebase_path_or_endpoint_list or "",
+                                   int(max_results or 15))),
         Tool("remember", "Save a fact/note to persistent memory.",
              {"type": "object",
               "properties": {"key": _str_prop("short key, e.g. 'target_ip'"),
