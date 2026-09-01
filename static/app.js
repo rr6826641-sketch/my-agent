@@ -314,6 +314,43 @@ function addRouteChip(label, reason) {
   return div;
 }
 
+/* 4-stage autonomous pipeline: header + per-stage status chips */
+function addPipelineHeader(target, stageCount) {
+  const div = document.createElement("div");
+  div.className = "route-chip pipeline-header";
+  div.dataset.target = target || "";
+  div.innerHTML =
+    `<span class="route-ico">🛡</span><span class="route-txt"><b>Autonomous Pipeline</b>` +
+    ` <span class="route-reason">· ${escapeHtml(target || "?")} · 0/${stageCount || 4} stages</span></span>`;
+  chatLog.appendChild(div);
+  scrollDown();
+  return div;
+}
+
+function addPipelineStage(num, title, status) {
+  // update the pipeline header's stage counter + append a status chip
+  const headers = chatLog.querySelectorAll(".pipeline-header");
+  const header = headers[headers.length - 1];
+  if (header) {
+    const target = header.dataset.target || "?";
+    const stages = header.querySelectorAll(".stage-chip").length;
+    const done = header.querySelectorAll(".stage-chip.done").length +
+      (status === "done" && !header.querySelector(`.stage-chip[data-num="${num}"].done`) ? 1 : 0);
+    header.querySelector(".route-reason").textContent =
+      ` · ${target} · ${done}/${Math.max(stages, num)} stages`;
+  }
+  const div = document.createElement("div");
+  div.className = "route-chip stage-chip " + (status || "running");
+  div.dataset.num = num || "";
+  const ico = status === "done" ? "✅" : "⏳";
+  div.innerHTML =
+    `<span class="route-ico">${ico}</span><span class="route-txt"><b>Stage ${escapeHtml(String(num))}</b>` +
+    ` <span class="route-reason">· ${escapeHtml(title || "")}${status === "done" ? " · complete" : " · running…"}</span></span>`;
+  chatLog.appendChild(div);
+  scrollDown();
+  return div;
+}
+
 function addToolCard(name, args, parallel) {
   const div = document.createElement("div");
   div.className = "toolcard";
@@ -611,6 +648,30 @@ function sendMessage(text) {
       return;
     }
 
+    if (e.type === "pipeline_start") {
+      // 4-stage autonomous pipeline kicked off for a target
+      typing.remove();
+      addPipelineHeader(e.target || "", (e.stages || []).length);
+      return;
+    }
+    if (e.type === "stage_start") {
+      typing.remove();
+      addPipelineStage(e.num, e.title || "", "running");
+      return;
+    }
+    if (e.type === "stage_complete") {
+      typing.remove();
+      addPipelineStage(e.num, e.title || "", "done");
+      return;
+    }
+    if (e.type === "pipeline_done") {
+      typing.remove();
+      addAssistantBubble((e.report || "") || "(empty pipeline report)");
+      finalAdded = true;
+      preview = null;
+      finish();
+      return;
+    }
     if (e.type === "notice") {
       // Red Team Mode: model declined once, client auto-retried with
       // authorization framing - surface that to the user.

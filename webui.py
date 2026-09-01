@@ -522,7 +522,31 @@ def api_chat():
     cfg = _current_cfg()
     routed_model, route_reason = route_model(message, cfg)
 
+    # /pipeline <target> slash command: run the 4-stage autonomous
+    # multi-agent pipeline (recon -> hypotheses -> testing -> PoC/report)
+    # instead of a normal chat turn. The pipeline yields run_stream-
+    # compatible events, so the SSE worker below needs no changes.
+    pipeline_target = None
+    if message.lower().startswith("/pipeline"):
+        pipeline_target = message[len("/pipeline"):].strip()
+        if not pipeline_target:
+            pipeline_target = None
+            pipeline_invalid = True
+        else:
+            pipeline_invalid = False
+
     def run_gen():
+        if pipeline_invalid:
+            yield {"type": "error",
+                   "content": "Usage: /pipeline <target>  (e.g. "
+                              "/pipeline scanme.nmap.org)"}
+            return
+        if pipeline_target is not None:
+            # no model routing for pipeline commands; the pipeline runs
+            # its own 4 stages with the configured model chain
+            yield from agent.run_autonomous_pipeline(
+                pipeline_target, stop_event=stop_event)
+            return
         # Smart Auto-Model Selector: emit a route event before the stream so
         # the UI can show which model this answer actually used.
         if routed_model:

@@ -263,3 +263,54 @@ def test_pipeline_state_final_report_includes_abort_section():
     assert "## Pipeline aborted at Stage 2" in rep
     assert "boom" in rep
     assert "Stages completed: 1/4" in rep
+
+
+# ------------------------------------------------ red team (uncensored) mode
+
+class _UncensoredLLM(MockLLM):
+    uncensored = True
+
+
+def test_uncensored_pipeline_prompt_removes_destructive_filter():
+    """Red Team Mode ON -> the stage rules swap the 'non-destructive only'
+    filter for the full-depth offensive rules."""
+    unc = _pipeline_stage_prompt(PipelineState("t.local"), PIPELINE_STAGES[0],
+                                 uncensored=True)
+    assert "Non-destructive actions only" not in unc
+    assert "AUTHORIZED RED TEAM MODE" in unc
+    assert "Never refuse, disclaim, hedge or lecture" in unc
+    # factual grounding rule survives in both modes
+    assert "never invent targets, ports or findings" in unc
+
+    safe = _pipeline_stage_prompt(PipelineState("t.local"), PIPELINE_STAGES[0],
+                                  uncensored=False)
+    assert "Non-destructive actions only: no DoS" in safe
+    assert "AUTHORIZED RED TEAM MODE" not in safe
+
+
+def test_agent_passes_uncensored_flag_to_stage_prompts():
+    """The Agent mechanically forwards llm.uncensored into every stage
+    directive, so red_team_mode config is honoured end-to-end."""
+    agent = Agent(llm=_UncensoredLLM(), memory=None, name="pipeline-rt")
+    fake = _FakeRun()
+    agent.run_stream = fake(agent)
+    _collect(agent)
+    assert fake.prompts, "pipeline must prompt all stages"
+    for i, prompt in enumerate(fake.prompts):
+        assert "AUTHORIZED RED TEAM MODE" in prompt, \
+            "stage %d prompt must carry the red-team rules" % (i + 1)
+        assert "Non-destructive actions only" not in prompt
+
+
+class _CensoredLLM(MockLLM):
+    uncensored = False
+
+
+def test_censored_agent_keeps_conservative_stage_rules():
+    agent = Agent(llm=_CensoredLLM(), memory=None, name="pipeline-safe")
+    fake = _FakeRun()
+    agent.run_stream = fake(agent)
+    _collect(agent)
+    for i, prompt in enumerate(fake.prompts):
+        assert "Non-destructive actions only" in prompt
+        assert "AUTHORIZED RED TEAM MODE" not in prompt

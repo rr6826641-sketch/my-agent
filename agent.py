@@ -19,7 +19,7 @@ from ai_agent.memory import InstitutionalMemory, MemoryStore
 BANNER = """
 ============================================================
   AI AGENT  -  reasoning + tools + memory + sub-agents
-  Commands: /help  /clear  /memory  /tools  /reset  exit
+  Commands: /help  /clear  /memory  /tools  /reset  /pipeline <target>  exit
 ============================================================
 """
 
@@ -101,7 +101,8 @@ def _handle_command(line, agent, memory):
     cmd = line.split()[0].lower()
     rest = line[len(cmd):].strip()
     if cmd == "/help":
-        print("Commands: /help  /clear  /reset  /memory  /tools  /memdel <key>  exit")
+        print("Commands: /help  /clear  /reset  /memory  /tools  /memdel <key>  "
+              "/pipeline <target>  exit")
         print("Tools:   " + agent.tool_names())
     elif cmd in ("/clear", "/reset"):
         agent.reset()
@@ -112,8 +113,42 @@ def _handle_command(line, agent, memory):
         print("deleted" if memory.delete(rest) else "key not found")
     elif cmd == "/tools":
         print(agent.tool_names())
+    elif cmd == "/pipeline":
+        if not rest:
+            print("usage: /pipeline <target>  (e.g. /pipeline scanme.nmap.org)")
+            return
+        _run_pipeline_cli(agent, rest)
     else:
         print("unknown command: %s (try /help)" % cmd)
+
+
+def _run_pipeline_cli(agent, target):
+    """Run the 4-stage autonomous pipeline, streaming progress to the
+    terminal: stage headers, live tool output and the final report."""
+    print("\n[pipeline] target: %s" % target)
+    for ev in agent.run_autonomous_pipeline(target):
+        t = ev.get("type")
+        if t == "pipeline_start":
+            print("[pipeline] stages: " + " -> ".join(ev.get("stages") or []))
+        elif t == "stage_start":
+            print("\n=== STAGE %d/4: %s ===" % (ev.get("num"), ev.get("title")))
+        elif t == "tool_call":
+            print("  [tool] %s(%s)" % (ev.get("name"),
+                                       (ev.get("arguments") or "")[:120]))
+        elif t == "tool_result":
+            out = (ev.get("content") or "").strip()
+            if out:
+                print("  [out]  %s" % (out[:400] + ("..." if len(out) > 400 else "")))
+        elif t == "error":
+            print("[pipeline] ERROR stage %s: %s" % (ev.get("stage", "?"),
+                                                     ev.get("content")))
+        elif t == "pipeline_done":
+            st = ev.get("state") or {}
+            print("\n[pipeline] finished: %s/4 stages completed%s" % (
+                len(st.get("completed_stages") or []),
+                " (aborted at stage %s)" % st["failed_stage"]
+                if st.get("failed_stage") else ""))
+            print("\n" + (ev.get("report") or ""))
 
 
 if __name__ == "__main__":
