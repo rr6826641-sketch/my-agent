@@ -182,9 +182,15 @@ def _iter_items(data):
 
 def _code_present(raw_item):
     """True when the item carries code evidence (snippet or syntax)."""
-    raw = (json.dumps(raw_item, ensure_ascii=False)
-           if isinstance(raw_item, dict) else str(raw_item))
-    if re.search(r'"code"\s*:|"snippet"\s*:|def |=>|function\s*\(', raw):
+    if isinstance(raw_item, dict):
+        if any(k in raw_item for k in ("code", "snippet")):
+            return True
+        # plain JSON syntax ({, ") is not code evidence; inspect values only
+        raw = " ".join(str(v) for v in raw_item.values()
+                       if isinstance(v, str))
+    else:
+        raw = str(raw_item)
+    if re.search(r"def |=>|function\s*\(", raw):
         return True
     return bool(_CODE_HINT.search(raw))
 
