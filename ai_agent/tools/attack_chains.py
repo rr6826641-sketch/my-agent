@@ -43,7 +43,8 @@ _NODE_TEMPLATES = [
     {"kind": "entry", "node": "SQL Injection Foothold", "impact": 7.5,
      "signals": ("sql injection", "sqli")},
     {"kind": "entry", "node": "Null SMB Session", "impact": 4.0,
-     "signals": ("null session", "anonymous logon", "anonymous session")},
+     "signals": ("null session", "null smb", "anonymous logon",
+                 "anonymous session")},
     {"kind": "entry", "node": "Default Credential Login", "impact": 6.0,
      "signals": ("default credential", "default password",
                  "default login")},
@@ -114,13 +115,16 @@ def _node_for(finding):
     try:
         blob = _text_blob(finding)
         best = None
-        best_rank = (-1, -1.0)
+        best_rank = (-1, -1, -1.0)
         for tmpl in _NODE_TEMPLATES:
-            hits = sum(1 for s in tmpl["signals"] if s in blob)
-            if hits == 0:
+            matched = [s for s in tmpl["signals"] if s in blob]
+            if not matched:
                 continue
-            # specificity: more signal hits + higher impact wins
-            rank = (hits, tmpl["impact"])
+            # specificity wins: longer matched signals (more precise) beat
+            # shorter generic ones (e.g. 'anonymous logon' beats 'smb'),
+            # then hit count, then template impact
+            specificity = sum(len(s) for s in matched)
+            rank = (specificity, len(matched), tmpl["impact"])
             if rank > best_rank:
                 best, best_rank = tmpl, rank
         if best is None:
@@ -167,7 +171,7 @@ def build_attack_chains(findings_list=""):
       {ok, total_input, unique, chain_count, chains}
     """
     try:
-        correlated = correlate_findings(findings_list or "")
+        correlated = correlate_findings(findings_list or [])
         if not correlated.get("ok"):
             return {"ok": False,
                     "error": correlated.get("error", "correlation failed")}
@@ -192,22 +196,35 @@ def build_attack_chains(findings_list=""):
         return {"ok": True, "total_input": correlated.get("total_input", 0),
                 "unique": 0, "chain_count": 0, "chains": []}
 
-    # highest-impact entry first; pivots ordered impact-desc so the path
-    # reads foothold -> credential -> privilege -> impact
+    # highest-impact entry first; pivots ordered impact-ASC so the path
+    # reads foothold -> creds -> privilege -> impact (escalation order)
     entries = sorted(entries, key=lambda h: -h["impact"])
-    pivots = sorted(pivots, key=lambda h: -h["impact"])
     finals = sorted(finals, key=lambda h: -h["impact"])
+    # deduplicate pivots by node label (keep the highest-impact/evidenced
+    # instance of each hop) and order impact-desc
+    deduped = []
+    for p in sorted(pivots, key=lambda h: -h["impact"]):
+        if any(d["node"] == p["node"] for d in deduped):
+            continue
+        deduped.append(p)
+    pivots = deduped
+    pivots = sorted(pivots, key=lambda h: h["impact"])  # escalation order
 
     chains = []
     # one chain per entry point; with no entry findings the top pivot is
     # promoted so unmatched-only results still produce a path
-    start_hops = entries or [{
+    start_hops = entries or ([{
+        "node": pivots[0]["node"], "kind": "entry",
+        "impact": max(5.0, pivots[0]["impact"]),
+        "finding_id": pivots[0].get("finding_id", ""),
+        "asset": pivots[0]["asset"],
+        "title": pivots[0].get("title", "")}] if pivots else [{
         "node": "Unknown Entry Point", "kind": "entry", "impact": 5.0,
-        "finding_id": (pivots[0].get("finding_id") if pivots else ""),
-        "asset": (pivots[0]["asset"] if pivots else "unknown"),
-        "title": "Unmapped initial access"}]
+        "finding_id": "", "asset": "unknown",
+        "title": "Unmapped initial access"}])
     for entry in start_hops:
-        chain_pivots = [p for p in pivots if p is not entry]
+        chain_pivots = [p for p in pivots
+                        if p is not entry and p["node"] != entry["node"]]
         final = finals[0] if finals else {
             "node": "Restricted Objective (Impact Unproven)", "kind": "final",
             "impact": max(6.0, entry["impact"]),

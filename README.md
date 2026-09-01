@@ -262,6 +262,9 @@ copy .env.example .env
 | `update_finding` | Finding update karo (status/severity/remediation) |
 | `delete_finding` | Finding delete karo |
 | `write_report` | Logged findings se professional Markdown pentest report (exec summary + severity table + details) |
+| `correlate_findings` | Raw scanner JSON dedupe + cross-tool correlate karo (findings merge) |
+| `build_attack_chains` | Findings se linked attack paths banao — entry point, pivots, final impact, composite risk score (series-system formula), remediation choke point |
+| `visualize_attack_chains` | Attack chains ka ASCII/Markdown graph — report mein embed hota hai (chain table + per-chain path diagram) |
 
 ### 🎯 Scope Enforcement
 | Tool | Kya karta hai |
@@ -353,7 +356,8 @@ my-agent/
 │       ├── code.py             # run_python, regex, password, encode
 │       ├── payloads.py         # reverse/bind shells, webshells, listeners, obfuscation, wordlists
 │       ├── webtests.py         # manual SQLi/XSS/CMDi/traversal/SSRF/redirect probes
-│       ├── reporting.py        # findings log + Markdown pentest report
+│       ├── reporting.py        # findings log + Markdown pentest report + attack-chain graph section
+│       ├── attack_chains.py    # attack-chain graph correlator (linked paths, composite risk, ASCII viz)
 │       ├── scope.py            # engagement scope guard (set/show/check)
 │       ├── custom.py           # custom utilities (sha1_quick, strings, html_to_text, dedupe, count)
 │       └── pentest.py          # nmap/sqlmap/nikto/nuclei/ffuf/gobuster/subfinder/httpx/curl/JWT wrappers
@@ -405,8 +409,9 @@ Bas — LLM khud naya tool discover kar lega aur jab zaroorat ho use karega.
 - **Scope enforcement** — `set_scope`/`check_scope` se authorized targets ki guarding
 - **RAG vector search** — `rag_index` + `vector_search` (pure-Python TF-IDF + cosine)
 - **Custom file utilities** — sha1_quick, strings_extract, html_to_text, dedupe_lines, count_lines
-- **Unit test suite** — `test_new_tools.py` (47 tests, sab pass)
-- **100 tools total** (pehle 59) — registry, config aur prompt sab upgrade ho chuke
+- **Attack-Chain Graph Correlator** — `build_attack_chains` + `visualize_attack_chains`: flat findings ki jagah linked attack paths (entry → pivots → final impact), series-system composite risk score, remediation choke point, ASCII/Markdown graph report mein embed hota hai
+- **Unit test suite** — `test_new_tools.py` (47 tests) + `test_attack_chains.py` (15 tests, sab pass)
+- **102 tools total** (pehle 59) — registry, config aur prompt sab upgrade ho chuke
 
 ---
 
