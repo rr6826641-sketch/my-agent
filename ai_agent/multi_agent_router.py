@@ -341,12 +341,35 @@ class ReconAgent(BaseSwarmAgent):
             self._heuristic_surface(target, surface, mode)
         self.surface[target] = surface
         snapshot = self._snapshot(surface)
+        self._sync_world_model(target, snapshot)
         self._log("recon", "surface mapped for %s: %s"
                   % (target, json.dumps(snapshot)[:400]))
         return {"summary": "recon complete for %s" % target,
                 "surface": snapshot,
                 "emit": [{"topic": TOPIC_SURFACE, "payload": {
                     "target": target, "surface": snapshot}}]}
+
+    def _sync_world_model(self, target, snapshot):
+        """Push recon results into the Game-Master World-State Engine
+        (hosts, ports, service assets). Best-effort: never breaks recon."""
+        try:
+            from .world_model import get_manager
+            wm = get_manager()
+            for host, info in (snapshot.get("hosts") or {}).items():
+                wm.record_host(host, ports=info.get("ports") or [],
+                               source="recon", actor="recon_agent")
+                for svc in info.get("services") or []:
+                    kind = ("db" if svc in ("mysql", "mssql", "postgresql",
+                                            "redis", "mongodb", "oracle")
+                            else "webapp" if svc in ("http", "https")
+                            else "service")
+                    wm.record_asset(host, kind,
+                                    "%s://%s:%s" % (
+                                        svc, host,
+                                        (info.get("ports") or [0])[0]),
+                                    tech=svc, actor="recon_agent")
+        except Exception:
+            pass
 
     def _parse_portscan(self, output, surface):
         for host_m in re.finditer(
@@ -594,6 +617,9 @@ class ExploitationAgent(BaseSwarmAgent):
                     "evidence": feedback_text[:500],
                     "steps": self._poc_steps(cand, target),
                 })
+                self._sync_compromise(target, cand, feedback_text)
+            elif analysis["outcome"] == "needs_mutation":
+                self._sync_control_feedback(cand, analysis)
         summary = ("executed %d candidates, %d confirmed, %d need "
                    "mutation" % (executed, confirmed,
                                  executed - confirmed))
@@ -608,6 +634,41 @@ class ExploitationAgent(BaseSwarmAgent):
         return {"summary": summary, "executed": executed,
                 "confirmed": confirmed, "pocs": self.pocs,
                 "feedback": self.feedback_log, "emit": emits}
+
+    def _sync_compromise(self, target, cand, evidence_text):
+        """Confirmed PoC -> update the Game-Master World-State: the
+        vuln class implies the new access level (root-level classes
+        escalate straight to root). Best-effort, never breaks exploits."""
+        try:
+            from .world_model import get_manager
+            wm = get_manager()
+            host = (cand.get("target") or target or "unknown").strip()
+            vclass = (cand.get("vuln_class") or "").lower()
+            level = "root" if any(k in vclass for k in (
+                "rce", "remote code", "command injection", "kernel",
+                "privilege")) else "user"
+            wm.record_host(host, source="exploiter", actor="exploiter")
+            wm.escalate(host, level, evidence="%s confirmed: %s"
+                        % (vclass, (evidence_text or "")[:150]),
+                        actor="exploiter")
+        except Exception:
+            pass
+
+    def _sync_control_feedback(self, cand, analysis):
+        """WAF-style blocks from exploit feedback are recorded into the
+        security-controls map so the analyzer skips raw retries."""
+        try:
+            from .world_model import get_manager
+            wm = get_manager()
+            mutation = (analysis.get("next_mutation") or "")
+            if "encode" in mutation.lower() or "waf" in mutation.lower():
+                wm.record_control(
+                    "waf", target=(cand.get("target") or "").strip(),
+                    detail="payload blocked during %s probe -> %s"
+                    % (cand.get("vuln_class"), mutation[:120]),
+                    actor="exploiter")
+        except Exception:
+            pass
 
     @classmethod
     def analyze_feedback(cls, text, candidate=None):

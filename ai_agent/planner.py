@@ -266,6 +266,15 @@ class GOAPPlanner:
         self.objective = (objective or "").strip()[:180]
         self.target = (target or "").strip()[:120]
         self.facts = frozenset(start_facts or ())
+        # Game-Master World-State fusion: seed the planner with facts
+        # from the central world model so completed stages (mapped
+        # surface, known footholds, elevations) are never re-planned.
+        try:
+            from .world_model import get_manager
+            self.facts = self.facts | frozenset(
+                get_manager().planning_facts())
+        except Exception:
+            pass
         start = self.facts
         # A* over world states (states are frozensets of facts).
         open_set: List[Tuple[float, float, int, FrozenSet[str],

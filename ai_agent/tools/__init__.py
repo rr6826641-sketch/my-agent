@@ -2357,6 +2357,78 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                 command or "", target or "", max_rounds,
                 session_id or "", command_timeout)))
 
+    # ---- game-master world state ----
+    REGISTRY.append(Tool(
+        "get_world_state",
+        "Query the Game-Master World-State Engine: the centralized, live "
+        "structured model of the target environment (discovered hosts & "
+        "network topology, assets & services, per-host compromise state "
+        "from unauthenticated to user to root/admin, and the security "
+        "controls map: WAFs, EDR indicators, segmentation). Mirrored to "
+        "SQLite (rpg/lorebook.db) after every mutation. ALWAYS query this "
+        "BEFORE re-scanning a target - if the fact is already in the world "
+        "state, do not spend scans rediscovering it. Feeds GOAP planning "
+        "and hypothesis generation.",
+        {"type": "object",
+         "properties": {
+             "section": _str_prop(
+                 "all | hosts | assets | controls | compromised | "
+                 "events | stats", "all"),
+             "host": _str_prop(
+                 "optional host/IP filter for assets and controls", "")},
+         "required": []},
+        lambda section="all", host="":
+            tool_get_world_state(section or "all", host or "")))
+    REGISTRY.append(Tool(
+        "update_world_state",
+        "Write new intelligence into the Game-Master World-State. Call this "
+        "the moment you discover a host, port, service, database, web app, "
+        "cloud bucket, a security control (WAF/EDR/segmentation), a "
+        "topology link, or you escalate privileges (unauthenticated -> "
+        "user -> root). Actions: record_host (host, ports comma-sep, "
+        "os_fingerprint), record_asset (host, kind webapp|db|bucket|api|"
+        "share, identifier, tech), escalate (host, level, evidence, creds), "
+        "record_control (kind, target, detail), link_hosts (host, host_b, "
+        "relation). State auto-syncs to rpg/lorebook.db and is instantly "
+        "visible to all other sub-agents, the GOAP planner and the "
+        "hypothesis engine.",
+        {"type": "object",
+         "properties": {
+             "action": _str_prop(
+                 "record_host | record_asset | escalate | record_control | "
+                 "link_hosts", ""),
+             "host": _str_prop("host IP/hostname (or first endpoint for "
+                               "link_hosts)", ""),
+             "ports": _str_prop("comma-separated open ports for record_host",
+                                ""),
+             "os_fingerprint": _str_prop("OS fingerprint for record_host",
+                                         ""),
+             "kind": _str_prop("asset/control kind: webapp|db|bucket|api|"
+                               "share|service or waf|edr|segmentation|"
+                               "ratelimit", ""),
+             "identifier": _str_prop("asset identifier (URL, connection "
+                                     "string, bucket name)", ""),
+             "tech": _str_prop("asset tech fingerprint, e.g. nginx, mysql 8",
+                               ""),
+             "level": _str_prop("access level for escalate: unauthenticated "
+                                "| user | root", ""),
+             "evidence": _str_prop("evidence supporting the escalation", ""),
+             "creds": _str_prop("captured credentials/loot notes", ""),
+             "target": _str_prop("target host for record_control", ""),
+             "detail": _str_prop("control detail for record_control", ""),
+             "host_b": _str_prop("second endpoint for link_hosts", ""),
+             "relation": _str_prop("topology relation, default connected",
+                                   "connected")},
+         "required": ["action"]},
+        lambda action="", host="", ports="", os_fingerprint="", kind="",
+               identifier="", tech="", level="", evidence="", creds="",
+               target="", detail="", host_b="", relation="connected":
+            tool_update_world_state(
+                action or "", host or "", ports or "", os_fingerprint or "",
+                kind or "", identifier or "", tech or "", level or "",
+                evidence or "", creds or "", target or "", detail or "",
+                host_b or "", relation or "connected")))
+
     global _REGISTRY
     _REGISTRY = REGISTRY
     return REGISTRY
@@ -2403,6 +2475,98 @@ def tool_current_time():
             "epoch": int(_time.time()),
             "weekday": now.strftime("%A"),
             "date": now.strftime("%Y-%m-%d")}
+def tool_get_world_state(section="all", host=""):
+    """Query the Game-Master World-State (central target model).
+
+    Reads the live world state mirrored in rpg/lorebook.db - no re-scan
+    needed for anything already recorded here.
+
+    section: all | hosts | assets | controls | compromised | events | stats
+    host:    optional host filter for assets/controls
+    """
+    try:
+        from ..world_model import get_manager
+        wm = get_manager()
+    except Exception as exc:
+        return json.dumps({"error": "world model unavailable: %r" % exc},
+                          ensure_ascii=False)
+    section = (section or "all").strip().lower()
+    host = (host or "").strip()
+    try:
+        if section in ("", "all", "snapshot"):
+            snap = wm.snapshot(include_events=10)
+        elif section == "hosts":
+            snap = {"hosts": wm.known_hosts(reachable_only=False)}
+        elif section == "assets":
+            snap = {"assets": wm.assets_for(host=host or None)}
+        elif section == "controls":
+            snap = {"controls": wm.controls_for(target=host or None)}
+        elif section == "compromised":
+            snap = {"compromised": wm.compromised("user")}
+        elif section == "events":
+            snap = {"events": wm.events(50)}
+        elif section == "stats":
+            snap = wm.stats()
+        else:
+            return json.dumps(
+                {"error": "section must be all|hosts|assets|controls|"
+                          "compromised|events|stats"}, ensure_ascii=False)
+        return json.dumps(snap, ensure_ascii=False, indent=2, default=str)
+    except Exception as exc:
+        return json.dumps({"error": "world-state query failed: %r" % exc},
+                          ensure_ascii=False)
+
+
+def tool_update_world_state(action="", host="", ports="", os_fingerprint="",
+                            kind="", identifier="", tech="", level="",
+                            evidence="", creds="", target="", detail="",
+                            host_b="", relation="connected"):
+    """Write new intelligence into the Game-Master World-State.
+
+    Every sub-agent reports discoveries here instead of re-scanning.
+    Actions:
+      record_host    - host + ports (comma-sep) + os_fingerprint
+      record_asset   - kind (webapp|db|bucket|api|share) + identifier (+tech)
+      escalate       - host access level: unauthenticated|user|root
+                       (+evidence, +creds captured)
+      record_control - kind (waf|edr|segmentation|ratelimit) + target + detail
+      link_hosts     - topology edge host <-> host_b (relation)
+    """
+    try:
+        from ..world_model import get_manager
+        wm = get_manager()
+    except Exception as exc:
+        return json.dumps({"error": "world model unavailable: %r" % exc},
+                          ensure_ascii=False)
+    action = (action or "").strip().lower()
+    try:
+        if action == "record_host":
+            port_list = [p for p in (ports or "").replace(",", " ").split()
+                         if p.strip()]
+            result = wm.record_host(host, ports=port_list,
+                                    os_fingerprint=os_fingerprint,
+                                    source="tool", actor="agent")
+        elif action == "record_asset":
+            result = wm.record_asset(host, kind, identifier, tech=tech,
+                                     actor="agent")
+        elif action == "escalate":
+            result = wm.escalate(host, level, evidence=evidence, creds=creds,
+                                 actor="agent")
+        elif action == "record_control":
+            result = wm.record_control(kind, target=target, detail=detail,
+                                       actor="agent")
+        elif action == "link_hosts":
+            result = wm.link_hosts(host, host_b, relation=relation,
+                                   actor="agent")
+        else:
+            result = {"error": "action must be record_host|record_asset|"
+                               "escalate|record_control|link_hosts"}
+        return json.dumps(result, ensure_ascii=False, indent=2, default=str)
+    except Exception as exc:
+        return json.dumps({"error": "world-state update failed: %r" % exc},
+                          ensure_ascii=False)
+
+
 _REGISTRY = []
 
 
