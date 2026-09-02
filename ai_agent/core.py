@@ -1,6 +1,7 @@
 """The Agent: an LLM wrapped in a think -> act -> observe loop."""
 
 import json
+import logging
 import os
 import re
 import threading
@@ -13,6 +14,7 @@ from .orchestration import (
     DEFAULT_MAX_SIBLINGS,
     OrchestrationManager,
 )
+from .planner import GOAPPlanner
 from .tools import create_tools, execute_tool
 from .tools.workspace import WorkspaceIndex
 
@@ -21,6 +23,8 @@ from .tools.workspace import WorkspaceIndex
 _SUBAGENT_DB_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "rpg", "lorebook.db")
+
+logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------
 # Parallel Tool Execution Maximizer
@@ -318,6 +322,19 @@ surface. Follow these conditional chains:
 - Never keep executing an outdated plan: if evidence contradicts an earlier
   assumption (no web service on a port, WAF present, unexpected tech stack,
   dead subdomain), adapt the plan and continue on the corrected course.
+
+# GOAP ENGINE (Goal-Oriented Action Planning - automatic)
+- For complex red-team objectives the engine decomposes the target into a
+  Goal-Action-State tree (Reconnaissance -> Initial Access -> Privilege
+  Escalation -> Persistence -> Objective) BEFORE any tool runs and injects
+  the [GOAP PLAN] block with every stage's alternative branches
+  (Path A / B / C). Follow the active branch first.
+- When a branch hits a blocked state (WAF trigger, closed/filtered port,
+  failed authentication, hard error) the planner automatically BACK-TRACKS
+  and injects a [GOAP PIVOT] block naming the alternative branch. Switch to
+  the named Path B/C action immediately and CONTINUE - never abort, never
+  restate the blocked approach, never stop the engagement because one path
+  failed. Blocked paths are data, not dead ends.
 
 # DEEP ANALYSIS / MULTI-PERSPECTIVE EVALUATION (mandatory)
 - NEVER give surface-level answers. Before formulating any response to a
@@ -1993,6 +2010,12 @@ class Agent:
         self._task_board = TaskBoard()
         self._root_task = None
         self._active_task = None
+        # GOAP Engine: dynamic Goal-Action-State planner. Complex
+        # red-team instructions are decomposed into a kill-chain
+        # action graph BEFORE tool execution begins; blocked branches
+        # (WAF, closed port, failed auth) trigger automatic
+        # back-tracking to alternative branches.
+        self._goap = GOAPPlanner()
 
     # ------------------------------------------------------------ prompt
 
@@ -2144,6 +2167,69 @@ class Agent:
             "plan": pblock,
             "pivot": pivot,
             "state": self._tactical.snapshot(),
+        }
+
+    # ------------------------------------------------------------ GOAP
+
+    def _goap_build(self, user_input):
+        """Decompose a complex objective into a Goal-Action-State tree
+        BEFORE any tool executes. Returns the [GOAP PLAN] block (or
+        ""), aligned with the tactical engine's objective detection."""
+        if (not self.reasoning_engine or self.npc_persona
+                or self.game_master or not self._tactical.active):
+            return ""
+        text = (user_input or "")[:400]
+        m = re.search(
+            r"\b\d{1,3}(?:\.\d{1,3}){3}\b"
+            r"|\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,24}\b",
+            text, re.I)
+        target = m.group(0) if m else ""
+        try:
+            plan = self._goap.plan_graph(text, target)
+        except Exception as exc:
+            logger.warning("GOAP planning failed: %s", exc)
+            return ""
+        if not plan:
+            return ""
+        return self._goap.render_plan_block()
+
+    def _goap_step(self, name, args, result):
+        """Feed one tool result into the GOAP graph. On a blocked
+        state (WAF trigger, closed/filtered port, failed auth, hard
+        error) the planner back-tracks to an alternative branch and
+        the [GOAP PIVOT] block is injected as a message so the loop
+        continues on Path B instead of terminating. Returns a
+        goap_pivot event or None."""
+        if not self._goap.active:
+            return None
+        try:
+            ev = self._goap.observe(name, str(args or ""),
+                                    str(result or ""))
+        except Exception as exc:
+            logger.warning("GOAP observe failed: %s", exc)
+            return None
+        if not ev or ev.get("event") not in ("pivot", "blocked"):
+            return None
+        if ev.get("event") == "pivot":
+            block = self._goap.render_pivot_block(ev)
+        else:
+            block = ("[GOAP BLOCKED] branch %s blocked (%s: %s) and "
+                     "no alternative branch remains - continue with "
+                     "the best available vector and document the "
+                     "blocker."
+                     % (ev.get("step", "?"),
+                        ev.get("category", "?"),
+                        (ev.get("evidence") or "")[:100]))
+        self.messages.append({"role": "system", "content": block})
+        return {
+            "type": "goap_pivot",
+            "event": ev.get("event"),
+            "category": ev.get("category"),
+            "evidence": ev.get("evidence"),
+            "step": ev.get("step"),
+            "next_action": ev.get("next_action", ""),
+            "block": block,
+            "state": self._goap.snapshot(),
         }
 
     def _npc_prompt(self):
@@ -2338,6 +2424,16 @@ class Agent:
         if (self.reasoning_engine and not self.npc_persona
                 and not self.game_master):
             self._reasoner.detect_objective(user_input)
+            # GOAP: decompose complex objectives into a
+            # Goal-Action-State tree before any tool executes; the
+            # [GOAP PLAN] block tells the LLM the active branch plus
+            # every alternative (Path B/C ...).
+            goap_block = self._goap_build(user_input)
+            if goap_block:
+                self.messages.append({"role": "system",
+                                      "content": goap_block})
+                yield {"type": "goap_plan", "block": goap_block,
+                       "state": self._goap.snapshot()}
         final = ""
         tool_schemas = [t.schema() for t in self._tool_list]
 
@@ -2490,6 +2586,14 @@ class Agent:
                     tev = self._tactical_step(name, args, result)
                     if tev:
                         yield tev
+                # GOAP: feed the fresh evidence into the action graph.
+                # A blocked state (WAF trigger, closed port, failed
+                # auth, hard error) makes the planner back-track to an
+                # alternative branch and inject a [GOAP PIVOT]
+                # instruction - the loop keeps running, never aborts.
+                gev = self._goap_step(name, args, result)
+                if gev:
+                    yield gev
             self._maybe_trim()
 
         self._task_board.close_all()
