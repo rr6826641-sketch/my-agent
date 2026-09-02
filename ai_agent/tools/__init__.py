@@ -2317,12 +2317,78 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
         "validity checks and deadline awareness. Zero arguments.",
         {"type": "object", "properties": {}, "required": []},
         lambda: tool_current_time()))
+    REGISTRY.append(Tool(
+        "sandbox_feedback_run",
+        "Execute a terminal command through the Live Sandbox Feedback "
+        "Loop Engine: runs it in the sandbox while a real-time stream "
+        "analyzer monitors live PTY/one-shot stdout+stderr for interactive "
+        "prompts (password:, y/n, sudo), syntax errors (tracebacks, bad "
+        "flags), access-denied responses (permission denied, 401/403, WAF "
+        "blocks, rate limits) and execution timeouts - detected instantly "
+        "from the live stream. On a failure signature the Reflection "
+        "Engine roots the failure and the Dynamic Command Corrector "
+        "auto-repairs flag syntax, fixes quoting, bumps timeouts or "
+        "applies bypass wrappers (sudo, random-agent, polite-delay) then "
+        "re-issues the corrected command automatically. Bounded rounds "
+        "(default 3, hard cap 6). Returns the full round-by-round audit "
+        "trail with corrections, stream signatures and final output tail. "
+        "Use INSTEAD of run_terminal for long or failure-prone commands "
+        "where you want automatic self-healing retries.",
+        {"type": "object",
+         "properties": {
+             "command": _str_prop(
+                 "command to execute with live feedback monitoring"),
+             "target": _str_prop(
+                 "optional target host/URL context for reflection",
+                 ""),
+             "max_rounds": {"type": "integer",
+                            "description": "max correct+reissue rounds "
+                            "(1-6, default 3)", "default": 3},
+             "session_id": _str_prop(
+                 "optional live PTY session id to monitor instead of a "
+                 "one-shot run (interactive prompts auto-answered)", ""),
+             "command_timeout": {"type": "integer",
+                                 "description": "per-round timeout seconds "
+                                 "(default 45)", "default": 45}},
+         "required": ["command"]},
+        lambda command="", target="", max_rounds=3, session_id="",
+               command_timeout=45:
+            tool_sandbox_feedback_run(
+                command or "", target or "", max_rounds,
+                session_id or "", command_timeout)))
+
     global _REGISTRY
     _REGISTRY = REGISTRY
     return REGISTRY
 
 
 DEFAULT_PORTS = "21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1433,1521,2049,2375,3000,3306,3389,5432,5900,6379,8000,8080,8443,8888,9000,9090,9200,11211,27017"
+
+
+
+def tool_sandbox_feedback_run(command, target="", max_rounds=3,
+                             session_id="", command_timeout=45):
+    """Run a command through the Live Sandbox Feedback Loop Engine.
+
+    Executes the command in the terminal sandbox while a real-time
+    stream analyzer watches live PTY/one-shot stdout+stderr for
+    interactive prompts, syntax errors, access-denied responses and
+    execution timeouts. On a failure signature the Reflection Engine
+    roots the failure and the Dynamic Command Corrector auto-repairs
+    flag syntax / quoting, bumps timeouts or applies bypass wrappers,
+    then re-issues the corrected command (bounded rounds, default 3,
+    hard cap 6). Returns the full round/correction audit trail.
+    """
+    from ..sandbox.feedback_loop import LiveFeedbackLoop
+    loop = LiveFeedbackLoop(max_rounds=int(max_rounds or 3),
+                            command_timeout=int(command_timeout or 45))
+    try:
+        result = loop.run(command or "", target=target or "",
+                          session_id=(session_id or "").strip() or None)
+    except Exception as exc:
+        return json.dumps({"error": "feedback loop failed: %r" % exc},
+                          ensure_ascii=False)
+    return json.dumps(result, ensure_ascii=False, indent=2, default=str)
 
 
 def tool_current_time():
