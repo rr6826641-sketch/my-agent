@@ -539,6 +539,7 @@ def api_chat():
     # instead of a normal chat turn. The pipeline yields run_stream-
     # compatible events, so the SSE worker below needs no changes.
     pipeline_target = None
+    pipeline_invalid = False
     if message.lower().startswith("/pipeline"):
         pipeline_target = message[len("/pipeline"):].strip()
         if not pipeline_target:
