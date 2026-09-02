@@ -273,7 +273,9 @@ def test_reporting(monkeypatch, tmp):
     out = tool_add_finding("http://10.0.0.1", "SQL injection in login",
                            severity="high", description="q param injectable",
                            verification="verified",
-                           verification_reason="manual confirm")
+                           verification_reason="manual confirm",
+                           verification_status="CONFIRMED_POC",
+                           evidence="' OR 1=1-- -> auth bypass confirmed")
     check("add_finding verified accepted", "added" in out.lower()
           or "F-" in out, out)
     rows = report_mod._read_all()
@@ -306,7 +308,9 @@ def test_verify_finding_tool(monkeypatch, tmp):
     monkeypatch(report_mod, "REPORTS_DIR", os.path.join(tmp, "reports2"))
 
     tool_add_finding("192.0.2.9", "Port 443 open on 192.0.2.9",
-                     severity="high", description="port 443 open on 192.0.2.9")
+                     severity="high", description="port 443 open on 192.0.2.9",
+                     verification_status="CONFIRMED_POC",
+                     evidence="nmap -sV output: 443/tcp open")
     tool_add_finding("192.0.2.10", "Port 22 open on 192.0.2.10",
                      severity="medium", description="port 22 open on 192.0.2.10")
     rows = report_mod._read_all()

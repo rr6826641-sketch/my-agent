@@ -862,13 +862,20 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                                  "into (default 'q')", "q"),
                              "request_timeout": {"type": "integer",
                                  "description": "per-request timeout seconds "
-                                 "(default 8)", "default": 8}},
+                                 "(default 8)", "default": 8},
+                             "granular": {"type": "boolean",
+                                 "description": "per-payload adaptation mode "
+                                 "(default true): each response mutates only "
+                                 "the payload that produced it; set false for "
+                                 "legacy round-wide adaptation", "default": True}},
               "required": ["target_url"]},
              lambda target_url="", initial_payload_set="", max_rounds=6,
-                    method="GET", param="q", request_timeout=8:
+                    method="GET", param="q", request_timeout=8,
+                    granular=True:
                  adaptive_fuzz(target_url or "", initial_payload_set or "",
                                int(max_rounds or 6), method or "GET",
-                               param or "q", int(request_timeout or 8))),
+                               param or "q", int(request_timeout or 8),
+                               bool(granular))),
         Tool("remember", "Save a fact/note to persistent memory.",
              {"type": "object",
               "properties": {"key": _str_prop("short key, e.g. 'target_ip'"),
@@ -1864,10 +1871,11 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                              "confidence": _str_prop("low | medium | high | confirmed", "medium"),
                              "status": _str_prop("open | confirmed | needs-validation | hypothesis | false-positive | fixed", "open"),
                              "verification": _str_prop("verified | unverified | false-positive - verification state of the claim (sets matching status)", ""),
-                             "verification_reason": _str_prop("why the claim was verified/filtered", "")},
+                             "verification_reason": _str_prop("why the claim was verified/filtered", ""),
+                             "verification_status": _str_prop("CONFIRMED_POC (non-destructive PoC executed + evidence logged) | NEEDS_VALIDATION - required for critical/high", "")},
               "required": ["asset", "title"]},
-             lambda asset="", title="", severity="medium", cwe="", description="", evidence="", impact="", remediation="", confidence="medium", status="open", verification="", verification_reason="":
-                 tool_add_finding(asset, title, severity or "medium", cwe or "", description or "", evidence or "", impact or "", remediation or "", confidence or "medium", status or "open", verification or "", verification_reason or "")),
+             lambda asset="", title="", severity="medium", cwe="", description="", evidence="", impact="", remediation="", confidence="medium", status="open", verification="", verification_reason="", verification_status="":
+                 tool_add_finding(asset, title, severity or "medium", cwe or "", description or "", evidence or "", impact or "", remediation or "", confidence or "medium", status or "open", verification or "", verification_reason or "", verification_status or "")),
         Tool("list_findings", "List all logged findings, optionally filtered "
              "by severity/status.",
              {"type": "object",
@@ -1886,10 +1894,12 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                              "remediation": _str_prop("new remediation", ""),
                              "confidence": _str_prop("low | medium | high | confirmed", ""),
                              "verification": _str_prop("verified | unverified | false-positive", ""),
-                             "verification_reason": _str_prop("why the claim was verified/filtered", "")},
+                             "verification_reason": _str_prop("why the claim was verified/filtered", ""),
+                             "verification_status": _str_prop("CONFIRMED_POC | NEEDS_VALIDATION - critical/high requires CONFIRMED_POC", ""),
+                             "evidence": _str_prop("PoC output / proof to attach", "")},
               "required": ["finding_id"]},
-             lambda finding_id="", severity="", status="", title="", remediation="", confidence="", verification="", verification_reason="":
-                 tool_update_finding(finding_id or "", severity or "", status or "", title or "", remediation or "", confidence or "", verification or "", verification_reason or "")),
+             lambda finding_id="", severity="", status="", title="", remediation="", confidence="", verification="", verification_reason="", verification_status="", evidence="":
+                 tool_update_finding(finding_id or "", severity or "", status or "", title or "", remediation or "", confidence or "", verification or "", verification_reason or "", verification_status or "", evidence or "")),
         Tool("delete_finding", "Delete a finding by id.",
              {"type": "object",
               "properties": {"finding_id": _str_prop("e.g. F-1A2B3C4D")},

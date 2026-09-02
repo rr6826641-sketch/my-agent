@@ -56,6 +56,16 @@ SEVERITIES = ["critical", "high", "medium", "low", "info"]
 STATUSES = ["open", "confirmed", "validated", "false-positive", "fixed", "needs-validation", "hypothesis"]
 VERIFICATION_STATUSES = ["verified", "unverified", "false-positive"]
 
+# ---- Mandatory PoC Verification Protocol ---------------------------------
+# Every finding carries a strict verification_status tag. A finding may
+# only be labelled CRITICAL/HIGH when a non-destructive PoC was executed
+# and logged (CONFIRMED_POC); everything else stays NEEDS_VALIDATION and
+# is capped at MEDIUM severity in generated reports.
+POC_CONFIRMED = "CONFIRMED_POC"
+POC_NEEDS_VALIDATION = "NEEDS_VALIDATION"
+VERIFICATION_STATUSES_POC = [POC_CONFIRMED, POC_NEEDS_VALIDATION]
+POC_REQUIRED_SEVERITIES = ("critical", "high")
+
 CVSS_FALLBACK = {
     "critical": 9.8, "high": 7.5, "medium": 5.3, "low": 3.1, "info": 0.0,
 }
@@ -104,10 +114,63 @@ def _verification_label(verification):
     return "[UNVERIFIED / REQUIRES MANUAL AUDIT]"
 
 
+def _poc_status_label(poc_status):
+    """Display tag for the mandatory verification_status field."""
+    return ("[POC CONFIRMED]" if poc_status == POC_CONFIRMED
+            else "[NEEDS VALIDATION - PENDING POC]")
+
+
+def _norm_poc_status(value):
+    """Normalize a verification_status value; '' -> NEEDS_VALIDATION.
+    Returns None for unrecognized values."""
+    v = str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
+    if v in ("CONFIRMED_POC", "CONFIRMED", "POC_CONFIRMED"):
+        return POC_CONFIRMED
+    if v in ("", "NEEDS_VALIDATION", "UNVALIDATED", "PENDING", "UNVERIFIED"):
+        return POC_NEEDS_VALIDATION
+    return None
+
+
+def _poc_gate(severity, poc_status, evidence):
+    """Mandatory PoC gate. Returns an error string or None.
+
+    ABSOLUTE RULE: CRITICAL/HIGH severity requires
+    verification_status=CONFIRMED_POC backed by non-empty logged PoC
+    evidence; CONFIRMED_POC in turn requires that evidence.
+    """
+    if severity in POC_REQUIRED_SEVERITIES and poc_status != POC_CONFIRMED:
+        return ("PoC Verification Protocol: severity '%s' requires "
+                "verification_status=CONFIRMED_POC - execute a non-destructive "
+                "PoC first, log its output as evidence, then re-log; or keep "
+                "the finding at NEEDS_VALIDATION with severity medium/low"
+                % severity)
+    if poc_status == POC_CONFIRMED and not _clean_text(evidence, 2000):
+        return ("PoC Verification Protocol: verification_status="
+                "CONFIRMED_POC requires non-empty evidence (the logged "
+                "PoC script/payload output)")
+    return None
+
+
+def _apply_poc_cap(rows):
+    """Report-level enforcement of the PoC protocol: cap CRITICAL/HIGH
+    findings at MEDIUM when no CONFIRMED_POC is logged. Returns the list
+    of downgraded findings."""
+    capped = []
+    for r in rows:
+        if r.get("severity") in POC_REQUIRED_SEVERITIES and \
+                (r.get("verification_status") or POC_NEEDS_VALIDATION) != \
+                POC_CONFIRMED:
+            r["severity"] = "medium"
+            r["poc_capped"] = True
+            capped.append(r)
+    return capped
+
+
 def tool_add_finding(asset="", title="", severity="medium", cwe="",
                      description="", evidence="", impact="", remediation="",
                      confidence="medium", status="open",
-                     verification="", verification_reason=""):
+                     verification="", verification_reason="",
+                     verification_status=""):
     """Log a vulnerability finding for the current engagement.
 
     asset       - affected URL/host/endpoint (required)
@@ -117,6 +180,10 @@ def tool_add_finding(asset="", title="", severity="medium", cwe="",
     confidence  - low | medium | high | confirmed
     status      - open | confirmed | needs-validation | hypothesis |
                   false-positive | fixed
+    verification_status - CONFIRMED_POC | NEEDS_VALIDATION (mandatory PoC
+                  Verification Protocol: CRITICAL/HIGH severity is only
+                  accepted as CONFIRMED_POC with logged PoC evidence;
+                  defaults to NEEDS_VALIDATION)
     """
     asset = _clean_text(asset)
     title = _clean_text(title, 300)
@@ -135,6 +202,13 @@ def tool_add_finding(asset="", title="", severity="medium", cwe="",
     if verification and verification not in VERIFICATION_STATUSES:
         return ("add_finding: verification must be one of %s"
                 % VERIFICATION_STATUSES)
+    poc_status = _norm_poc_status(verification_status)
+    if poc_status is None:
+        return ("add_finding: verification_status must be one of %s"
+                % VERIFICATION_STATUSES_POC)
+    poc_error = _poc_gate(severity, poc_status, evidence)
+    if poc_error:
+        return "add_finding: %s" % poc_error
     # Keep the finding's status consistent with its verification state:
     # verified -> confirmed, false-positive -> filtered, unverified -> audit.
     if verification == V_VERIFIED and status in ("open", "needs-validation",
@@ -160,15 +234,16 @@ def tool_add_finding(asset="", title="", severity="medium", cwe="",
         "confidence": confidence,
         "status": status,
         "verification": verification or V_UNVERIFIED,
+        "verification_status": poc_status,
         "verification_reason": _clean_text(verification_reason, 500),
     }
     with _lock:
         rows = _read_all()
         rows.append(finding)
         _write_all(rows)
-    return ("Finding logged: %s | %s | %s | %s\n"
+    return ("Finding logged: %s | %s | %s | %s | %s\n"
             "Run 'write_report' at the end to generate the full pentest report."
-            % (fid, severity.upper(), title, asset))
+            % (fid, severity.upper(), poc_status, title, asset))
 
 
 def tool_list_findings(severity="", status="", sort_by="severity"):
@@ -193,18 +268,25 @@ def tool_list_findings(severity="", status="", sort_by="severity"):
         rows.sort(key=lambda r: order.get(r.get("severity"), 99))
     lines = ["Findings (%d):" % len(rows)]
     for r in rows:
-        lines.append("- [%s] [%s] %s %s | %s | %s"
+        lines.append("- [%s] [%s] %s %s [%s] %s | %s"
                      % (r.get("status", "?"),
                         (r.get("severity") or "?").upper(),
                         _verification_label(r.get("verification")),
+                        _poc_status_label(r.get("verification_status")),
                         r.get("id"), r.get("title"), r.get("asset")))
     return "\n".join(lines)
 
 
 def tool_update_finding(finding_id="", severity="", status="", title="",
                         remediation="", confidence="",
-                        verification="", verification_reason=""):
-    """Update a logged finding by id (F-XXXXXXXX)."""
+                        verification="", verification_reason="",
+                        verification_status="", evidence=""):
+    """Update a logged finding by id (F-XXXXXXXX).
+
+    The Mandatory PoC Verification Protocol is enforced here too: a
+    finding can only carry CRITICAL/HIGH severity (or verification_status
+    =CONFIRMED_POC) when logged PoC evidence backs it.
+    """
     finding_id = (finding_id or "").strip().upper()
     if not finding_id:
         return "update_finding: finding_id is required (e.g. F-1A2B3C4D)"
@@ -214,11 +296,31 @@ def tool_update_finding(finding_id="", severity="", status="", title="",
                        if r.get("id", "").upper() == finding_id), None)
         if target is None:
             return "update_finding: finding '%s' not found" % finding_id
+        # ---- PoC Verification Protocol: validate BEFORE mutating ----
+        if verification_status:
+            new_poc = _norm_poc_status(verification_status)
+            if new_poc is None:
+                return ("update_finding: verification_status must be one "
+                        "of %s" % VERIFICATION_STATUSES_POC)
+        else:
+            new_poc = None
+        eff_sev = (severity.strip().lower() if severity
+                   else target.get("severity", "info"))
+        eff_poc = new_poc or target.get("verification_status") or \
+            POC_NEEDS_VALIDATION
+        eff_evidence = evidence if evidence else target.get("evidence", "")
+        poc_error = _poc_gate(eff_sev, eff_poc, eff_evidence)
+        if poc_error:
+            return "update_finding: %s" % poc_error
         if severity:
             sev = severity.strip().lower()
             if sev not in SEVERITIES:
                 return "update_finding: severity must be one of %s" % SEVERITIES
             target["severity"] = sev
+        if new_poc is not None:
+            target["verification_status"] = new_poc
+        if evidence:
+            target["evidence"] = _clean_text(evidence)
         if status:
             st = status.strip().lower()
             if st not in STATUSES:
@@ -246,9 +348,11 @@ def tool_update_finding(finding_id="", severity="", status="", title="",
         if verification_reason:
             target["verification_reason"] = _clean_text(
                 verification_reason, 500)
+        target.setdefault("verification_status", POC_NEEDS_VALIDATION)
         target["ts"] = _now()
         _write_all(rows)
-    return "Finding %s updated." % finding_id
+    return "Finding %s updated. | verification_status: %s" % (
+        finding_id, target.get("verification_status"))
 
 
 def tool_delete_finding(finding_id=""):
@@ -305,6 +409,10 @@ def tool_verify_finding(finding_id="", method="auto"):
         target["verification_reason"] = reason
         target["verification_method"] = verdict.get(
             "method", "deterministic")
+        # lightweight deterministic checks do NOT satisfy the PoC gate:
+        # verification_status stays NEEDS_VALIDATION unless a PoC was
+        # explicitly executed and logged.
+        target.setdefault("verification_status", POC_NEEDS_VALIDATION)
         target["ts"] = _now()
         _write_all(rows)
     label = _verification_label(target["verification"])
@@ -365,6 +473,7 @@ def tool_verify_all_findings(only_unverified=True):
             cur["verification_reason"] = reason
             cur["verification_method"] = verdict.get(
                 "method", "deterministic")
+            cur.setdefault("verification_status", POC_NEEDS_VALIDATION)
             cur["ts"] = _now()
             done.append((fid, title, _verification_label(
                 cur["verification"]), reason))
@@ -407,6 +516,12 @@ def tool_write_report(target="", author="HackerAI Agent",
                 if r.get("status") == "false-positive"
                 or r.get("verification") == "false-positive"]
     rows = [r for r in rows if r not in filtered]
+
+    # Mandatory PoC Verification Protocol (report-level enforcement):
+    # CRITICAL/HIGH labels in the executive summary are only allowed when
+    # a non-destructive PoC was executed and logged. Everything else is
+    # capped at MEDIUM severity for this report.
+    poc_capped = _apply_poc_cap(rows)
     if include_open_only:
         keep = {"open", "confirmed", "validated",
                 "needs-validation", "hypothesis"}
@@ -456,6 +571,13 @@ def tool_write_report(target="", author="HackerAI Agent",
              "([VERIFIED TRUE POSITIVE]); **%d** unverified "
              "([UNVERIFIED / REQUIRES MANUAL AUDIT] - manual audit "
              "recommended)." % (verified_n, unverified_n))
+    if poc_capped:
+        L.append("**PoC Verification Protocol:** %d finding(s) carried "
+                 "CRITICAL/HIGH labels without a logged non-destructive PoC "
+                 "([NEEDS VALIDATION - PENDING POC]); their severity is "
+                 "capped at MEDIUM in this report until a PoC is executed "
+                 "and logged (verification_status=CONFIRMED_POC)."
+                 % len(poc_capped))
     if filtered:
         L.append("**%d** false positive(s) automatically filtered "
                  "([FALSE POSITIVE - FILTERED] - see Section 5)."
@@ -468,15 +590,16 @@ def tool_write_report(target="", author="HackerAI Agent",
     L.append("")
     L.append("## 3. Findings Summary")
     L.append("")
-    L.append("| ID | Severity | Title | Asset | Status | Verification |")
-    L.append("|----|----------|-------|-------|--------|--------------|")
+    L.append("| ID | Severity | Title | Asset | Status | Verification | PoC Status |")
+    L.append("|----|----------|-------|-------|--------|--------------|------------|")
     for r in rows:
-        L.append("| %s | %s | %s | %s | %s | %s |"
+        L.append("| %s | %s | %s | %s | %s | %s | %s |"
                  % (r.get("id"), (r.get("severity") or "?").capitalize(),
                     (r.get("title") or "?")[:80],
                     (r.get("asset") or "?")[:60],
                     r.get("status", "?"),
-                    _verification_label(r.get("verification"))))
+                    _verification_label(r.get("verification")),
+                    _poc_status_label(r.get("verification_status"))))
     L.append("")
     L.append("## 4. Detailed Findings")
     L.append("")
@@ -493,6 +616,8 @@ def tool_write_report(target="", author="HackerAI Agent",
         L.append("| Status | %s |" % r.get("status"))
         L.append("| Verification | %s |"
                  % _verification_label(r.get("verification")))
+        L.append("| PoC Status | %s |"
+                 % _poc_status_label(r.get("verification_status")))
         L.append("| Confidence | %s |" % r.get("confidence"))
         L.append("")
         if r.get("description"):
@@ -743,6 +868,9 @@ def correlate_findings(findings_list="", chain_fmt="ascii", per_asset=False):
             if src and src not in existing["corroborated_by"]:
                 existing["corroborated_by"].append(src)
             existing["duplicate_count"] += 1
+            if _norm_poc_status(_fget(f, ("verification_status",
+                                          "poc_status"))) == POC_CONFIRMED:
+                existing["verification_status"] = POC_CONFIRMED
             if SEV_ORDER[sev] < SEV_ORDER[existing["severity"]]:
                 existing["severity"] = sev
                 existing["risk_vector"] = RISK_VECTORS[sev]
@@ -752,6 +880,9 @@ def correlate_findings(findings_list="", chain_fmt="ascii", per_asset=False):
             "asset": host or "unknown",
             "title": title,
             "severity": sev,
+            "verification_status": _norm_poc_status(
+                _fget(f, ("verification_status", "poc_status")))
+            or POC_NEEDS_VALIDATION,
             "risk_vector": RISK_VECTORS[sev],
             "cvss_base": calc_cvss_score(RISK_VECTORS[sev])["base_score"],
             "port": port,
@@ -1020,7 +1151,16 @@ def generate_markdown_report(target_name="", executive_summary="", findings_json
         if not correlated.get("ok"):
             return "generate_markdown_report: correlation failed: %s" % correlated.get("error")
         findings = correlated["findings"]
-        counts = correlated["by_severity"]
+
+        # Mandatory PoC Verification Protocol (report-level enforcement):
+        # CRITICAL/HIGH labels only reach the executive summary when a
+        # non-destructive PoC was executed and logged; everything else is
+        # capped at MEDIUM severity for this report.
+        poc_capped = _apply_poc_cap(findings)
+        counts = {s: 0 for s in SEVERITIES}
+        for r in findings:
+            counts[r["severity"]] += 1
+        findings.sort(key=lambda r: (SEV_ORDER[r["severity"]], r["asset"]))
 
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         if not executive_summary:
@@ -1048,6 +1188,14 @@ def generate_markdown_report(target_name="", executive_summary="", findings_json
         L.append("")
         L.append(executive_summary)
         L.append("")
+        if poc_capped:
+            L.append("> **PoC Verification Protocol:** %d finding(s) carried "
+                     "CRITICAL/HIGH labels without a logged non-destructive "
+                     "PoC ([NEEDS VALIDATION - PENDING POC]); their severity "
+                     "is capped at MEDIUM in this report until a PoC is "
+                     "executed and logged (verification_status="
+                     "CONFIRMED_POC)." % len(poc_capped))
+            L.append("")
         L.append("## 2. Risk Matrix")
         L.append("")
         L.append("| Severity | Count | Score band (CVSS v3.1) |")
@@ -1086,6 +1234,8 @@ def generate_markdown_report(target_name="", executive_summary="", findings_json
                 if r["cve"]:
                     L.append("| CVE / Refs | %s |" % r["cve"])
                 L.append("| Source scanner(s) | %s |" % ", ".join(r["corroborated_by"]) or "n/a")
+                L.append("| PoC Status | %s |"
+                         % _poc_status_label(r.get("verification_status")))
                 L.append("")
                 if r["evidence"]:
                     L.append("**Proof of Concept / Evidence:**")

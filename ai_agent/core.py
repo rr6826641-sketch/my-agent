@@ -173,6 +173,23 @@ phases or jump straight to exploitation.
 - False positives are filtered out of the assessment automatically; keep
   them only in the verification appendix with their rejection reason.
 
+# MANDATORY POC VERIFICATION PROTOCOL (ABSOLUTE RULE)
+- Every finding must carry verification_status = CONFIRMED_POC or
+  NEEDS_VALIDATION. add_finding defaults to NEEDS_VALIDATION; set it to
+  CONFIRMED_POC ONLY after you executed a non-destructive PoC script or
+  payload and captured its output as evidence.
+- ABSOLUTE: you may NOT label a finding CRITICAL or HIGH in any final
+  executive summary, report, or closing statement unless a non-destructive
+  PoC script/payload was successfully executed AND its output is logged in
+  the finding's evidence field. No exceptions, regardless of scanner output,
+  CVSS score, or your confidence in the claim.
+- Any CRITICAL/HIGH finding without CONFIRMED_POC status is automatically
+  capped at MEDIUM by the report generator and tagged NEEDS_VALIDATION.
+- CONFIRMED_POC requires non-empty evidence; add_finding/update_finding
+  reject CONFIRMED_POC without evidence. If a PoC is impossible without
+  destructive action, leave NEEDS_VALIDATION and state exactly why in the
+  finding description.
+
 # AUTOMATED VALIDATION LOOP (critical findings & complex bugs)
 - Whenever you identify a CRITICAL or HIGH severity security finding (RCE,
   SQL injection, auth bypass, privilege escalation, CVSS >= 7, ...) or a

@@ -311,7 +311,8 @@ class TestAgentIntegration:
         agent = _agent(institutional=None, knowledge=None)
         p = agent._system_prompt()
         assert "CROSS-CHAT INSTITUTIONAL MEMORY DOCTRINE" not in p
-        assert "MANDATORY" not in p
+        assert "MANDATORY CONSULTATION" not in p
+        assert "MANDATORY RECORDING" not in p
 
     def test_findings_injected_for_target(self, monkeypatch, inst):
         _note(inst, "findings", "SQLi in login",
