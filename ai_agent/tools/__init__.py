@@ -4,6 +4,7 @@ Add your own tools by writing a function in any module here and one
 Tool(...) entry below. The LLM discovers them automatically.
 """
 
+import json
 import os
 
 from .base import Tool, execute_tool, truncate
@@ -2239,6 +2240,76 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                   "required": ["query"]},
              lambda query="", top_k=5: _gm_lore_search(query, top_k)),
         ]
+
+    # ---- Multi-Agent Swarm Router -------------------------------------
+    from .terminal import tool_run_terminal
+
+    def _swarm_executor(command):
+        """Bridge the swarm's synchronous command needs onto the agent's
+        terminal tool (bounded output, process registry, timeout)."""
+        return tool_run_terminal(command, timeout=90, max_output=12000)
+
+    def tool_swarm_launch(target, mission="", max_rounds=3):
+        """Run the full Recon->Analyzer->Exploiter swarm pipeline."""
+        try:
+            from ..multi_agent_router import SwarmRouter, snapshot_for_memory
+        except Exception as exc:
+            return "swarm_launch error: import failed: %r" % exc
+        rounds = max(1, min(int(max_rounds or 3), 5))
+        router = SwarmRouter(tool_executor=_swarm_executor,
+                             max_rounds=rounds)
+        try:
+            summary = router.run_mission_sync(target, mission=mission)
+        except Exception as exc:
+            return "swarm_launch error: %r" % exc
+        # Archive outcomes into the episodic memory store when available.
+        archived = 0
+        try:
+            from ..reflection import ReflectionEngine
+            store = ReflectionEngine().episodic
+            for blob in snapshot_for_memory(summary):
+                kind = blob["kind"]
+                if kind == "payload" and store.archive_payload(blob["text"],
+                                                               target=target):
+                    archived += 1
+                elif kind == "lesson" and store.archive_lesson(
+                        blob["text"], target=target):
+                    archived += 1
+        except Exception:
+            pass
+        out = {
+            "target": target, "rounds": len(summary["rounds"]),
+            "surface": summary["surface"],
+            "hypotheses": len(summary["hypotheses"]),
+            "candidates": len(summary["candidates"]),
+            "pocs": summary["pocs"],
+            "feedback": summary["feedback"],
+            "memory_archived": archived,
+            "bus": summary["bus"],
+        }
+        return json.dumps(out, ensure_ascii=False, indent=2,
+                          default=str)
+
+    REGISTRY.append(Tool(
+        "swarm_launch",
+        "Launch the Multi-Agent Swarm Router against a target: three "
+        "specialists (ReconAgent, AnalyzerAgent, ExploitationAgent) run a "
+        "bounded recon -> analyze -> exploit pipeline over an async message "
+        "bus. Recon maps the attack surface, the Analyzer generates "
+        "hypotheses and ranked candidate exploits, the Exploiter executes "
+        "validation payloads, classifies feedback and records PoCs. Failed "
+        "rounds refine candidate priorities. Confirmed payloads and failure "
+        "lessons are archived to episodic memory. Returns a JSON summary.",
+        {"type": "object",
+         "properties": {
+             "target": _str_prop("target host / URL / network to assess"),
+             "mission": _str_prop(
+                 "free-form mission note (optional)", ""),
+             "max_rounds": {"type": "integer", "default": 3,
+                            "description": "pipeline rounds, capped at 5"}},
+         "required": ["target"]},
+        lambda target="", mission="", max_rounds=3:
+            tool_swarm_launch(target or "", mission or "", max_rounds)))
 
     REGISTRY.append(Tool("current_time",
         "Current date and time - local + UTC ISO-8601, unix epoch, weekday,"
