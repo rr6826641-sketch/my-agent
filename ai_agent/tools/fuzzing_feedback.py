@@ -46,6 +46,8 @@ import urllib.parse
 
 import requests
 
+from .payload_memory import PAYLOAD_MEMORY
+
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
 
@@ -294,7 +296,7 @@ def _classify_response(resp, elapsed, baseline_time, baseline_status):
 
 def adaptive_fuzz(target_url, initial_payload_set="", max_rounds=6,
                   method="GET", param="q", request_timeout=8,
-                  granular=True):
+                  granular=True, use_memory=True):
     """Closed-loop adaptive fuzzer. Returns JSON string with:
     baseline info, round-by-round log (what response was parsed, which
     mutation family was applied, which payloads were kept), adapted payload
@@ -332,6 +334,20 @@ def adaptive_fuzz(target_url, initial_payload_set="", max_rounds=6,
     if not payloads:
         payloads = list(DEFAULT_INITIAL)
     payloads = [str(p) for p in payloads][:50]
+
+    # ---- cross-session payload memory: seed + record results
+    host_key = urllib.parse.urlsplit(target_url).netloc or target_url
+    seeded_payloads = []
+    memory_recorded = 0
+    if use_memory:
+        remembered = PAYLOAD_MEMORY.seed(host_key, limit=8)
+        have = set(payloads)
+        for p in remembered:
+            if p not in have:
+                payloads.append(p)
+                have.add(p)
+                seeded_payloads.append(p)
+        payloads = payloads[:50]
 
     session = requests.Session()
     session.headers.update({"User-Agent": UA})
@@ -410,6 +426,14 @@ def adaptive_fuzz(target_url, initial_payload_set="", max_rounds=6,
             sig["payload"] = payload[:200]
             round_log["parsed_signals"].append(sig)
             round_log["payloads_tried"].append(payload[:120])
+            if use_memory:
+                PAYLOAD_MEMORY.record(
+                    host_key, payload, bool(sig.get("anomaly")),
+                    vuln_class=sig.get("anomaly") or "",
+                    db=sig.get("db_engine") or "",
+                    waf=sig.get("waf") or "",
+                    source="adaptive_fuzz")
+                memory_recorded += 1
 
             if sig["db_engine"]:
                 db_engine_detected = sig["db_engine"]
@@ -565,6 +589,14 @@ def adaptive_fuzz(target_url, initial_payload_set="", max_rounds=6,
         "total_requests": total_requests,
         "rounds": rounds,
         "signals_found": len(working_payloads),
+        "memory": {
+            "seeded_from_past_sessions": seeded_payloads,
+            "results_recorded": memory_recorded,
+            "note": ("hit/miss results for every payload were saved to "
+                     "the persistent payload memory - future runs on this "
+                     "host start with the historically best payloads "
+                     "(payload_memory_top to inspect)."),
+        },
         "working_payloads": working_payloads[:20],
         "adapted_payload_set": payloads,
         "note": ("Responses were parsed (status, timing, headers, error "

@@ -189,6 +189,13 @@ phases or jump straight to exploitation.
   reject CONFIRMED_POC without evidence. If a PoC is impossible without
   destructive action, leave NEEDS_VALIDATION and state exactly why in the
   finding description.
+- PoC WORKFLOW: call gen_poc(finding_type, asset, param) to get a
+  ready-to-run NON-DESTRUCTIVE PoC (curl + python script + expected
+  proof) for sqli, sqli_time, xss_reflect, ssrf, cmdi, lfi,
+  open_redirect, ssti, xxe, idor, auth_bypass, cors and
+  header_injection. Execute it via the terminal, log the FULL output as
+  evidence, then set CONFIRMED_POC. Never hand-craft a destructive
+  payload when gen_poc covers the class.
 
 # AUTOMATED VALIDATION LOOP (critical findings & complex bugs)
 - Whenever you identify a CRITICAL or HIGH severity security finding (RCE,

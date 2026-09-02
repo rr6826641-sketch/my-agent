@@ -62,6 +62,11 @@ from .hypothesis_engine import (
 )
 from .cve_variant import hunt_cve_variants
 from .fuzzing_feedback import adaptive_fuzz
+from .poc_templates import generate_poc, poc_classes
+from .payload_memory import (PAYLOAD_MEMORY,
+                             tool_payload_memory_top,
+                             tool_payload_memory_record,
+                             tool_payload_memory_reset)
 from .cloud_sec import (
     aws_s3_enum,
     cloud_misconfig_scan,
@@ -867,15 +872,99 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                                  "description": "per-payload adaptation mode "
                                  "(default true): each response mutates only "
                                  "the payload that produced it; set false for "
-                                 "legacy round-wide adaptation", "default": True}},
+                                 "legacy round-wide adaptation", "default": True},
+                             "use_memory": {"type": "boolean",
+                                 "description": "cross-session payload memory "
+                                 "(default true): seed the run with historically "
+                                 "best payloads for this host and record every "
+                                 "hit/miss back into payload_memory", "default": True}},
               "required": ["target_url"]},
              lambda target_url="", initial_payload_set="", max_rounds=6,
                     method="GET", param="q", request_timeout=8,
-                    granular=True:
+                    granular=True, use_memory=True:
                  adaptive_fuzz(target_url or "", initial_payload_set or "",
                                int(max_rounds or 6), method or "GET",
                                param or "q", int(request_timeout or 8),
-                               bool(granular))),
+                               bool(granular), bool(use_memory))),
+        # ---- cross-session payload effectiveness memory ----
+        Tool("payload_memory_top",
+             "Query the persistent cross-session payload effectiveness "
+             "memory: which payloads historically produced signals (SQL "
+             "errors, WAF blocks, reflections, timing deltas) on a host, "
+             "ranked by smoothed hit-rate x recency decay. Call BEFORE a "
+             "fuzz run to pick starting payloads, and after a run to see "
+             "what was learned.",
+             {"type": "object",
+              "properties": {
+                  "host": _str_prop(
+                      "host/IP/URL filter (netloc is auto-extracted)", ""),
+                  "vuln_class": _str_prop(
+                      "signal filter: sql_error | waf_block | reflection | "
+                      "stack_trace | time_delay | server_error", ""),
+                  "top_k": {"type": "integer", "default": 10}},
+              "required": []},
+             lambda host="", vuln_class="", top_k=10:
+                 tool_payload_memory_top(host or "", vuln_class or "",
+                                         int(top_k or 10))),
+        Tool("payload_memory_record",
+             "Manually record a payload observation into the persistent "
+             "effectiveness memory (adaptive_fuzz records automatically). "
+             "Use when a manual test or another tool found a payload that "
+             "worked/failed on a host, so every future session benefits.",
+             {"type": "object",
+              "properties": {
+                  "host": _str_prop("target host/IP/URL"),
+                  "payload": _str_prop("the exact payload string"),
+                  "signal": _str_prop(
+                      "anomaly name when it hit (sql_error, waf_block, "
+                      "reflection, stack_trace, time_delay, server_error) "
+                      "or 'none' for a miss", ""),
+                  "vuln_class": _str_prop("optional vulnerability class "
+                      "label", ""),
+                  "db": _str_prop("detected DB engine (optional)", ""),
+                  "waf": _str_prop("detected WAF (optional)", "")},
+              "required": ["host", "payload"]},
+             lambda host="", payload="", signal="", vuln_class="",
+                    db="", waf="":
+                 tool_payload_memory_record(host or "", payload or "",
+                                            signal or "", vuln_class or "",
+                                            db or "", waf or "")),
+        Tool("payload_memory_reset",
+             "Forget remembered payloads for one host (host=...) or reset "
+             "the whole payload memory when host is omitted.",
+             {"type": "object",
+              "properties": {"host": _str_prop(
+                  "host to forget (omit to reset everything)", "")},
+              "required": []},
+             lambda host="": tool_payload_memory_reset(host or "")),
+
+        # ---- auto-PoC template generator ----
+        Tool("gen_poc",
+             "Generate a READY-TO-RUN, NON-DESTRUCTIVE PoC (curl one-liner "
+             "+ python script + expected-proof description) for a finding "
+             "class: sqli, sqli_time, xss_reflect, ssrf, cmdi, lfi, "
+             "open_redirect, ssti, xxe, idor, auth_bypass, cors, "
+             "header_injection. Run the script, log its FULL output via "
+             "add_finding(evidence=...), then set verification_status="
+             "CONFIRMED_POC - this is the ONLY path to CRITICAL/HIGH "
+             "severity under the PoC Verification Protocol. "
+             "gen_poc(finding_type='classes') lists all templates.",
+             {"type": "object",
+              "properties": {
+                  "finding_type": _str_prop(
+                      "vulnerability class (e.g. sqli, xss_reflect, ssrf, "
+                      "idor, ssti, xxe, cors, open_redirect, cmdi, lfi, "
+                      "auth_bypass, header_injection) or 'classes'"),
+                  "asset": _str_prop("affected URL/endpoint"),
+                  "param": _str_prop("parameter to inject into (default 'q')",
+                                     "q"),
+                  "extra": _str_prop("optional operator notes embedded in "
+                                     "the PoC output", "")},
+              "required": ["finding_type", "asset"]},
+             lambda finding_type="", asset="", param="q", extra="":
+                 generate_poc(finding_type or "", asset or "",
+                              param or "q", extra or "")),
+
         Tool("remember", "Save a fact/note to persistent memory.",
              {"type": "object",
               "properties": {"key": _str_prop("short key, e.g. 'target_ip'"),
