@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import ai_agent.core as core
 from ai_agent.core import Agent, _detect_kb_target
-from ai_agent.memory import INSTITUTIONAL_CATEGORIES, InstitutionalMemory
+from ai_agent.memory_store import INSTITUTIONAL_CATEGORIES, InstitutionalMemory
 from ai_agent.tools import create_tools
 
 

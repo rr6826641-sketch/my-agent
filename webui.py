@@ -30,7 +30,7 @@ from ai_agent.config import (PROJECT_DIR, load_config, config_status, save_env_k
 from ai_agent.core import Agent, RunCancelled
 from ai_agent.llm import MockClient, OpenAIClient
 from ai_agent.artifacts import ArtifactManager
-from ai_agent.memory import (
+from ai_agent.memory_store import (
     GlobalKnowledge,
     InstitutionalMemory,
     MemoryStore,

@@ -175,7 +175,7 @@ def _test_webtests():
 
 
 def _test_rag(tmp):
-    from ai_agent.memory import MemoryStore
+    from ai_agent.memory_store import MemoryStore
     docdir = os.path.join(tmp, "docs")
     os.makedirs(docdir)
     with open(os.path.join(docdir, "sql_cheatsheet.md"), "w",
@@ -238,7 +238,7 @@ def _test_spawn_cap():
 def _test_mock_agent():
     from ai_agent.core import Agent
     from ai_agent.llm import MockClient
-    from ai_agent.memory import MemoryStore
+    from ai_agent.memory_store import MemoryStore
     import tempfile as tf
     with tf.TemporaryDirectory() as td:
         mem = MemoryStore(os.path.join(td, "mem.json"))

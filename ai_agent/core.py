@@ -15,6 +15,7 @@ from .orchestration import (
     OrchestrationManager,
 )
 from .planner import GOAPPlanner
+from .reflection import ReflectionEngine
 from .tools import create_tools, execute_tool
 from .tools.workspace import WorkspaceIndex
 
@@ -2016,6 +2017,17 @@ class Agent:
         # (WAF, closed port, failed auth) trigger automatic
         # back-tracking to alternative branches.
         self._goap = GOAPPlanner()
+        # Dual-Layer Memory & Reflection Engine: after every tool
+        # execution (and especially after failed exploitation attempts)
+        # the reflection loop evaluates expected-vs-actual output, roots
+        # the failure (WAF / auth / network / syntax) and derives the
+        # next payload mutation. Lessons persist to
+        # memory/reflection_history.json and successful payloads /
+        # bypasses / methodologies are archived into the episodic
+        # vector store (memory/episodic_vectors.json) for cross-session
+        # recall.
+        self._reflection = ReflectionEngine()
+        self._last_user_input = ""
 
     # ------------------------------------------------------------ prompt
 
@@ -2232,6 +2244,71 @@ class Agent:
             "state": self._goap.snapshot(),
         }
 
+    # ------------------------------------------------- dual-layer memory
+
+    def _reflection_step(self, name, args, result):
+        """Self-Reflection loop after one tool execution.
+
+        Evaluates expected-vs-actual output, roots the failure (WAF,
+        auth, network, syntax, ...) and derives the next payload
+        mutation. Failures persist a lesson to
+        memory/reflection_history.json and the episodic vector store;
+        successful exploitation evidence is archived for cross-session
+        recall. On failure the [REFLECTION] block is injected into the
+        conversation so the next LLM iteration applies the mutation
+        instead of repeating the attempt. Returns an event or None."""
+        try:
+            rec = self._reflection.reflect(
+                name, str(args or ""), str(result or ""),
+                target=self._kb_target or "")
+        except Exception as exc:
+            logger.warning("reflection failed: %s", exc)
+            return None
+        if rec.get("outcome") != "failure":
+            return {"type": "reflection",
+                    "outcome": rec.get("outcome"),
+                    "tool": name}
+        block = self._reflection.render_reflection_block(rec)
+        if not block:
+            return None
+        self.messages.append({"role": "system", "content": block})
+        return {"type": "reflection", "outcome": "failure",
+                "tool": name, "failure_root": rec.get("failure_root"),
+                "why": rec.get("why_failed"),
+                "next_mutation": rec.get("next_mutation"),
+                "block": block}
+
+    def _episodic_recall_block(self, user_input):
+        """Cross-session recall: relevant past payloads / bypasses /
+        methodologies / failed-attempt lessons for the current target,
+        rendered as a system block (or '' when nothing applies)."""
+        text = (user_input or "")[:400]
+        if not text:
+            return ""
+        try:
+            hits = self._reflection.episodic.query(text, top_k=6)
+            lessons = self._reflection.lessons_for(args=text, limit=4)
+        except Exception as exc:
+            logger.warning("episodic recall failed: %s", exc)
+            return ""
+        seen, lines = set(), []
+        for h in hits:
+            key = (h.get("text") or "")[:160]
+            if key and key not in seen:
+                seen.add(key)
+                meta = h.get("meta") or {}
+                lines.append("- [%s%s] %s" % (
+                    meta.get("kind", "note"),
+                    ("/" + meta.get("outcome")) if meta.get("outcome")
+                    else "", key))
+        if lessons:
+            lines.append(self._reflection.render_lesson_block(args=text))
+        if not lines:
+            return ""
+        return ("[EPISODIC MEMORY] Relevant experience from past "
+                "sessions (reuse what worked, avoid what failed):\n"
+                + "\n".join(l for l in lines if l))
+
     def _npc_prompt(self):
         memory_block = ""
         if self.memory is not None:
@@ -2405,6 +2482,7 @@ class Agent:
         if not user_input:
             yield {"type": "error", "content": "(empty input)"}
             return
+        self._last_user_input = user_input
         self.messages.append({"role": "user", "content": user_input})
         self._maybe_trim()
         yield {"type": "start", "content": user_input}
@@ -2434,6 +2512,15 @@ class Agent:
                                       "content": goap_block})
                 yield {"type": "goap_plan", "block": goap_block,
                        "state": self._goap.snapshot()}
+            # Cross-session episodic recall: surface archived payloads,
+            # bypass techniques, methodologies and failed-attempt
+            # lessons relevant to this instruction BEFORE the first
+            # tool runs.
+            recall_block = self._episodic_recall_block(user_input)
+            if recall_block:
+                self.messages.append({"role": "system",
+                                      "content": recall_block})
+                yield {"type": "episodic_recall", "block": recall_block}
         final = ""
         tool_schemas = [t.schema() for t in self._tool_list]
 
@@ -2594,6 +2681,16 @@ class Agent:
                 gev = self._goap_step(name, args, result)
                 if gev:
                     yield gev
+                # Dual-Layer Memory & Reflection Engine: run the
+                # self-reflection loop on EVERY tool result. Failures
+                # (expected vs actual, root cause, next mutation) are
+                # persisted to memory/reflection_history.json and the
+                # [REFLECTION] block steers the next iteration away
+                # from repeating the failed attempt; successes are
+                # archived into the episodic vector store.
+                rev = self._reflection_step(name, args, result)
+                if rev:
+                    yield rev
             self._maybe_trim()
 
         self._task_board.close_all()

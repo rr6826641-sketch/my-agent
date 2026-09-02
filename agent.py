@@ -14,7 +14,7 @@ import sys
 from ai_agent.config import PROJECT_DIR, load_config
 from ai_agent.core import Agent
 from ai_agent.llm import MockClient, OpenAIClient
-from ai_agent.memory import InstitutionalMemory, MemoryStore
+from ai_agent.memory_store import InstitutionalMemory, MemoryStore
 
 BANNER = """
 ============================================================

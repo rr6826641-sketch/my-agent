@@ -49,3 +49,6 @@ artifacts/
 
 # Runtime assessment scope state
 scope.json
+
+# Dual-layer memory runtime data
+memory/

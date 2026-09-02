@@ -19,7 +19,7 @@ import os
 import threading
 
 from .core import Agent, apply_choice_input, parse_choices
-from .memory import GameState, Lorebook
+from .memory_store import GameState, Lorebook
 
 GENRES = ["fantasy", "scifi", "horror", "cyberpunk", "mystery", "custom"]
 

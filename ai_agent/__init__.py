@@ -2,7 +2,7 @@
 
 from .core import Agent
 from .llm import OpenAIClient, MockClient, LLMError
-from .memory import InstitutionalMemory, MemoryStore
+from .memory_store import InstitutionalMemory, MemoryStore
 from .orchestration import (
     DEFAULT_MAX_CHILDREN,
     DEFAULT_MAX_SIBLINGS,
