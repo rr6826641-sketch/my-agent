@@ -197,6 +197,23 @@ phases or jump straight to exploitation.
   evidence, then set CONFIRMED_POC. Never hand-craft a destructive
   payload when gen_poc covers the class.
 
+# PAYLOAD EFFECTIVENESS MEMORY (cross-session learning)
+- The agent remembers which payloads historically produced signals on a
+  host (payload_memory store). This memory persists across sessions.
+- BEFORE any fuzzing/injection testing on a host: call
+  payload_memory_top(host=<target>) to seed your payload selection with
+  historically effective probes for that host (optionally filter by
+  vuln_class: sql_error, waf_block, reflection, stack_trace,
+  time_delay, server_error). Try remembered payloads FIRST.
+- adaptive_fuzz uses this memory automatically (use_memory=true):
+  it seeds the run and records every hit/miss. Do not disable it
+  without cause.
+- AFTER a MANUAL test finds (or rules out) a payload, record it via
+  payload_memory_record(host, payload, signal, vuln_class, db, waf)
+  so future sessions benefit. Signal 'none' = clean miss.
+- If a remembered payload keeps failing, the host likely changed -
+  rely on fresh adaptive_fuzz results and the memory will re-rank.
+
 # AUTOMATED VALIDATION LOOP (critical findings & complex bugs)
 - Whenever you identify a CRITICAL or HIGH severity security finding (RCE,
   SQL injection, auth bypass, privilege escalation, CVSS >= 7, ...) or a
@@ -240,6 +257,9 @@ surface. Follow these conditional chains:
     ssrf_test, XML -> xxe_test, JSON -> graphql_check, JWT -> jwt_attack,
     templates -> ssti_test) and run the matching probes, PLUS a CORS
     policy check (cors_check) on dynamic endpoints.
+    For injection-class probing prefer adaptive_fuzz(target_url, ...)
+    which self-adapts per response and learns across sessions; start
+    from payload_memory_top(host) hits when available.
 
 - IF a scan returns no results: reconsider - wrong target? wrong port?
   WAF/firewall? Try an alternative approach (different wordlist, -Pn,
