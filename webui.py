@@ -46,6 +46,9 @@ CHATS_PATH = os.path.join(PROJECT_DIR, "chats.json")
 ARTIFACTS_DIR = os.path.join(PROJECT_DIR, "artifacts")
 artifacts = ArtifactManager(ARTIFACTS_DIR)
 
+# persistent cross-conversation institutional notes (SQLite, gitignored)
+INSTITUTIONAL_NOTES_PATH = os.path.join(PROJECT_DIR, "institutional_notes.db")
+
 # serializes all reads/writes of chats.json
 _chat_lock = threading.Lock()
 
@@ -337,8 +340,7 @@ def _build_agent(cfg):
     # past findings about a target are auto-injected into the system prompt
     # when a new chat mentions the same domain/IP.
     knowledge = GlobalKnowledge(os.path.join(PROJECT_DIR, "knowledge.db"))
-    institutional = InstitutionalMemory(
-        os.path.join(PROJECT_DIR, "institutional_notes.db"))
+    institutional = InstitutionalMemory(INSTITUTIONAL_NOTES_PATH)
     llm = _build_llm(cfg)
     agent = Agent(llm, memory=memory, knowledge=knowledge,
                   institutional=institutional,
