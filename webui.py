@@ -285,6 +285,7 @@ def _build_llm(cfg):
             model=model,
             fallback_models=cfg.get("fallback_models"),
             uncensored=uncensored,
+            refusal_retries=cfg.get("refusal_retries"),
         )
     client.persona_block = persona_block
     return client

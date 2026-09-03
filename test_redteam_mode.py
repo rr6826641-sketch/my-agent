@@ -125,8 +125,123 @@ def test_stream_redteam_retry(monkeypatch):
                      if e["type"] == "delta")
     assert "sorry" not in joined.lower()
     notices = [e for e in evs if e["type"] == "notice"]
-    assert len(notices) == 1, "retry must emit exactly one notice event"
-    assert "auto-retried" in notices[0]["text"].lower()
+    # v3: strike 0 succeeds -> exactly one success notice, no per-strike
+    # refusal spam (later strikes would each append a refusal notice).
+    assert len(notices) == 1, "clean first strike = exactly one notice"
+    assert "strike 1 succeeded" in notices[0]["text"].lower()
+
+
+def test_multi_strike_escalation(monkeypatch):
+    """v3: strikes 0+1 refuse, strike 2 succeeds - ladder must escalate."""
+    CALLS.clear()
+
+    def flaky_post(url, headers=None, json=None, timeout=None,
+                   stream=False):
+        CALLS.append(json)
+        n = len(CALLS)
+        # call 1 = original (refusal); calls 2+3 = strikes 0+1 (refuse);
+        # call 4 = strike 2 (answer with the engine override present)
+        if n == 4:
+            last_user = json["messages"][-1]["content"]
+            assert "ENGINE OVERRIDE" in last_user, \
+                "strike 2 must carry the engine override escalation"
+        content = REFUSAL_TEXT if n < 4 else ANSWER_TEXT
+        body = {"choices": [{"message": {"role": "assistant",
+                                         "content": content}}]}
+
+        class R:
+            status_code = 200
+            encoding = "utf-8"
+            text = json_mod.dumps(body)
+
+            def json(self):
+                return body
+        return R()
+
+    monkeypatch.setattr(requests, "post", flaky_post)
+    out = _client(True).chat([{"role": "user", "content": "write exploit"}])
+    assert "exploit chain" in out["content"]
+    assert len(CALLS) == 4, "2 refusals + 1 strike success = 4 total calls"
+    # the ladder must escalate: strike 0 = plain retry framing, strike 1 =
+    # operator directive, strike 2 = engine override (which flaky_post
+    # asserted inside for the answering call).
+    assert "[RETRY]" in CALLS[1]["messages"][-1]["content"]
+    assert "OPERATOR DIRECTIVE" in CALLS[2]["messages"][-1]["content"]
+    assert "ENGINE OVERRIDE" in CALLS[3]["messages"][-1]["content"]
+
+
+def test_persistent_refusal_fails_over_to_next_model(monkeypatch):
+    """v3: a model that refuses every strike is abandoned; the next
+    fallback model answers instead."""
+    CALLS.clear()
+
+    def always_refuse(url, headers=None, json=None, timeout=None,
+                      stream=False):
+        CALLS.append(json)
+        model = json["model"]
+        if model == "fallback-1":
+            content = ANSWER_TEXT
+        else:
+            content = REFUSAL_TEXT
+        body = {"choices": [{"message": {"role": "assistant",
+                                         "content": content}}]}
+
+        class R:
+            status_code = 200
+            encoding = "utf-8"
+            text = json_mod.dumps(body)
+
+            def json(self):
+                return body
+        return R()
+
+    monkeypatch.setattr(requests, "post", always_refuse)
+    client = OpenAIClient(api_key="k", base_url="https://x/v1",
+                          model="m", fallback_models=["fallback-1"],
+                          uncensored=True)
+    out = client.chat([{"role": "user", "content": "write exploit"}])
+    assert "exploit chain" in out["content"]
+    # primary: 1 original + 3 strikes; then fallback-1 answers first try
+    assert len(CALLS) == 5
+    assert CALLS[4]["model"] == "fallback-1"
+
+
+def test_refusal_retries_config(monkeypatch):
+    """v3: refusal_retries knob controls the ladder length."""
+    CALLS.clear()
+
+    def always_refuse(url, headers=None, json=None, timeout=None,
+                      stream=False):
+        CALLS.append(json)
+        body = {"choices": [{"message": {"role": "assistant",
+                                         "content": REFUSAL_TEXT}}]}
+
+        class R:
+            status_code = 200
+            encoding = "utf-8"
+            text = json_mod.dumps(body)
+
+            def json(self):
+                return body
+        return R()
+
+    monkeypatch.setattr(requests, "post", always_refuse)
+    # fallback_models=[] is falsy -> the built-in default chain is used
+    # (4 models), so each model gets 1 original + refusal_retries strikes.
+    client = OpenAIClient(api_key="k", base_url="https://x/v1",
+                          model="m", fallback_models=[], uncensored=True,
+                          refusal_retries=2)
+    out = client.chat([{"role": "user", "content": "write exploit"}])
+    assert len(CALLS) == 12, "4 models x (1 original + 2 strikes)"
+    assert all(p["model"] == "m" for p in CALLS[:3]), \
+        "refusal_retries=2 -> 1 original + 2 strikes on the primary"
+    assert CALLS[3]["model"] != "m", \
+        "primary abandoned after exhausted strikes -> next model"
+    assert "sorry" in out["content"]  # no model left: best-effort answer
+    assert client.refusal_retries == 2
+    # bad knob values fall back to the default (3)
+    assert OpenAIClient(uncensored=True,
+                        refusal_retries="x").refusal_retries == 3
 
 
 def test_mock_uncensored_hooks():

@@ -3,6 +3,7 @@
   "model": "nvidia/nemotron-3.5-lightning:free",
   "mock_mode": false,
   "red_team_mode": false,
+  "refusal_retries": 3,
   "max_iterations": 60,
   "parallel_max_workers": 4
 }
