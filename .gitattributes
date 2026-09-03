@@ -1,0 +1,2 @@
+# Force LF for shell scripts so Docker builds work from Windows checkouts
+*.sh text eol=lf

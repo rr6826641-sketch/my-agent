@@ -1,5 +1,6 @@
 requests>=2.31
 python-dotenv>=1.0
+Flask>=3.0  # webui.py (Web UI server)
 ddgs>=9.0  # web search (search_web tool); falls back to lite.duckduckgo.com scraper
 # Real ConPTY backend for start_session(pty=True) / pty_* tools on Windows.
 # If pywinpty wheels are unavailable for your Python, install manually:

@@ -71,6 +71,21 @@ Web UI features:
 - **Settings** — base URL/model/mock mode config.json mein save hote hain; **API key sirf `.env` mein** (config.json kabhi nahi — secret isolation)
 - **System** — OS, IPs, disk info
 
+### Docker se chalao (server / VPS)
+
+```bash
+# Pehle runtime files banao, phir .env mein API key daalo:
+cp config.example.json config.json
+touch chats.json memory.json findings.jsonl tasks.json nvd_cache.json personas_custom.txt
+mkdir -p rpg artifacts reports data memory
+cp .env.example .env   # .env edit karke AGENT_API_KEY daalo
+
+docker compose up -d --build
+# Browser: http://localhost:8080
+```
+
+Poori detail (manual docker run, persistence, security notes): **[deploy.md](deploy.md)**
+
 ### Mock mode (test ke liye — koi API key nahi chahiye)
 
 Mock mode mein ye command language samajh aati hai:

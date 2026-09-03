@@ -1,0 +1,41 @@
+# Git / docs
+.git
+.gitignore
+.gitattributes
+*.md
+
+# Secrets & local config (injected at runtime via env_file / bind mounts)
+.env
+config.json
+
+# Runtime state (bind-mounted at runtime, never baked into the image)
+chats.json
+memory.json
+findings.jsonl
+tasks.json
+nvd_cache.json
+personas_custom.txt
+knowledge.db
+institutional_notes.db
+rpg/
+artifacts/
+reports/
+data/
+memory/
+
+# Dev & test artifacts
+__pycache__/
+*.pyc
+.pytest_cache/
+conftest.py
+test_*.py
+poc_*.py
+e2e_web_research_test.py
+webui.log
+webui_test.log
+webui.pid
+
+# Local tooling / big local caches
+api_models.json
+scope.json
+start_ui.bat

@@ -1,0 +1,28 @@
+services:
+  my-agent:
+    build: .
+    image: my-agent:latest
+    container_name: my-agent
+    ports:
+      - "8080:8080"          # host:container; override with "${PORT:-8080}:8080" if needed
+    env_file:
+      - path: .env           # AGENT_API_KEY / AGENT_BASE_URL / AGENT_MODEL
+        required: false      # missing .env -> mock mode
+    environment:
+      - PORT=8080
+    volumes:
+      # Runtime state files (create them first: see deploy.md / README quick start)
+      - ./config.json:/app/config.json
+      - ./chats.json:/app/chats.json
+      - ./memory.json:/app/memory.json
+      - ./findings.jsonl:/app/findings.jsonl
+      - ./tasks.json:/app/tasks.json
+      - ./nvd_cache.json:/app/nvd_cache.json
+      - ./personas_custom.txt:/app/personas_custom.txt
+      # Runtime directories
+      - ./rpg:/app/rpg
+      - ./artifacts:/app/artifacts
+      - ./reports:/app/reports
+      - ./data:/app/data
+      - ./memory:/app/memory
+    restart: unless-stopped
