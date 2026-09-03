@@ -6,6 +6,7 @@ config.json
 
 # Runtime data
 memory.json
+.restart_required
 findings.jsonl
 nvd_cache.json
 cve_nodes.json

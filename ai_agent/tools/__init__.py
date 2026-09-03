@@ -94,6 +94,16 @@ from .pentest import (
     tool_jwt_decode,
 )
 from .tasks import tool_manage_tasks
+from .self_upgrade import (
+    tool_check_update, tool_apply_update,
+)
+from ..learning import tool_learn_lesson
+from ..continuity import (
+    tool_save_progress, tool_mission_status, tool_finish_mission,
+)
+from ..rules_engine import (
+    tool_rules_add, tool_rules_list, tool_rules_remove, tool_rules_reset,
+)
 
 from .extra import (
     tool_http_methods, tool_cors_check, tool_waf_detect,
@@ -2433,6 +2443,132 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                 kind or "", identifier or "", tech or "", level or "",
                 evidence or "", creds or "", target or "", detail or "",
                 host_b or "", relation or "connected")))
+
+    # ---- self-maintenance: version check + self-upgrade (F1) ----
+    REGISTRY.append(Tool(
+        "check_update",
+        "Check whether a newer version of the agent itself exists in its "
+        "GitHub repo. Runs git fetch against origin and reports branch, "
+        "local HEAD, remote, and how many commits the local repo is behind "
+        "(update available?) or ahead. Safe read-only operation.",
+        {"type": "object", "properties": {}, "required": []},
+        lambda: tool_check_update()))
+    REGISTRY.append(Tool(
+        "apply_update",
+        "Self-upgrade the agent: pull the latest code from its own GitHub "
+        "repo (origin, ff-only), then run safety gates so a bad update can "
+        "never break the agent - (1) all ai_agent modules must compile, "
+        "(2) optional pytest suite (run_tests=quick|full|none) must pass. "
+        "If any gate fails the repo is automatically rolled back to the "
+        "previous HEAD. A clean working tree is required unless force=true. "
+        "On success a .restart_required marker is written so a running web "
+        "UI knows it should be restarted to load the new code.",
+        {"type": "object",
+         "properties": {
+             "run_tests": _str_prop(
+                 "test gate level: quick (6 regression files) | full | none",
+                 "quick"),
+             "force": {"type": "boolean",
+                        "description": "allow pull even with local edits",
+                        "default": False}},
+         "required": []},
+        lambda run_tests="quick", force=False:
+            tool_apply_update(run_tests=run_tests or "quick",
+                              force=bool(force))))
+
+    # ---- self-learning / mission continuity / self-managed rules
+    #      (F2/F3/F4) ----
+    REGISTRY.append(Tool(
+        "learn_lesson",
+        "Archive a durable lesson into long-term memory so it is "
+        "re-injected into future conversations. Call this when the user "
+        "teaches a standing preference or you discover something worth "
+        "remembering across sessions (e.g. 'verify every finding before "
+        "reporting it', 'this target blocks ICMP').",
+        {"type": "object",
+         "properties": {
+             "text": _str_prop("the lesson text to remember forever", ""),
+             "tags": _str_prop("optional comma-separated tags", "")},
+         "required": ["text"]},
+        lambda text="", tags="":
+            tool_learn_lesson(text=text or "", tags=tags or "")))
+    REGISTRY.append(Tool(
+        "save_progress",
+        "Manually checkpoint the current long-running task (objective + "
+        "what has been done + next steps). If the run later exhausts its "
+        "iteration budget or is stopped, the operator can say 'continue' "
+        "and the agent resumes exactly from this checkpoint.",
+        {"type": "object",
+         "properties": {
+             "objective": _str_prop("short objective of the task", ""),
+             "progress": _str_prop("what has been accomplished so far", ""),
+             "next_steps": _str_prop("what remains to be done", "")},
+         "required": ["objective"]},
+        lambda objective="", progress="", next_steps="":
+            tool_save_progress(objective=objective or "",
+                               progress=progress or "",
+                               next_steps=next_steps or "")))
+    REGISTRY.append(Tool(
+        "mission_status",
+        "Show whether a paused/long-running mission checkpoint exists and "
+        "what it contains (objective, progress summary, resume hint).",
+        {"type": "object", "properties": {}, "required": []},
+        lambda: tool_mission_status()))
+    REGISTRY.append(Tool(
+        "finish_mission",
+        "Mark the currently paused mission as finished and clear its "
+        "checkpoint. Use when the task has been completed or abandoned on "
+        "purpose.",
+        {"type": "object", "properties": {}, "required": []},
+        lambda: tool_finish_mission()))
+    REGISTRY.append(Tool(
+        "rules_add",
+        "Add a self-managed runtime rule the agent must follow from now "
+        "on. Sections: constraint (self-imposed limits), boundary (what to "
+        "refuse), procedure (standing methodology), preference (operator "
+        "likes), uncensored (self-authorisation for red-team mode), other.",
+        {"type": "object",
+         "properties": {
+             "text": _str_prop("rule text (1-600 chars)", ""),
+             "section": _str_prop(
+                 "rule section: constraint | boundary | procedure | "
+                 "preference | uncensored | other", "constraint"),
+             "enabled": _str_prop("true|false", "true")},
+         "required": ["text"]},
+        lambda text="", section="constraint", enabled="true":
+            tool_rules_add(text=text or "", section=section or "constraint",
+                           enabled=enabled or "true")))
+    REGISTRY.append(Tool(
+        "rules_list",
+        "List the current self-managed rules (enabled ones). Optional "
+        "section filter: all | constraint | boundary | procedure | "
+        "preference | uncensored | other.",
+        {"type": "object",
+         "properties": {
+             "section": _str_prop(
+                 "section filter", "all")},
+         "required": []},
+        lambda section="all":
+            tool_rules_list(section=section or "all")))
+    REGISTRY.append(Tool(
+        "rules_remove",
+        "Remove one self-managed rule by its id (see rules_list for ids).",
+        {"type": "object",
+         "properties": {
+             "rule_id": _str_prop("rule id to delete", "")},
+         "required": ["rule_id"]},
+        lambda rule_id="":
+            tool_rules_remove(rule_id=rule_id or "")))
+    REGISTRY.append(Tool(
+        "rules_reset",
+        "Delete ALL self-managed rules. Keeps a timestamped .bak backup of "
+        "the old store. Requires confirm='yes'.",
+        {"type": "object",
+         "properties": {
+             "confirm": _str_prop("must be 'yes' to wipe all rules", "no")},
+         "required": []},
+        lambda confirm="no":
+            tool_rules_reset(confirm=confirm or "no")))
 
     global _REGISTRY
     _REGISTRY = REGISTRY

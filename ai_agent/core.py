@@ -15,6 +15,11 @@ from .orchestration import (
 )
 from .planner import GOAPPlanner
 from .reflection import ReflectionEngine
+from .continuity import (
+    MissionCheckpointStore, looks_like_continuation,
+)
+from .learning import SessionLearner
+from .rules_engine import RulesEngine
 from .tools import create_tools, execute_tool
 from .tools.workspace import WorkspaceIndex
 
@@ -1952,7 +1957,8 @@ class Agent:
                  spawn_timeout=900, game_master=False, world_state=None,
                  lorebook=None, npc_persona=None, auto_verify=True,
                  knowledge=None, institutional=None,
-                 reasoning_engine=True):
+                 reasoning_engine=True,
+                 learner=None, rules_engine=None, mission_store=None):
         self.llm = llm
         self.memory = memory
         self.name = name
@@ -2036,6 +2042,17 @@ class Agent:
         # vector store (memory/episodic_vectors.json) for cross-session
         # recall.
         self._reflection = ReflectionEngine()
+        # F2/F3/F4 self-managed memory: durable lessons (SessionLearner),
+        # runtime rules (RulesEngine) and mission checkpoints
+        # (MissionCheckpointStore). Callers may inject their own instances
+        # (tests use tmp-dir stores); the defaults read PROJECT_DIR/memory
+        # and never raise on missing/corrupt files.
+        self._learner = learner if learner is not None else SessionLearner()
+        self._rules = (rules_engine if rules_engine is not None
+                       else RulesEngine())
+        self._missions = (mission_store if mission_store is not None
+                          else MissionCheckpointStore())
+        self._mission_resumed = None
         self._last_user_input = ""
 
     # ------------------------------------------------------------ prompt
@@ -2131,6 +2148,16 @@ class Agent:
         persona_block = getattr(self.llm, "persona_block", "") or ""
         if persona_block:
             prompt = "%s\n\n%s" % (prompt, persona_block)
+        # F2/F4: surface durable cross-session lessons and the operator's
+        # self-managed runtime rules (NPC / game-master personas return
+        # earlier, so this only applies to the main reasoning agent and
+        # its sub-agents).
+        learned = self._self_learned_block()
+        if learned:
+            prompt = "%s\n\n%s" % (prompt, learned)
+        rules = self._self_rules_block()
+        if rules:
+            prompt = "%s\n\n%s" % (prompt, rules)
         return prompt
 
     # ------------------------------------------- tactical reasoning engine
@@ -2457,6 +2484,105 @@ class Agent:
             out[r["batch"] - 1].append(r["call"])
         return out
 
+    # ------------------------------------------------- self-managed memory
+    # F2 self-learning / F3 mission continuity / F4 runtime rules: durable
+    # lessons + self-rules enrich the system prompt, a paused mission is
+    # resumed on 'continue', stop/exhaustion auto-checkpoints progress and
+    # a completed resumption is archived as finished.
+
+    def _self_learned_block(self):
+        """[SELF-LEARNED] recall block for the current turn, or ''.
+
+        NPC/game-master personas never see it (they return earlier in
+        _system_prompt); sub-agents do, so operator doctrine propagates.
+        """
+        try:
+            return self._learner.render_block(self._last_user_input, top_k=5)
+        except Exception:
+            return ""
+
+    def _self_rules_block(self):
+        """[SELF-RULES] block of enabled runtime rules, or ''.
+
+        Applies to the main agent and sub-agents so the operator's
+        self-managed rules are followed everywhere.
+        """
+        try:
+            return self._rules.render_block()
+        except Exception:
+            return ""
+
+    def _mission_resume_block(self, user_input):
+        """[MISSION RESUME] block when this message continues a paused
+        mission, or ''. Only the top-level agent resumes missions.
+        """
+        try:
+            if self.npc_persona or self.game_master or self.spawn_depth > 0:
+                return ""
+            if not self._missions.active():
+                return ""
+            if not looks_like_continuation(user_input or ""):
+                return ""
+            cid = self._missions.active_id()
+            block = self._missions.render_resume_block(cid=cid,
+                                                       query=user_input)
+            if not block:
+                return ""
+            self._mission_resumed = cid
+            return block
+        except Exception:
+            return ""
+
+    def _finish_resumed_mission_if_done(self):
+        """Archive a resumed mission once its follow-up turn completes."""
+        cid = getattr(self, "_mission_resumed", None)
+        try:
+            if cid:
+                self._missions.finish(cid)
+        except Exception:
+            pass
+        finally:
+            self._mission_resumed = None
+
+    def _auto_checkpoint(self, user_input):
+        """Auto-save a progress checkpoint on stop / max-iterations.
+
+        Returns a short human note, or None when there is nothing worth
+        resuming (no assistant/tool activity in this turn yet).
+        """
+        try:
+            if self.npc_persona or self.game_master or self.spawn_depth > 0:
+                return None
+            progress, _ = MissionCheckpointStore.progress_from_messages(
+                self.messages)
+            if not progress:
+                return None
+            if not any(line[:2] in ("A|", "T|")
+                       for line in progress.splitlines()):
+                return None
+            objective = ((user_input or "").strip()[:160]
+                         or "[task in progress]")
+            res = self._missions.save(
+                objective, progress=progress, context={"source": "auto"})
+            return ("Auto-checkpoint saved (%s): %s. Send 'continue' to "
+                    "resume from where it stopped."
+                    % (res["id"], res["objective"]))
+        except Exception:
+            return None
+
+    def _learn_from_conversation(self):
+        """Distill standing directives/lessons from this turn (F2).
+
+        Top-level agent only: sub-agent task briefs must not pollute the
+        shared lesson store.
+        """
+        try:
+            if self.npc_persona or self.game_master or self.spawn_depth > 0:
+                return
+            self._learner.learn_from_messages(self.messages)
+        except Exception:
+            pass
+
     def run(self, user_input):
         """Run one user query and return the final answer string."""
         parts = []
@@ -2501,6 +2627,14 @@ class Agent:
         self.messages.append({"role": "user", "content": user_input})
         self._maybe_trim()
         yield {"type": "start", "content": user_input}
+        # F3: if a paused mission checkpoint exists and this message asks
+        # to continue it, inject the resume block so the next LLM turn
+        # picks the work back up instead of starting over.
+        resume_block = self._mission_resume_block(user_input)
+        if resume_block:
+            self.messages.append({"role": "system",
+                                  "content": resume_block})
+            yield {"type": "mission_resume", "block": resume_block}
         # Task Board: silently track this turn as the root task. Any
         # in_progress task left over from a previous (possibly crashed)
         # turn is reaped first so the board never hangs on forgotten
@@ -2541,6 +2675,9 @@ class Agent:
 
         for _ in range(self.max_iterations):
             if stop_event is not None and stop_event.is_set():
+                note = self._auto_checkpoint(user_input)
+                if note:
+                    yield {"type": "mission_checkpoint", "note": note}
                 raise RunCancelled("run cancelled by user")
             prompt = ([{"role": "system", "content": self._system_prompt()}]
                       + list(self.messages))
@@ -2553,6 +2690,11 @@ class Agent:
                         yield {"type": "delta", "content": ev.get("content", "")}
                     elif ev["type"] == "message":
                         reply = ev["message"]
+            except RunCancelled:
+                note = self._auto_checkpoint(user_input)
+                if note:
+                    yield {"type": "mission_checkpoint", "note": note}
+                raise
             except LLMError as exc:
                 yield {"type": "error", "content": "[LLM error] %s" % exc}
                 return
@@ -2604,6 +2746,8 @@ class Agent:
                         content = self._apply_verification_tags(content)
                     if summary:
                         content = "%s\n\n---\n\n%s" % (content, summary)
+                self._learn_from_conversation()
+                self._finish_resumed_mission_if_done()
                 self._task_board.close_all()
                 self._active_task = None
                 bev = self._task_board.event()
@@ -2626,6 +2770,9 @@ class Agent:
             pending = {}
             for batch in batches:
                 if stop_event is not None and stop_event.is_set():
+                    note = self._auto_checkpoint(user_input)
+                    if note:
+                        yield {"type": "mission_checkpoint", "note": note}
                     raise RunCancelled("run cancelled by user")
                 # Confirm every call up front (sequential UI prompts).
                 confirmed = [self._check_tool_confirm(call)
@@ -2708,11 +2855,17 @@ class Agent:
                     yield rev
             self._maybe_trim()
 
+        # F2/F3: distill lessons and auto-checkpoint so a truncated run can
+        # be resumed with 'continue' instead of restarting from scratch.
+        self._learn_from_conversation()
+        note = self._auto_checkpoint(user_input)
         self._task_board.close_all()
         self._active_task = None
         bev = self._task_board.event()
         if bev:
             yield bev
+        if note:
+            yield {"type": "mission_checkpoint", "note": note}
         yield {"type": "final",
                "content": final or "[stopped: max iterations reached]"}
 
