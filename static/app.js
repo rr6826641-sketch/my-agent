@@ -625,15 +625,15 @@ function sendMessage(text) {
   function armWatchdog() {
     clearTimeout(watchdogInactive);
     watchdogInactive = setTimeout(() => {
-      finish("⚠️ connection stalled — no events for 5+ minutes, try again");
-    }, 330000);
+      finish("⚠️ connection stalled — no events for 15+ minutes, try again");
+    }, 930000);
   }
 
   function armWatchdogTotal() {
     clearTimeout(watchdogTotal);
     watchdogTotal = setTimeout(() => {
       finish("⚠️ request timed out — stream released");
-    }, 400000);
+    }, 3600000);
   }
 
   // one decoded SSE "data:" payload -> identical rendering to the old

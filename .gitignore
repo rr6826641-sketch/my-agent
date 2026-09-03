@@ -53,3 +53,4 @@ scope.json
 # Dual-layer memory runtime data
 memory/
 api_models.json
+*.log

@@ -7,6 +7,7 @@ import json
 import os
 import re
 import threading
+import time
 
 import requests
 
@@ -178,6 +179,10 @@ class OpenAIClient:
         self.base_url = (base_url or "https://api.openai.com/v1").rstrip("/")
         self.model = model or "gpt-4o-mini"
         self.timeout = timeout
+        # SSE watchdog: a model that stops sending data chunks but keeps
+        # the connection alive with comment lines would otherwise hang a
+        # stream forever (keep-alives reset the socket read timeout).
+        self.stream_stall_timeout = 90
         self.fallback_models = list(fallback_models or self.FALLBACK_MODELS)
         # Red Team Mode: refusal auto-retry + uncensored request framing.
         self.uncensored = bool(uncensored)
@@ -376,15 +381,23 @@ class OpenAIClient:
 
         content_parts = []
         tool_slots = {}
+        last_data_ts = time.time()
         try:
             for raw in resp.iter_lines(decode_unicode=True):
                 if cancel_event is not None and cancel_event.is_set():
                     raise RunCancelled("generation cancelled by user")
+                now_ts = time.time()
+                if now_ts - last_data_ts > self.stream_stall_timeout:
+                    resp.close()
+                    raise LLMError(
+                        "stream stall: no data from model '%s' for %ds"
+                        % (model, self.stream_stall_timeout))
                 if not raw:
                     continue
                 line = raw.strip()
                 if not line.startswith("data:"):
                     continue
+                last_data_ts = now_ts
                 data = line[5:].strip()
                 if data == "[DONE]":
                     break

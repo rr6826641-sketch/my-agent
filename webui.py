@@ -548,7 +548,10 @@ def api_chat():
     with _run_lock:
         _active_runs[run_id] = stop_event
 
-    q = queue.Queue(maxsize=64)
+    # unbounded: a buffered burst of delta events (e.g. Red Team mode
+    # that releases all narrative deltas at the end) must not be
+    # mistaken for a dead client and falsely abort the run
+    q = queue.Queue()
     agent = _state["agent"]
     cfg = _current_cfg()
     routed_model, route_reason = route_model(message, cfg)
@@ -666,13 +669,14 @@ def api_chat():
 
     def gen():
         yield "retry: 1500\n\n"
-        # overall stream cap; individual tools are capped at 120s each
-        # (TOOL_TIMEOUT in ai_agent/tools/base.py) so this only fires
-        # when something is truly stuck — and the frontend releases busy.
+        # idle window: individual tools are capped at 120s each
+        # (TOOL_TIMEOUT in ai_agent/tools/base.py); the window only
+        # fires when nothing arrives for 900s (slow models + long
+        # fallback chains included) — and the frontend releases busy.
         try:
             while True:
                 try:
-                    event = q.get(timeout=360)
+                    event = q.get(timeout=900)
                 except queue.Empty:
                     yield "data: {\"type\": \"error\", \"content\": \"[timed out]\"}\n\n"
                     break
@@ -1219,7 +1223,10 @@ def api_rpg_game_play(game_id):
     data = request.get_json(silent=True) or {}
     player_input = (data.get("input") or "").strip()
 
-    q = queue.Queue(maxsize=64)
+    # unbounded: a buffered burst of delta events (e.g. Red Team mode
+    # that releases all narrative deltas at the end) must not be
+    # mistaken for a dead client and falsely abort the run
+    q = queue.Queue()
     run_iter = eng.act_stream(game_id, player_input, stop_event=stop_event)
 
     def worker():
@@ -1253,7 +1260,7 @@ def api_rpg_game_play(game_id):
         try:
             while True:
                 try:
-                    event = q.get(timeout=360)
+                    event = q.get(timeout=900)
                 except queue.Empty:
                     yield "data: {\"type\": \"error\", \"content\": \"[timed out]\"}\n\n"
                     break
