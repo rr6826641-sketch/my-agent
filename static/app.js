@@ -45,6 +45,7 @@ function switchView(name) {
   if (name === "memory") loadMemory();
   if (name === "reports") loadReports();
   if (name === "rpg") loadRPGView();
+  if (name === "chat") updateExportPill();
   if (name === "settings") { loadSettings(); loadPersona(); }
   if (name === "system") loadSystem();
 }
@@ -57,6 +58,11 @@ $("#btn-new").addEventListener("click", () => {
   if (busy) return;
   newChat();
 });
+
+function updateExportPill() {
+  const pill = $("#pill-export");
+  if (pill) pill.disabled = !currentSessionId;
+}
 
 /* ---------------- welcome chips ---------------- */
 function welcome() {
@@ -97,6 +103,7 @@ function newChat() {
   currentSessionId = null;
   chatLog.innerHTML = "";
   welcome();
+  updateExportPill();
   loadSessions();
 }
 
@@ -162,6 +169,7 @@ async function openSession(id) {
   } catch { return; }
   currentSessionId = s.id;
   renderSession(s);
+  updateExportPill();
   loadSessions();
 }
 
@@ -1131,6 +1139,18 @@ async function refreshStatus() {
     updateRedTeamPill(s.red_team_mode, s.persona);
   } catch { /* ignore */ }
 }
+
+/* ---------------- chat export (Markdown pentest report) ---------------- */
+$("#pill-export").addEventListener("click", () => {
+  if (!currentSessionId) {
+    const pill = $("#pill-export");
+    const old = pill.textContent;
+    pill.textContent = "no active chat";
+    setTimeout(() => (pill.textContent = old), 1500);
+    return;
+  }
+  window.location.href = "/api/sessions/" + encodeURIComponent(currentSessionId) + "/export";
+});
 
 /* ---------------- red team master switch (one-click evil profile) ---------------- */
 let redTeamOn = false;

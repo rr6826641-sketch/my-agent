@@ -820,6 +820,143 @@ def api_sessions_del(sid):
     return jsonify({"ok": bool(removed)})
 
 
+@app.route("/api/sessions/<sid>/export")
+def api_sessions_export(sid):
+    """Full Markdown pentest export of a chat: executive summary, tool
+    timeline (outputs trimmed), validation cards and artifact download links.
+    Everything runs as a downloadable .md file."""
+    with _chat_lock:
+        data = _read_chats_unlocked()
+        s = data.get("sessions", {}).get(sid)
+        if s:
+            s = json.loads(json.dumps(s))
+    if not s:
+        return jsonify({"error": "session not found"}), 404
+
+    title = (s.get("title") or "New chat").strip()
+    msgs = s.get("messages") or []
+    persona = personas.normalize(s.get("persona")) if s.get("persona") \
+        else personas.normalize(_current_cfg().get("persona"))
+
+    tools_used = sorted({m.get("name") for m in msgs
+                         if m.get("role") == "tool" and m.get("name")
+                         and not m.get("validator")})
+    validations = [m for m in msgs if m.get("role") == "assistant"
+                   and m.get("kind") == "validation"]
+    v_by = {"verified": 0, "rejected": 0, "unverified": 0}
+    for v in validations:
+        v_by[(v.get("status") or "unverified").lower()
+             if (v.get("status") or "unverified").lower() in v_by
+             else "unverified"] += 1
+
+    try:
+        arows = artifacts.list_chat(sid)
+    except Exception:
+        arows = []
+
+    def hhmm(ts):
+        try:
+            return datetime.datetime.fromtimestamp(float(ts)).strftime("%H:%M")
+        except Exception:
+            return "--:--"
+
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    lines = [
+        "# Pentest Export — %s" % title,
+        "",
+        "**Agent:** HackerAI (local) · **Messages:** %d · "
+        "**Artifacts:** %d  " % (len(msgs), len(arows)),
+        "**Exported:** %s · **Red Team Mode:** %s · "
+        "**Persona:** %s  " % (now,
+                               "ON" if s.get("red_team_mode") else "off",
+                               persona),
+        "**Session ID:** `%s`" % sid,
+        "",
+    ]
+
+    lines += ["## Executive Summary", ""]
+    lines.append("- **Tools used:** %s" % (", ".join(tools_used) if tools_used
+                                            else "none"))
+    lines.append("- **Validation findings:** %d verified / %d rejected / "
+                 "%d unverified" % (v_by["verified"], v_by["rejected"],
+                                    v_by["unverified"]))
+    lines.append("")
+
+    if validations:
+        lines += ["## Findings (Validation Cards)", ""]
+        for v in validations:
+            ico = {"verified": "✅", "rejected": "❌"}.get(
+                (v.get("status") or "").lower(), "❔")
+            lines.append("### %s %s" % (
+                ico, (v.get("status") or "unverified").capitalize()))
+            finding = (v.get("finding") or "").strip()
+            if finding:
+                lines.append("> %s" % finding.replace("\n", "\n> "))
+            reason = (v.get("reason") or "").strip()
+            if reason:
+                lines.append("")
+                lines.append("*Reason:* %s" % reason.replace("\n", " "))
+            lines.append("")
+
+    lines += ["## Timeline", ""]
+    for m in msgs:
+        ts = hhmm(m.get("ts"))
+        role = m.get("role")
+        if role == "user":
+            lines += ["### [%s] 👤 User" % ts,
+                      (m.get("content") or "").replace("\n", "\n> "), ""]
+        elif role == "tool":
+            tag = "🩸 Validator" if m.get("validator") else "🛠️ Tool"
+            lines += ["### [%s] %s: %s" % (ts, tag, m.get("name") or "?"),
+                      "```",
+                      "$ %s" % (m.get("arguments") or ""),
+                      "```"]
+            result = m.get("result") or m.get("content") or ""
+            if str(result).strip():
+                result = str(result)
+                if len(result) > 2000:
+                    lines += ["Output (first 2000 of %d chars):" % len(result),
+                              "```", result[:2000], "```"]
+                else:
+                    lines += ["Output:", "```", result, "```"]
+            lines.append("")
+        elif role == "assistant":
+            kind = m.get("kind") or ""
+            content = (m.get("content") or "").strip()
+            label = {"final": "🤖 Agent (final)",
+                     "error": "🤖 Agent (error)",
+                     "thinking": "🤖 Agent (thinking)",
+                     "tactical": "🩸 Tactical reasoning",
+                     "validation_spawned": "🩸 Validation spawned",
+                     "validation_done": "🩸 Validation done"}.get(kind,
+                                                            "🤖 Agent")
+            head = "### [%s] %s" % (ts, label)
+            phase = m.get("phase")
+            if kind == "tactical" and phase:
+                head += " — %s" % phase
+            lines.append(head)
+            if content:
+                lines.append("> %s" % content.replace("\n", "\n> "))
+            lines.append("")
+
+    if arows:
+        lines += ["## Artifacts", ""]
+        for r in arows:
+            lines.append("- **%s** — `%s` (%s)" % (
+                r.get("tool"), r.get("filename"), r.get("size_h")))
+        lines += ["", "## Downloads", ""]
+        for r in arows:
+            lines.append("- [%s](%s)" % (r.get("filename"), r.get("url")))
+        lines.append("")
+
+    md = "\n".join(lines)
+    safe = re.sub(r"[^a-z0-9_.-]+", "_", title.lower()).strip("_")[:40] or sid
+    from io import BytesIO
+    return send_file(BytesIO(md.encode("utf-8")), as_attachment=True,
+                     download_name="pentest_export_%s.md" % safe,
+                     mimetype="text/markdown; charset=utf-8")
+
+
 # --------------------------------------------------------------------------
 # Artifacts API (downloadable scan outputs)
 # --------------------------------------------------------------------------
