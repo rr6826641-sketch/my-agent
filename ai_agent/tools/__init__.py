@@ -153,6 +153,11 @@ from .custom import (
 from .darkweb_intel import (
     tool_scrape_onion_service, tool_search_darkweb_leaks,
 )
+
+from .k8s_cloud_audit import (
+    tool_k8s_cluster_audit, tool_helm_security_scan,
+    tool_iam_policy_analyzer,
+)
 from .workspace import (
     tool_workspace_scan, tool_workspace_symbols, tool_workspace_deps,
     tool_workspace_query, tool_workspace_export,
@@ -2632,6 +2637,71 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                 query=query or "",
                 limit=int(limit or 8),
                 use_tor=_as_bool(use_tor),
+                timeout=int(timeout or 20))))
+
+    REGISTRY.append(Tool(
+        "k8s_cluster_audit",
+        "Audit a Kubernetes cluster security posture: privileged / root "
+        "containers, host namespaces, missing NetworkPolicies, cleartext "
+        "stringData secrets, secret-shaped ConfigMaps and open API-server "
+        "access. Reads a kubeconfig (parameter, $KUBECONFIG or "
+        "~/.kube/config); when kubectl is installed it fetches "
+        "pods/secrets/configmaps/networkpolicies for live checks, otherwise "
+        "it still returns the config-only API-server posture read. "
+        "Structured JSON output: meta, severity-ranked findings, summary.",
+        {"type": "object",
+         "properties": {
+             "kubeconfig_path": _str_prop(
+                 "path to a kubeconfig YAML; defaults to $KUBECONFIG or "
+                 "~/.kube/config", ""),
+             "timeout": {"type": "integer", "default": 20,
+                         "description": "max seconds for the whole audit"}},
+         "required": []},
+        lambda kubeconfig_path="", timeout=20:
+            tool_k8s_cluster_audit(
+                kubeconfig_path=kubeconfig_path or None,
+                timeout=int(timeout or 20))))
+    REGISTRY.append(Tool(
+        "helm_security_scan",
+        "Scan a Helm chart (directory or packaged .tgz) for security "
+        "antipatterns before install: insecure defaults in values.yaml "
+        "(privileged, runAsUser 0, host namespaces, latest image tags), "
+        "hardcoded secret-like values in templates/values, wildcard or "
+        "anonymous RBAC roles/bindings and use of the default service "
+        "account. Works fully offline on chart files. Structured JSON "
+        "output: meta, severity-ranked findings, summary.",
+        {"type": "object",
+         "properties": {
+             "chart_path": _str_prop(
+                 "path to the chart directory or .tgz archive"),
+             "timeout": {"type": "integer", "default": 20,
+                         "description": "max seconds for the scan"}},
+         "required": ["chart_path"]},
+        lambda chart_path="", timeout=20:
+            tool_helm_security_scan(
+                chart_path=chart_path or "",
+                timeout=int(timeout or 20))))
+    REGISTRY.append(Tool(
+        "iam_policy_analyzer",
+        "Analyze a cloud IAM policy for privilege-escalation and "
+        "over-broad grants. Auto-detects the provider from the JSON shape: "
+        "AWS (Statement/policyDocument - wildcard actions/resources, "
+        "iam:PassRole & other known escalation actions, public root "
+        "principals), GCP (bindings - allUsers/allAuthenticatedUsers, "
+        "service-account actAs) or Azure (permissions/dataActions - '*', "
+        "wildcard actions, assignableScopes at root). Pass the raw policy "
+        "JSON string. Structured JSON output: meta, severity-ranked "
+        "findings, summary.",
+        {"type": "object",
+         "properties": {
+             "policy_json": _str_prop(
+                 "raw AWS/GCP/Azure IAM policy as a JSON string"),
+             "timeout": {"type": "integer", "default": 20,
+                         "description": "max seconds for the analysis"}},
+         "required": ["policy_json"]},
+        lambda policy_json="", timeout=20:
+            tool_iam_policy_analyzer(
+                policy_json=policy_json or "",
                 timeout=int(timeout or 20))))
 
     global _REGISTRY
