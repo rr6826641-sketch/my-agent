@@ -3068,6 +3068,12 @@ class Agent:
                 "method", "sub-agent"),
         } for f in results_src]
 
+        # Cross-chat persistence: terminal verdicts (verified / rejected)
+        # are written to the shared SQLite knowledge bases so FUTURE chats
+        # about the same target recall them automatically. Unverified
+        # findings stay chat-local (manual audit still pending).
+        self._persist_verdicts(self._verification_results)
+
         verified = sum(1 for r in self._verification_results
                        if r["status"] == V_VERIFIED)
         rejected = sum(1 for r in self._verification_results
@@ -3081,6 +3087,53 @@ class Agent:
         yield {"type": "validation_done", "summary": summary,
                "verified": verified, "rejected": rejected,
                "unverified": unverified, "count": len(findings)}
+
+    def _persist_verdicts(self, results):
+        """Cross-chat persistence of independent validation verdicts.
+
+        Every VERIFIED or REJECTED verdict is written to the shared SQLite
+        stores so future chats about the same target recall it automatically:
+          - GlobalKnowledge (knowledge.db): finding_type="verification"
+          - InstitutionalMemory (notes db): category="findings",
+            tags=[validation, <status>, <method>]
+        UNVERIFIED findings are deliberately NOT persisted - they still
+        require manual audit inside the current chat.
+        Best-effort: any storage error is swallowed - validation must never
+        break the answer pipeline. Returns the persisted content lines.
+        """
+        if not results:
+            return []
+        persisted = []
+        for r in results:
+            status = r.get("status")
+            if status not in (V_VERIFIED, V_REJECTED):
+                continue
+            label = VERIFY_LABELS.get(status, status)
+            method = r.get("method", "deterministic")
+            reason = " ".join((r.get("reason") or "").split())
+            content = "%s %s %s (method: %s)%s" % (
+                label, r.get("type", "?"), r.get("value", "?"), method,
+                " - %s" % reason if reason else "")
+            tags = ["validation", status, method]
+            if self.knowledge is not None and self._kb_target:
+                try:
+                    self.knowledge.save_finding(
+                        self._kb_target, "verification", content, tags=tags)
+                    persisted.append(content)
+                except Exception:
+                    pass
+            if self.institutional is not None:
+                try:
+                    self.institutional.add_note(
+                        category="findings",
+                        title=("%s: %s" % (label, r.get("value", "?")))[:200],
+                        content=content,
+                        target=self._kb_target or "",
+                        tags=tags)
+                    persisted.append(content)
+                except Exception:
+                    pass
+        return persisted
 
     def _apply_verification_tags(self, content):
         """Tag the final answer with per-finding verification status.
