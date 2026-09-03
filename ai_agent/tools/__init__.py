@@ -382,8 +382,13 @@ def create_tools(memory, knowledge=None, institutional=None,
     REGISTRY = [
         # ---- core ----
         Tool("run_terminal",
-             "Execute a shell command on the user's machine and return its "
-             "output. Use for system info, scripts, installs, scans.",
+             "Execute a real shell command on the user's machine and return "
+             "its live output. This is the PRIMARY way to do local/system/"
+             "home-network work - use it for saved Wi-Fi passwords (netsh "
+             "wlan show profile name=<SSID> key=clear), the active SSID "
+             "(netsh wlan show interfaces), ARP table / connected devices "
+             "(arp -a), ipconfig, route, processes, files and scripts. "
+             "Never just describe a command: run it.",
              {"type": "object",
               "properties": {"command": _str_prop("command to run", None),
                              "timeout": {"type": "integer", "default": 60,
