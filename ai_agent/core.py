@@ -2116,6 +2116,12 @@ class Agent:
         # LLM client was built with uncensored=True (config red_team_mode).
         if getattr(self.llm, "uncensored", False):
             prompt = "%s\n\n%s" % (prompt, UNCENSORED_TAIL_BLOCK)
+        # Persona presets: the active persona directive block (built
+        # in webui._build_llm from config "persona") rides on the LLM
+        # client and lands after the tail block, so it wins on style.
+        persona_block = getattr(self.llm, "persona_block", "") or ""
+        if persona_block:
+            prompt = "%s\n\n%s" % (prompt, persona_block)
         return prompt
 
     # ------------------------------------------- tactical reasoning engine

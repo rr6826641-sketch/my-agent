@@ -54,3 +54,6 @@ scope.json
 memory/
 api_models.json
 *.log
+
+# Persona custom text (user runtime data)
+personas_custom.txt

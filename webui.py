@@ -36,6 +36,7 @@ from ai_agent.memory_store import (
     MemoryStore,
 )
 from ai_agent.rpg import RPGEngine
+from ai_agent import personas
 from ai_agent.tools import create_tools
 
 CONFIG_PATH = os.path.join(PROJECT_DIR, "config.json")
@@ -264,20 +265,29 @@ def _save_cfg(patch):
 
 def _build_llm(cfg):
     """Create the LLM client from the current config (mock or live)."""
+    uncensored = bool(cfg.get("red_team_mode"))
+    # Persona presets: the active persona's directive block rides on the
+    # client; core.Agent._system_prompt appends it after the Red Team
+    # tail block so both chat and the RPG engine inherit the persona.
+    persona_block = personas.get_block(cfg.get("persona"),
+                                       uncensored=uncensored)
     if cfg.get("mock"):
-        return MockClient(uncensored=cfg.get("red_team_mode"))
-    # Smart Auto-Model Selector: in auto mode the configured model is a
-    # placeholder; the actual model is chosen per-request by the router.
-    model = cfg.get("model") or "gpt-4o-mini"
-    if cfg.get("auto") or model == "auto":
-        model = DEFAULT_FAST_MODEL
-    return OpenAIClient(
-        api_key=cfg.get("api_key") or "",
-        base_url=cfg.get("base_url") or "https://api.openai.com/v1",
-        model=model,
-        fallback_models=cfg.get("fallback_models"),
-        uncensored=cfg.get("red_team_mode"),
-    )
+        client = MockClient(uncensored=uncensored)
+    else:
+        # Smart Auto-Model Selector: in auto mode the configured model is a
+        # placeholder; the actual model is chosen per-request by the router.
+        model = cfg.get("model") or "gpt-4o-mini"
+        if cfg.get("auto") or model == "auto":
+            model = DEFAULT_FAST_MODEL
+        client = OpenAIClient(
+            api_key=cfg.get("api_key") or "",
+            base_url=cfg.get("base_url") or "https://api.openai.com/v1",
+            model=model,
+            fallback_models=cfg.get("fallback_models"),
+            uncensored=uncensored,
+        )
+    client.persona_block = persona_block
+    return client
 
 
 def _build_agent(cfg):
@@ -1139,6 +1149,32 @@ def api_settings_save():
 
     _reload_state(mock_override=mock)
     return jsonify(_status())
+
+
+# --------------------------------------------------------------------------
+# Persona presets (Red Team Mode tuning)
+# --------------------------------------------------------------------------
+
+@app.route("/api/personas")
+def api_personas():
+    cfg = _current_cfg()
+    return jsonify({
+        "current": personas.normalize(cfg.get("persona")),
+        "custom_text": personas.get_custom_text(),
+        "personas": personas.list_personas(),
+    })
+
+
+@app.route("/api/personas", methods=["POST"])
+def api_personas_save():
+    """Switch persona and/or update the custom persona text."""
+    data = request.get_json(silent=True) or {}
+    pid = personas.normalize(data.get("persona"))
+    if data.get("custom_text") is not None:
+        personas.save_custom_text(data.get("custom_text"))
+    _save_cfg({"persona": pid})
+    _reload_state(mock_override=_current_cfg().get("mock"))
+    return jsonify({"ok": True, "persona": pid})
 
 
 # --------------------------------------------------------------------------

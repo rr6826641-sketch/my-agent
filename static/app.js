@@ -45,7 +45,7 @@ function switchView(name) {
   if (name === "memory") loadMemory();
   if (name === "reports") loadReports();
   if (name === "rpg") loadRPGView();
-  if (name === "settings") loadSettings();
+  if (name === "settings") { loadSettings(); loadPersona(); }
   if (name === "system") loadSystem();
 }
 
@@ -999,6 +999,55 @@ $("#set-save").addEventListener("click", async () => {
     refreshStatus();
   } else {
     msg.textContent = "❌ failed to save";
+  }
+});
+
+/* ---------------- persona presets ---------------- */
+async function loadPersona() {
+  try {
+    const p = await fetchJSON("/api/personas");
+    const sel = $("#persona-select");
+    sel.innerHTML = "";
+    for (const item of (p.personas || [])) {
+      const id = typeof item === "string" ? item : item.id;
+      const label = typeof item === "string" ? item : (item.name || item.id);
+      const opt = document.createElement("option");
+      opt.value = id;
+      opt.textContent = label;
+      sel.appendChild(opt);
+    }
+    sel.value = p.current || "hackerai";
+    $("#persona-custom").value = p.custom_text || "";
+    syncPersonaCustom();
+  } catch (e) { /* settings page still usable */ }
+}
+
+function syncPersonaCustom() {
+  const ta = $("#persona-custom");
+  const on = $("#persona-select").value === "custom";
+  ta.style.display = on ? "" : "none";
+  ta.disabled = !on;
+}
+
+$("#persona-select").addEventListener("change", syncPersonaCustom);
+
+$("#persona-save").addEventListener("click", async () => {
+  const msg = $("#persona-msg");
+  msg.textContent = "saving...";
+  try {
+    const res = await fetch("/api/personas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        persona: $("#persona-select").value,
+        custom_text: $("#persona-custom").value,
+      }),
+    });
+    if (!res.ok) throw new Error("save failed");
+    msg.textContent = "✅ persona saved";
+    setTimeout(() => (msg.textContent = ""), 2500);
+  } catch (e) {
+    msg.textContent = "❌ failed to save persona";
   }
 });
 
