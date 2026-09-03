@@ -150,6 +150,9 @@ from .custom import (
     tool_sha1_quick, tool_strings_extract, tool_html_to_text,
     tool_dedupe_lines, tool_count_lines,
 )
+from .darkweb_intel import (
+    tool_scrape_onion_service, tool_search_darkweb_leaks,
+)
 from .workspace import (
     tool_workspace_scan, tool_workspace_symbols, tool_workspace_deps,
     tool_workspace_query, tool_workspace_export,
@@ -2569,6 +2572,67 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
          "required": []},
         lambda confirm="no":
             tool_rules_reset(confirm=confirm or "no")))
+
+    REGISTRY.append(Tool(
+        "scrape_onion_service",
+        "Fetch ONE .onion page through the local Tor SOCKS5 proxy "
+        "(default socks5h://127.0.0.1:9050, override with TOR_PROXY) and "
+        "extract dark-web threat intel: page title, meta tags, readable "
+        "text excerpt, leaked e-mail addresses, hash candidates "
+        "(md5/sha1/sha256, labeled + generic hex) and every .onion link "
+        "on the page. Bounded timeouts, a hard download cap and "
+        "structured per-failure errors (tor-off / node-offline / "
+        "http-error) mean a dead onion node can never hang the agent. "
+        "Only for .onion targets you are authorized to research.",
+        {"type": "object",
+         "properties": {
+             "onion_url": _str_prop(
+                 "http(s) URL of the .onion service to fetch"),
+             "timeout": {"type": "integer", "default": 15,
+                         "description": "max seconds to wait for the "
+                                        "onion node"},
+             "ignore_ssl": {"type": "boolean", "default": False,
+                            "description": "accept self-signed onion TLS "
+                                           "(common) - set true on TLS "
+                                           "errors"},
+             "include_text": {"type": "boolean", "default": True,
+                              "description": "extract text excerpt, emails "
+                                             "and hashes from the body"}},
+         "required": ["onion_url"]},
+        lambda onion_url="", timeout=15, ignore_ssl=False,
+               include_text=True:
+            tool_scrape_onion_service(
+                onion_url=onion_url or "",
+                timeout=int(timeout or 15),
+                ignore_ssl=_as_bool(ignore_ssl),
+                include_text=_as_bool(include_text, True))))
+    REGISTRY.append(Tool(
+        "search_darkweb_leaks",
+        "Query public dark-web indexes (Ahmia) for onion pages matching a "
+        "target domain, credential or breach indicator. Uses the clearnet "
+        "mirror by default so it works with NO local Tor; set use_tor=true "
+        "to query the Ahmia .onion index through Tor and keep the search "
+        "traffic off clearnet. Returns structured hits: onion_url, title, "
+        "snippet, first_seen_timestamp.",
+        {"type": "object",
+         "properties": {
+             "query": _str_prop(
+                 "domain, keyword or breach indicator to search for"),
+             "limit": {"type": "integer", "default": 8,
+                       "description": "max hits to return (1-25)"},
+             "use_tor": {"type": "boolean", "default": False,
+                         "description": "route the query via Tor to the "
+                                        "Ahmia onion index"},
+             "timeout": {"type": "integer", "default": 20,
+                         "description": "max seconds to wait for the "
+                                        "index"}},
+         "required": ["query"]},
+        lambda query="", limit=8, use_tor=False, timeout=20:
+            tool_search_darkweb_leaks(
+                query=query or "",
+                limit=int(limit or 8),
+                use_tor=_as_bool(use_tor),
+                timeout=int(timeout or 20))))
 
     global _REGISTRY
     _REGISTRY = REGISTRY
