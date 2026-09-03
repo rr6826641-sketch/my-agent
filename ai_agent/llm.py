@@ -91,6 +91,17 @@ HIGH_REASONING_FALLBACKS = [
     "deepseek/deepseek-r1",
 ]
 
+# Red Team Mode (pro-max): known-uncensored hosted models used to keep the
+# failover chain refusal-free.  When uncensored mode is on these sit between
+# the primary model and the generic (possibly safety-tuned) fallback_models,
+# so a 429/empty-body drop mid-engagement never lands the next request on a
+# model that will simply refuse the authorized offensive-security task.
+UNCENSORED_FALLBACK_MODELS = [
+    "thinkingmachines/inkling:free",
+    "deepseek/deepseek-v4-0324:free",
+    "qwen/qwen3-coder:free",
+]
+
 
 def _candidate_models(primary, fallback_models,
                       high_reasoning_models=HIGH_REASONING_MODELS,
@@ -274,7 +285,8 @@ class OpenAIClient:
 
     def __init__(self, api_key="", base_url="https://api.openai.com/v1",
                  model="gpt-4o-mini", timeout=120, fallback_models=None,
-                 uncensored=False, refusal_retries=None):
+                 uncensored=False, refusal_retries=None,
+                 uncensored_fallbacks=None):
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
         self.base_url = (base_url or "https://api.openai.com/v1").rstrip("/")
         self.model = model or "gpt-4o-mini"
@@ -294,9 +306,26 @@ class OpenAIClient:
                                     else max(1, int(refusal_retries)))
         except (TypeError, ValueError):
             self.refusal_retries = DEFAULT_REFUSAL_RETRIES
+        # Red Team Mode (pro-max): uncensored models are placed between the
+        # primary and the generic fallbacks when the caller opts in, so
+        # network-failover in an uncensored session keeps an uncensored
+        # model on deck instead of dropping straight onto a generic one.
+        self.uncensored_fallbacks = [
+            m for m in (uncensored_fallbacks or []) if m]
+
+    def _effective_fallbacks(self):
+        """Fallback chain for this call: uncensored pool first (opt-in),
+        then the configured generic fallbacks (deduped)."""
+        if not self.uncensored_fallbacks:
+            return self.fallback_models
+        chain = list(self.uncensored_fallbacks)
+        for m in self.fallback_models:
+            if m not in chain:
+                chain.append(m)
+        return chain
 
     def chat(self, messages, tools=None, temperature=0.2):
-        models = _candidate_models(self.model, self.fallback_models)
+        models = _candidate_models(self.model, self._effective_fallbacks())
         last_error = None
         for index, model in enumerate(models):
             try:
@@ -391,7 +420,8 @@ class OpenAIClient:
         aborted by raising RunCancelled.
         model: optional per-call override (used by the Smart Auto-Router).
         """
-        models = _candidate_models(model or self.model, self.fallback_models)
+        models = _candidate_models(model or self.model,
+                                   self._effective_fallbacks())
         last_error = None
         for index, model in enumerate(models):
             if cancel_event is not None and cancel_event.is_set():

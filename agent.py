@@ -12,7 +12,8 @@ import os
 
 from ai_agent.config import PROJECT_DIR, load_config
 from ai_agent.core import Agent
-from ai_agent.llm import MockClient, OpenAIClient
+from ai_agent.llm import (MockClient, OpenAIClient,
+                          UNCENSORED_FALLBACK_MODELS)
 from ai_agent.memory_store import InstitutionalMemory, MemoryStore
 
 BANNER = """
@@ -53,6 +54,11 @@ def main():
             model=cfg["model"],
             fallback_models=cfg.get("fallback_models"),
             uncensored=cfg.get("red_team_mode"),
+            # Red Team Mode (pro-max): keep uncensored models first in the
+            # failover chain so a drop/429 can't force the run onto a
+            # safety-tuned generic fallback.
+            uncensored_fallbacks=(UNCENSORED_FALLBACK_MODELS
+                                  if cfg.get("red_team_mode") else None),
         )
         if not cfg["api_key"] and cfg["base_url"].startswith("https://api.openai.com"):
             print("[warning] no API key set - add AGENT_API_KEY to .env "

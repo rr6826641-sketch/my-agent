@@ -27,7 +27,8 @@ from flask import (Flask, jsonify, render_template, request, Response,
 
 from ai_agent.config import (PROJECT_DIR, load_config, config_status, save_env_key)
 from ai_agent.core import Agent, RunCancelled
-from ai_agent.llm import MockClient, OpenAIClient
+from ai_agent.llm import (MockClient, OpenAIClient,
+                          UNCENSORED_FALLBACK_MODELS)
 from ai_agent.artifacts import ArtifactManager
 from ai_agent.memory_store import (
     GlobalKnowledge,
@@ -175,6 +176,21 @@ MODEL_ROUTES = {
     "general": "meta-llama/llama-3.3-70b-instruct",
 }
 
+# Red Team Mode lock (pro-max): when the uncensored master switch is ON the
+# auto-router must never land a request on a safety-tuned host model (Llama
+# 3.3 general, DeepSeek R1 reasoning/coding).  Every route resolves to an
+# uncensored catalog model so a hosted-model refusal can never silently gate
+# the agent mid-engagement.  route_model() swaps in this table only when
+# cfg["red_team_mode"] is true; the stock routes above stay untouched
+# otherwise (existing router regression tests keep passing).
+REDTEAM_ROUTE_LOCK = {
+    "uncensored": "thinkingmachines/inkling:free",
+    "reasoning": "deepseek/deepseek-v4-0324:free",
+    "cyber": "cognitivecomputations/dolphin-mistral-24b-venice-edition",
+    "coding": "qwen/qwen3-coder:free",
+    "general": "cognitivecomputations/dolphin-mistral-24b-venice-edition",
+}
+
 
 _CYBER_RES = _kw_res(_CYBER_WORDS)
 _CODING_RES = _kw_res(_CODING_WORDS)
@@ -186,24 +202,45 @@ def route_model(prompt, cfg=None):
 
     Returns (None, None) only when the Smart Auto-Router is off (the
     configured/default model is then used unchanged).
+
+    Red Team Mode lock: with cfg["red_team_mode"]=true every resolved route
+    is remapped through REDTEAM_ROUTE_LOCK so requests in an uncensored
+    session always reach an uncensored model - never Llama 3.3 general or
+    DeepSeek R1, whose safety tuning can refuse offensive-security work.
     """
     cfg = cfg or {}
     auto = bool(cfg.get("auto")) or (cfg.get("model") == "auto")
     if not auto or not prompt:
         return None, None
+    red_team = bool(cfg.get("red_team_mode"))
     for w in ("uncensored", "jailbreak", "nsfw", "adult"):
         if w in prompt.lower():
-            return MODEL_ROUTES["uncensored"], "uncensored / jailbreak prompt"
-    for rx in _REASONING_RES:
-        if rx.search(prompt):
-            return MODEL_ROUTES["reasoning"], "complex reasoning / architecture / analysis task"
-    for rx in _CYBER_RES:
-        if rx.search(prompt):
-            return MODEL_ROUTES["cyber"], "cyber security / recon task"
-    for rx in _CODING_RES:
-        if rx.search(prompt):
-            return MODEL_ROUTES["coding"], "coding / math / logic task"
-    # general chat & fast answers -> fast Llama general model
+            model = REDTEAM_ROUTE_LOCK["uncensored"] if red_team \
+                else MODEL_ROUTES["uncensored"]
+            return model, "uncensored / jailbreak prompt"
+    # Reasoning is checked before the cyber/coding groups so complex
+    # security-assessment design still reaches a flagship reasoning model.
+    if any(rx.search(prompt) for rx in _REASONING_RES):
+        if red_team:
+            return (REDTEAM_ROUTE_LOCK["reasoning"],
+                    "complex reasoning (Red Team lock -> uncensored model)")
+        return MODEL_ROUTES["reasoning"], \
+            "complex reasoning / architecture / analysis task"
+    if any(rx.search(prompt) for rx in _CYBER_RES):
+        if red_team:
+            return (REDTEAM_ROUTE_LOCK["cyber"],
+                    "cyber security / recon task (uncensored model)")
+        return MODEL_ROUTES["cyber"], "cyber security / recon task"
+    if any(rx.search(prompt) for rx in _CODING_RES):
+        if red_team:
+            return (REDTEAM_ROUTE_LOCK["coding"],
+                    "coding task (Red Team lock -> uncensored model)")
+        return MODEL_ROUTES["coding"], "coding / math / logic task"
+    # general chat & fast answers: censored Llama by default, but in Red
+    # Team Mode the fallback is the top uncensored model instead.
+    if red_team:
+        return (REDTEAM_ROUTE_LOCK["general"],
+                "Red Team mode -> uncensored default model")
     return MODEL_ROUTES["general"], "general chat / fast answer"
 
 # --- encoding hardening: every response MUST be UTF-8 ---------------------
@@ -284,6 +321,11 @@ def _build_llm(cfg):
             fallback_models=cfg.get("fallback_models"),
             uncensored=uncensored,
             refusal_retries=cfg.get("refusal_retries"),
+            # Red Team Mode (pro-max): keep uncensored models on the
+            # failover chain so drops/429s can't force a censored fallback
+            # into an authorized offensive-security run.
+            uncensored_fallbacks=(UNCENSORED_FALLBACK_MODELS
+                                  if uncensored else None),
         )
     client.persona_block = persona_block
     return client
