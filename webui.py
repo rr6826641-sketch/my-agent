@@ -129,12 +129,14 @@ _CYBER_WORDS = [
     "pentest", "penetration", "hack", "hacking", "cyber", "security",
     "dark web", "anonym", "proxy", "evasion", "privilege escalation",
     "lateral movement", "persistence", "c2", "keylog", "spyware",
+    "escalate", "escalation", "privesc", "priv esc", "compromised",
+    "compromise", "webshell", "implant", "post-exploitation",
     "trojan", "rootkit", "botnet", "ddos", "credential", "dump",
     "smb", "rdp", "wifi", "aircrack", "deauth", "sniff", "arp",
     "session hijack", "token", "idor", "auth bypass", "bypass", "0day",
     "zeroday", "forensic", "malware analysis", "threat", "red team",
     "blue team", "siem", "firewall", "ids", "ips", "network",
-    "endpoint", "active directory", "ad", "ldap", "kerberos", "nltest",
+    "endpoint", "active directory", "ldap", "kerberos", "nltest",
     "bloodhound", "mimikatz", "pass-the-hash", "lateral", "domain",
 ]
 _CODING_WORDS = [
@@ -153,40 +155,57 @@ _CODING_WORDS = [
     "snippet", "function call", "implement", "write a program", "coding",
 ]
 
+def _kw_res(words):
+    """Compile keyword list to word-boundary regexes.
+
+    Plain substring matching ('w in text') misfires on short tokens:
+    'api' matches 'capital', 'ids' matches 'consider', ... Boundaries
+    regex word boundaries keep multi-word phrases and c++ working.
+    """
+    return [re.compile(r"(?<!\w)" + re.escape(w) + r"(?!\w)")
+            for w in words]
+
+
 MODEL_ROUTES = {
     "cyber": "cognitivecomputations/dolphin-mistral-24b-venice-edition",
     "uncensored": "thinkingmachines/inkling:free",
     "coding": "deepseek/deepseek-r1",
     # flagship reasoning: complex logic / architecture / code analysis
     "reasoning": "deepseek/deepseek-r1",
+    # general chat & fast answers -> powerful open-source general model
+    "general": "meta-llama/llama-3.3-70b-instruct",
 }
+
+
+_CYBER_RES = _kw_res(_CYBER_WORDS)
+_CODING_RES = _kw_res(_CODING_WORDS)
+_REASONING_RES = _kw_res(_REASONING_WORDS)
 
 
 def route_model(prompt, cfg=None):
     """Classify a prompt and return (model_id, reason).
 
-    Returns (None, None) when the Smart Auto-Router is off or no special
-    class matches (the default fast model is then used).
+    Returns (None, None) only when the Smart Auto-Router is off (the
+    configured/default model is then used unchanged).
     """
     cfg = cfg or {}
     auto = bool(cfg.get("auto")) or (cfg.get("model") == "auto")
     if not auto or not prompt:
         return None, None
-    text = (" " + prompt.lower() + " ")
-
     for w in ("uncensored", "jailbreak", "nsfw", "adult"):
-        if w in text:
+        if w in prompt.lower():
             return MODEL_ROUTES["uncensored"], "uncensored / jailbreak prompt"
-    for w in _REASONING_WORDS:
-        if w in text:
+    for rx in _REASONING_RES:
+        if rx.search(prompt):
             return MODEL_ROUTES["reasoning"], "complex reasoning / architecture / analysis task"
-    for w in _CYBER_WORDS:
-        if w in text:
+    for rx in _CYBER_RES:
+        if rx.search(prompt):
             return MODEL_ROUTES["cyber"], "cyber security / recon task"
-    for w in _CODING_WORDS:
-        if w in text:
+    for rx in _CODING_RES:
+        if rx.search(prompt):
             return MODEL_ROUTES["coding"], "coding / math / logic task"
-    return None, None
+    # general chat & fast answers -> fast Llama general model
+    return MODEL_ROUTES["general"], "general chat / fast answer"
 
 # --- encoding hardening: every response MUST be UTF-8 ---------------------
 # jsonify: emit raw UTF-8 instead of \uXXXX escapes (cleaner, smaller)
