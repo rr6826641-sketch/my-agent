@@ -408,6 +408,21 @@ body {
 .settings-card small { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; }
 .settings-card .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg); }
 .settings-card .check input { margin: 0; width: auto; }
+
+/* uncensored model quick-picks */
+.quickpicks-wrap { margin: -6px 0 14px; }
+.qp-title { display: block; color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+.quickpicks { display: flex; flex-wrap: wrap; gap: 6px; }
+.qp-chip {
+  font-size: 11.5px; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid rgba(255, 26, 26, .35); background: transparent;
+  color: var(--fg); cursor: pointer; transition: all .15s ease;
+}
+.qp-chip:hover { border-color: var(--accent); background: rgba(255, 26, 26, .12); }
+.qp-chip.active {
+  border-color: var(--accent); background: var(--accent); color: #fff;
+  box-shadow: 0 0 8px rgba(255, 26, 26, .45);
+}
 .row { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
 .btn-primary {
   background: linear-gradient(135deg, #ff1a1a, #cc0000); color: #fff;

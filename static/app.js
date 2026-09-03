@@ -959,6 +959,43 @@ function fillModelSelect(catalog) {
   return sel;
 }
 
+/* Uncensored model quick-picks: one click -> model select + auto off */
+function renderQuickPicks(catalog) {
+  const wrap = $("#model-quickpicks");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  (catalog || []).filter((m) => m.uncensored).forEach((m) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "qp-chip";
+    b.dataset.model = m.id;
+    b.title = m.desc || m.label;
+    b.textContent = "☠ " + m.label;
+    b.addEventListener("click", () => {
+      $("#set-auto").checked = false;
+      const sel = $("#set-model");
+      if (!sel.querySelector(`option[value="${CSS.escape(m.id)}"]`)) {
+        const opt = document.createElement("option");
+        opt.value = m.id;
+        opt.textContent = m.label;
+        sel.appendChild(opt);
+      }
+      sel.value = m.id;
+      updateQuickPickActive();
+    });
+    wrap.appendChild(b);
+  });
+}
+
+function updateQuickPickActive() {
+  const wrap = $("#model-quickpicks");
+  if (!wrap) return;
+  const cur = $("#set-model").value;
+  wrap.querySelectorAll(".qp-chip").forEach((b) => {
+    b.classList.toggle("active", b.dataset.model === cur);
+  });
+}
+
 async function loadSettings() {
   const s = await fetchJSON("/api/settings");
   // The key itself is never sent back - only whether it exists in .env.
@@ -966,7 +1003,9 @@ async function loadSettings() {
   $("#set-key").placeholder = s.has_key ? "✓ API key is saved in .env (leave blank to keep it)" : "sk-…  (no key set — will be saved to .env)";
   $("#set-url").value = s.base_url || "";
   fillModelSelect(s.catalog);
+  renderQuickPicks(s.catalog);
   $("#set-model").value = s.auto ? "auto" : (s.model || "auto");
+  updateQuickPickActive();
   $("#set-auto").checked = !!s.auto;
   $("#set-mock").checked = !!s.mock;
   $("#set-redteam").checked = !!s.red_team_mode;
@@ -976,7 +1015,9 @@ async function loadSettings() {
 // the Auto-Model Selector checkbox drives the model select
 $("#set-auto").addEventListener("change", () => {
   $("#set-model").value = $("#set-auto").checked ? "auto" : $("#set-model").value;
+  updateQuickPickActive();
 });
+$("#set-model").addEventListener("change", updateQuickPickActive);
 $("#set-save").addEventListener("click", async () => {
   const msg = $("#set-msg");
   msg.textContent = "saving…";
