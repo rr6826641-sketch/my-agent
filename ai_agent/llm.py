@@ -21,6 +21,63 @@ class RunCancelled(Exception):
     pass
 
 
+class NetworkError(LLMError):
+    """Transient network failure talking to the LLM API (DNS resolution,
+    connect/read timeout, connection reset or mid-stream drop). Subclass of
+    LLMError so existing failover logic keeps working, but carries the
+    UI-facing fallback text and can be recognised to skip mid-answer failover.
+    """
+
+
+NETWORK_FALLBACK_MSG = ("Internet connection interrupted while reaching "
+                        "LLM API. Please check connection and retry.")
+
+# requests exceptions that mean "the network is unstable" and are worth an
+# exponential-backoff retry. HTTP 4xx/5xx and malformed-request errors are
+# NOT retried (they surface immediately as LLMError instead).
+_TRANSIENT_NET_ERRORS = (requests.exceptions.Timeout,
+                         requests.exceptions.ConnectionError,
+                         # remote closed/reset the body mid-stream
+                         # (urllib3 ProtocolError e.g. "Connection broken:
+                         #  IncompleteRead" -> requests.ChunkedEncodingError):
+                         # the classic signature of an SSE drop in flight
+                         requests.exceptions.ChunkedEncodingError)
+
+
+def _post_with_retry(model, url, headers, payload, timeout, stream=False,
+                     retries=3, backoff=1.0):
+    """POST /chat/completions with bounded exponential-backoff retries.
+
+    Only transient network errors (DNS failure, refused/reset connection,
+    connect or read timeout) are retried, up to `retries` attempts with
+    backoff delays of backoff, backoff*2, ... (default 1s then 2s). When the
+    retries are exhausted a NetworkError is raised carrying the friendly
+    UI fallback message, so the caller never hangs silently and never lets
+    the agent stay stuck in a working state on a dead network.
+
+    Non-transient request failures (bad URL, etc.) raise LLMError at once.
+    """
+    attempt = 0
+    delay = float(backoff)
+    while True:
+        # later attempts use a shorter timeout so a half-dead network is
+        # abandoned fast instead of burning minutes per attempt.
+        effective = timeout if attempt == 0 else min(float(timeout), 30.0)
+        try:
+            return requests.post(url, headers=headers, json=payload,
+                                 timeout=effective, stream=stream)
+        except _TRANSIENT_NET_ERRORS as exc:
+            attempt += 1
+            if attempt >= retries:
+                raise NetworkError("%s (model '%s'; %s after %d attempt(s): "
+                                   "%s)" % (NETWORK_FALLBACK_MSG, model,
+                                            type(exc).__name__, attempt, exc))
+            time.sleep(delay)
+            delay *= 2
+        except requests.exceptions.RequestException as exc:
+            raise LLMError("API request failed: %s" % exc)
+
+
 # Flagship reasoning models (Task 4: High-Reasoning Fallback & Auto-Router).
 # When the primary model is one of these, the OTHER flagship is tried before
 # the cheap generic fallbacks, so hard reasoning/architecture/code-analysis
@@ -299,11 +356,10 @@ class OpenAIClient:
         if self.api_key:
             headers["Authorization"] = "Bearer " + self.api_key
         url = self.base_url + "/chat/completions"
-        try:
-            resp = requests.post(url, headers=headers, json=payload,
-                                 timeout=self.timeout)
-        except requests.exceptions.RequestException as exc:
-            raise LLMError("API request failed: %s" % exc)
+        # Transient network errors (DNS failure, dropped connection,
+        # timeouts) are retried with exponential backoff before a hard
+        # NetworkError with the friendly fallback message is raised.
+        resp = _post_with_retry(model, url, headers, payload, self.timeout)
         # SSE/JSON bodies are always UTF-8; stop requests from guessing
         # ISO-8859-1 when the upstream omits the charset (mojibake source)
         resp.encoding = "utf-8"
@@ -341,6 +397,7 @@ class OpenAIClient:
             if cancel_event is not None and cancel_event.is_set():
                 raise RunCancelled("generation cancelled by user")
             try:
+                produced = False
                 if self.uncensored:
                     # Red Team Mode: buffer the stream so a refusal can be
                     # auto-retried before anything reaches the UI.
@@ -352,7 +409,6 @@ class OpenAIClient:
                     last_error = LLMError(
                         "model '%s' returned no content" % model)
                 else:
-                    produced = False
                     for ev in self._stream_once(model, messages, tools,
                                                 temperature,
                                                 cancel_event=cancel_event):
@@ -363,6 +419,15 @@ class OpenAIClient:
                         return
                     last_error = LLMError(
                         "model '%s' returned no content" % model)
+            except NetworkError as exc:
+                # A network drop AFTER tokens were already streamed to the
+                # UI must not trigger a second (fallback) model run on top
+                # of the visible partial reply: re-raise immediately so the
+                # caller surfaces the interruption and clears the busy
+                # state instead of hanging in a silent model-failover chain.
+                if produced:
+                    raise
+                last_error = exc
             except LLMError as exc:
                 last_error = exc
             if index + 1 < len(models):
@@ -434,11 +499,11 @@ class OpenAIClient:
         if self.api_key:
             headers["Authorization"] = "Bearer " + self.api_key
         url = self.base_url + "/chat/completions"
-        try:
-            resp = requests.post(url, headers=headers, json=payload,
-                                 timeout=self.timeout, stream=True)
-        except requests.exceptions.RequestException as exc:
-            raise LLMError("API request failed: %s" % exc)
+        # Same bounded exponential-backoff retry as chat(): a dead network
+        # must fail loudly (NetworkError) instead of silently hanging the
+        # agent in a working state while the fallback chain is walked.
+        resp = _post_with_retry(model, url, headers, payload, self.timeout,
+                                stream=True)
         # SSE/JSON bodies are always UTF-8; stop requests from guessing
         # ISO-8859-1 when the upstream omits the charset (mojibake source)
         resp.encoding = "utf-8"
@@ -471,6 +536,7 @@ class OpenAIClient:
         content_parts = []
         tool_slots = {}
         last_data_ts = time.time()
+        drop_exc = None
         try:
             for raw in resp.iter_lines(decode_unicode=True):
                 if cancel_event is not None and cancel_event.is_set():
@@ -523,14 +589,26 @@ class OpenAIClient:
                         slot["args"] += fn["arguments"]
         except RunCancelled:
             raise
-        except requests.exceptions.RequestException:
-            pass
+        except _TRANSIENT_NET_ERRORS as exc:
+            # Mid-stream network drop. Never swallow it silently: a silent
+            # pass here left the UI stuck on "agent is working…" while the
+            # client quietly walked the whole fallback chain. Surface a real
+            # NetworkError so the stream ends with the fallback message and
+            # the busy state is always released.
+            drop_exc = exc
+        except requests.exceptions.RequestException as exc:
+            raise LLMError("API stream failed: %s" % exc)
         finally:
             stop_watch.set()
             resp.close()
 
         if cancel_event is not None and cancel_event.is_set():
             raise RunCancelled("generation cancelled by user")
+
+        if drop_exc is not None:
+            raise NetworkError("%s (model '%s'; connection dropped "                               "mid-stream: %s)"
+                               % (NETWORK_FALLBACK_MSG, model,
+                                  type(drop_exc).__name__))
 
         tool_calls = []
         for idx in sorted(tool_slots):
