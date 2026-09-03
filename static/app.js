@@ -1087,8 +1087,47 @@ async function refreshStatus() {
     }
     $("#pill-mode").className = "pill " + (s.mode === "mock" ? "mock" : "live");
     $("#badge-tools").textContent = s.tools;
+    updateRedTeamPill(s.red_team_mode, s.persona);
   } catch { /* ignore */ }
 }
+
+/* ---------------- red team master switch (one-click evil profile) ---------------- */
+let redTeamOn = false;
+let redTeamBusy = false;
+
+function updateRedTeamPill(on, persona) {
+  redTeamOn = !!on;
+  const pill = $("#pill-redteam");
+  if (!pill) return;
+  if (redTeamOn) {
+    pill.textContent = "🩸 RED TEAM · " + String(persona || "unfiltered").toUpperCase();
+    pill.className = "pill redteam-on";
+  } else {
+    pill.textContent = "🩸 RED TEAM OFF";
+    pill.className = "pill redteam-off";
+  }
+}
+
+$("#pill-redteam").addEventListener("click", async () => {
+  if (redTeamBusy) return;
+  redTeamBusy = true;
+  try {
+    const res = await fetch("/api/redteam", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: !redTeamOn }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      updateRedTeamPill(data.red_team_mode, data.persona);
+      // keep Settings checkbox in sync
+      const cb = $("#set-redteam");
+      if (cb) cb.checked = !!data.red_team_mode;
+    }
+  } catch { /* ignore */ } finally {
+    redTeamBusy = false;
+  }
+});
 
 refreshStatus();
 setInterval(refreshStatus, 10000);

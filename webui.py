@@ -357,6 +357,8 @@ def _status():
         "mode": mode,
         "model": model,
         "red_team_mode": bool(cfg.get("red_team_mode")),
+        "persona": personas.normalize(cfg.get("persona")),
+        "refusal_retries": int(cfg.get("refusal_retries", 3) or 0),
         "base_url": "built-in" if cfg.get("mock") else cfg.get("base_url", "?"),
         "has_key": bool(cfg.get("api_key")),
         "key_error": _state.get("key_error", ""),
@@ -1181,6 +1183,23 @@ def api_personas_save():
 # --------------------------------------------------------------------------
 # RPG (interactive campaigns)
 # --------------------------------------------------------------------------
+
+@app.route("/api/redteam", methods=["POST"])
+def api_redteam_master_switch():
+    """One-click Red Team master switch (evil profile).
+
+    enabled=true  -> red_team_mode on + 'unfiltered' persona
+    enabled=false -> red_team_mode off (persona left as-is)
+    """
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get("enabled"))
+    patch = {"red_team_mode": enabled}
+    if enabled:
+        patch["persona"] = "unfiltered"
+    _save_cfg(patch)
+    _reload_state(mock_override=_current_cfg().get("mock"))
+    return jsonify({"ok": True, **_status()})
+
 
 @app.route("/api/rpg")
 def api_rpg_status():
