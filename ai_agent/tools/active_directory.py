@@ -25,9 +25,6 @@ import random
 import socket
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List
-
-from .base import truncate
 
 DEFAULT_TIMEOUT = 3.0
 _MAX_SWEEP_HOSTS = 8192

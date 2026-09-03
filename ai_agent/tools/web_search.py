@@ -183,6 +183,29 @@ def _scraper_search(query: str, max_results: int) -> list[dict]:
     return out
 
 
+def _html_search(query: str, max_results: int) -> list[dict]:
+    url = "https://html.duckduckgo.com/html/?q=" + quote_plus(query)
+    resp = requests.get(url, headers={"User-Agent": USER_AGENT},
+                        timeout=REQUEST_TIMEOUT)
+    resp.raise_for_status()
+    page = resp.text
+    anchors = re.findall(
+        r'<a\b([^>]*\bclass=["\']result__a["\'][^>]*)>(.*?)</a>', page, re.S)
+    snips = re.findall(r'class=["\']result__snippet["\'][^>]*>(.*?)</a>',
+                       page, re.S)
+    out = []
+    for i, (attrs, title_html) in enumerate(anchors[:max_results]):
+        m = re.search(r'\bhref=["\']([^"\']+)["\']', attrs)
+        link = _unwrap_ddg_link(m.group(1).strip()) if m else ""
+        snip = _strip_html(snips[i]) if i < len(snips) else ""
+        out.append({
+            "title": _strip_html(title_html)[:200],
+            "url": link[:500],
+            "snippet": snip[:500],
+        })
+    return out
+
+
 # --------------------------------------------------------------------------
 # Public tool API
 # --------------------------------------------------------------------------
@@ -191,7 +214,7 @@ def search_web(query: str, max_results: int = 5) -> dict:
     """Search the web via DuckDuckGo; return structured JSON results.
 
     Returns:
-        {"query": str, "backend": "ddgs"|"scraper", "count": int,
+        {"query": str, "backend": "ddgs"|"scraper"|"html", "count": int,
          "results": [{"title", "url", "snippet"}, ...]}
         plus {"error": str} when every backend failed (results == []).
     """

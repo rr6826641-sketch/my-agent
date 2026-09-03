@@ -65,7 +65,6 @@ def tool_sqli_test(url="", param="", method="GET", data=""):
     if not url or not param:
         return "sqli_test: url and param are required"
     s = _session()
-    base = {"param": param, "method": method, "url": url}
     out = ["SQLi boolean-based probe: %s ? %s" % (url, param), ""]
     try:
         r0 = _request(s, method, url, {param: "1"}, data)
@@ -85,7 +84,6 @@ def tool_sqli_test(url="", param="", method="GET", data=""):
                          "quote payload differs / SQL error in response"))
 
         rt = _request(s, method, url, {param: "1' OR '1'='1"}, data)
-        t = _body(rt)
         out.append("tautology       : %s" % _status_of(rt))
         taut = isinstance(r0, requests.Response) and isinstance(rt, requests.Response) \
             and len(rt.content) != len(r0.content)

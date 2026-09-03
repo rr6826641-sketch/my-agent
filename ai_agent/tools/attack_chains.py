@@ -44,7 +44,6 @@ import os
 import re
 import threading
 import time
-import urllib.request
 
 from .reporting import correlate_findings
 

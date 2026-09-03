@@ -36,7 +36,6 @@ Example::
     #                           "fixed_command": "nmap -sV --top-ports 100 ..."}]
 """
 
-import json
 import os
 import re
 import threading

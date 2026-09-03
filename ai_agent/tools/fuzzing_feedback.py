@@ -37,7 +37,6 @@ Everything runs inside the tool-call timeout budget: total duration is
 capped, requests are sequential and failures are tolerated.
 """
 
-import base64
 import json
 import random
 import re

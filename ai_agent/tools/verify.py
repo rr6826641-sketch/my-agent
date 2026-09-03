@@ -142,7 +142,7 @@ def parse_host_port(value):
 def _probe_port(host, port, timeout=3.0):
     """Single TCP connect probe. Returns (open_bool, detail)."""
     try:
-        with socket.create_connection((host, port), timeout=timeout) as s:
+        with socket.create_connection((host, port), timeout=timeout):
             return True, "TCP connect to %s:%d succeeded" % (host, port)
     except socket.timeout:
         return False, "TCP connect to %s:%d timed out" % (host, port)

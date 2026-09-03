@@ -12,8 +12,6 @@ import json
 import re
 from pathlib import Path
 
-from .base import truncate
-
 SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 MAX_GUIDE_CHARS = 24000
 DEFAULT_SEARCH_LIMIT = 5

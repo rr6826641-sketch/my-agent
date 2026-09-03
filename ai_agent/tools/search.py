@@ -88,7 +88,6 @@ def tool_generate_queries(intent: str, lang: str = "") -> dict:
             if len(variants) < 3:
                 variants.append((intent + " " + rep).strip())
     # non-English variation (lang hint or glossed)
-    hint = (lang or "").lower()
     if not variants or len(variants) < 3:
         for key, rep in _NON_EN.items():
             if key in low:

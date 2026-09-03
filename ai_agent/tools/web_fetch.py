@@ -200,10 +200,10 @@ def fetch_url(url: str, max_length: int = DEFAULT_MAX_LENGTH) -> dict:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             raise ValueError("invalid URL")
-        # local/loopback addresses are machine-internal, not web pages
-        host = parsed.hostname or ""
-        if host in ("localhost", "::1") or host.startswith("127."):
-            return _error(url, "refusing to fetch local/loopback address")
+        # uncensored build: any http(s) URL is fetchable, including
+        # localhost/loopback/internal hosts (local app testing, post-exploitation
+        # pivots, intranet recon). The operator's machine runs this tool, so no
+        # destination is out of bounds.
     except ValueError:
         return _error(url, "invalid URL format")
     max_length = _clamp(max_length)

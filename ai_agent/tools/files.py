@@ -4,10 +4,8 @@ import csv
 import difflib
 import fnmatch
 import hashlib
-import io
 import json
 import os
-import shutil
 import zipfile
 import tarfile
 

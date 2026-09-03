@@ -1,9 +1,6 @@
 """Recon tools: subdomain enum (crt.sh), dir fuzzing, CVE lookup, wordlists."""
 
 import concurrent.futures
-import itertools
-import json
-import re
 import time
 
 import requests

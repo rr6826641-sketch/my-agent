@@ -9,7 +9,6 @@ Examples:
 
 import argparse
 import os
-import sys
 
 from ai_agent.config import PROJECT_DIR, load_config
 from ai_agent.core import Agent
@@ -63,7 +62,6 @@ def main():
     institutional = InstitutionalMemory(
         cfg.get("institutional_db") or
         os.path.join(PROJECT_DIR, "institutional_notes.db"))
-    interactive = sys.stdin.isatty() and not cfg["once"]
     agent = Agent(
         llm, memory=memory, institutional=institutional,
         max_iterations=cfg["max_iterations"] or 60,

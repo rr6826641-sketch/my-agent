@@ -520,7 +520,6 @@ class WorkspaceIndex:
         resolved = []
         for imp in rec.get("imports", []):
             target = imp["target"]
-            low = target
             rel_path = None
             if target.startswith(("./", "../")):
                 # filesystem-relative (js/ts/other): resolve from this dir

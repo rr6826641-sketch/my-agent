@@ -18,8 +18,6 @@ ssrf, cmdi, lfi, open_redirect, ssti, xxe, idor, auth_bypass, cors,
 header_injection, cors_misconfig? (kept list explicit below).
 """
 
-import json
-
 # finding_type -> template dict
 # Each template: title, safety, payload, curl, python, proof, cwe
 

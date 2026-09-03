@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import re
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -115,6 +114,7 @@ from .tools.verify import (
     lightweight_verify_finding,
     payload_verify_plan,
 )
+from .tools.hypothesis_engine import chain_to_verification_plan
 
 SYSTEM_PROMPT = """You are {name}, an elite AI penetration testing assistant
 for authorized cybersecurity professionals.

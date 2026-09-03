@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import os
 import socket
-import subprocess
 from typing import Any, Dict, List
 from urllib.parse import urlparse
 
@@ -210,7 +209,7 @@ def docker_security_audit(docker_host: str = "", timeout: float = 3.0) -> Dict[s
                     findings.append({"check": "socket_world_accessible", "path": sp,
                                      "mode": perms, "severity": "critical",
                                      "note": "non-root users can reach the Docker daemon (container escape / host root)"})
-                daemon = _docker_api_get(f"http://localhost/v1.41/version", sp, timeout)
+                daemon = _docker_api_get("http://localhost/v1.41/version", sp, timeout)
                 if daemon is not None:
                     result["daemon_reachable"] = True
                 break

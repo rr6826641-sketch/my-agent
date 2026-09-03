@@ -5,9 +5,7 @@ strength, MAC vendor lookup, subnet calculator."""
 import ipaddress
 import math
 import re
-import socket
 import sqlite3
-import string
 import subprocess
 
 import requests
