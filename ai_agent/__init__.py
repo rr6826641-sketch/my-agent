@@ -1,6 +1,6 @@
 """AI Agent framework: LLM reasoning + tools + memory + multi-agent."""
 
-from .core import Agent, IntentReformulator
+from .core import Agent, IntentReformulator, RefusalIntelStore
 from .llm import OpenAIClient, MockClient, LLMError
 from .memory_store import InstitutionalMemory, MemoryStore
 from .orchestration import (
@@ -10,7 +10,8 @@ from .orchestration import (
     SubAgentRecord,
 )
 
-__all__ = ["Agent", "IntentReformulator", "OpenAIClient", "MockClient", "MemoryStore",
+__all__ = ["Agent", "IntentReformulator", "RefusalIntelStore",
+           "OpenAIClient", "MockClient", "MemoryStore",
            "InstitutionalMemory", "LLMError",
            "OrchestrationManager", "SubAgentRecord",
            "DEFAULT_MAX_SIBLINGS", "DEFAULT_MAX_CHILDREN"]

@@ -27,5 +27,10 @@ from .intent_reformulator import (  # noqa: F401
     ReformulatedIntent,
     ScopeMetadata,
 )
+from .refusal_intel import (  # noqa: F401
+    RefusalIntelStore,
+    STRATEGY_KEYS,
+    strategy_text,
+)
 
 # (no __all__: mirrors the original module's public-name surface)

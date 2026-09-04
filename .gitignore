@@ -58,3 +58,5 @@ api_models.json
 
 # Persona custom text (user runtime data)
 personas_custom.txt
+# Refusal Intelligence Engine runtime memory
+refusal_intel.json

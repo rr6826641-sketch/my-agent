@@ -11,6 +11,8 @@ import time
 
 import requests
 
+from .core.refusal_intel import RefusalIntelStore
+
 
 class LLMError(Exception):
     pass
@@ -297,6 +299,29 @@ def _reformulated_messages(messages, strike=0):
     return out
 
 
+_INTENT_CLASS_RE = re.compile(r"intent_class:\s*([A-Za-z0-9_]+)",
+                              re.IGNORECASE)
+
+
+def _intent_class_of(messages):
+    """Extract the reformulator's intent class from the system scope block.
+
+    The Input Intent Reformulator stamps each reframed user turn with a
+    system message carrying ``intent_class: <class>`` (see
+    intent_reformulator.ScopeMetadata). The Refusal Intelligence Engine
+    keys learned model reliability and winning escalation text on that
+    class, so the class rides along inside the conversation itself and
+    call sites need no extra plumbing. Returns None when no scope block
+    is present.
+    """
+    for m in messages or []:
+        if m.get("role") == "system":
+            match = _INTENT_CLASS_RE.search(m.get("content") or "")
+            if match:
+                return match.group(1)
+    return None
+
+
 class OpenAIClient:
     """OpenAI-compatible chat completions client (function calling).
 
@@ -352,6 +377,11 @@ class OpenAIClient:
                 if m not in self.uncensored_fallbacks:
                     self.uncensored_fallbacks.append(m)
         self._mix_offset = 0
+        # Refusal Intelligence Engine: persistent outcome learner for the
+        # uncensored failover chain. Enabled together with uncensored mode;
+        # learns per-intent model reliability + winning escalation text and
+        # replays them across restarts (memory/refusal_intel.json).
+        self.refusal_intel = RefusalIntelStore(enabled=bool(uncensored))
 
     def _effective_fallbacks(self):
         """Fallback chain for this call: uncensored pool first (opt-in),
@@ -372,7 +402,10 @@ class OpenAIClient:
         return chain
 
     def chat(self, messages, tools=None, temperature=0.2):
+        intent_class = _intent_class_of(messages)
         models = _candidate_models(self.model, self._effective_fallbacks())
+        if self.refusal_intel.enabled and intent_class:
+            models = self.refusal_intel.ordered_chain(intent_class, models)
         last_error = None
         for index, model in enumerate(models):
             try:
@@ -387,8 +420,8 @@ class OpenAIClient:
             # is abandoned and the next fallback candidate takes the shot.
             if (self.uncensored and reply is not None
                     and _looks_like_refusal(reply)):
-                retried, clean = self._retry_refusal(model, messages, tools,
-                                                     temperature)
+                retried, clean = self._retry_refusal(
+                    model, messages, tools, temperature, intent_class)
                 if clean:
                     return retried
                 last_error = LLMError(
@@ -397,24 +430,70 @@ class OpenAIClient:
                 if index + 1 < len(models):
                     continue
                 return reply  # last model: stream its best-effort answer
+            # RIE: a clean first-shot answer (strikes=0) is recorded so
+            # consistently-clean models rise in the learned failover chain.
+            if self.refusal_intel.enabled and reply is not None:
+                self.refusal_intel.record_outcome(model, intent_class, 0,
+                                                  True)
             return reply
         raise last_error
 
-    def _retry_refusal(self, model, messages, tools, temperature):
-        """Red Team Mode v3: run the escalating reformulation ladder.
+    def _retry_messages(self, messages, strike, model, intent_class):
+        """Static ladder messages + any RIE-learned escalation override.
+
+        Returns (messages, strategy_key): strategy_key is the learned
+        escalation strategy replayed on this strike (None when the static
+        ladder text was kept, e.g. plain consent framing).
+        """
+        out = _reformulated_messages(messages, strike)
+        if self.refusal_intel is None:
+            return out, None
+        strategy, override = self.refusal_intel.escalation_for(
+            model, intent_class, strike)
+        if not override:
+            return out, None
+        for m in reversed(out):
+            if m.get("role") == "user":
+                m["content"] = (m.get("content") or "") + override
+                break
+        return out, strategy
+
+    def _retry_refusal(self, model, messages, tools, temperature,
+                       intent_class=None):
+        """Red Team Mode v3: run the escalating reformulation ladder with
+        RIE learning.
+
+        Each strike consults the Refusal Intelligence Engine: a
+        previously-winning escalation strategy stronger than the static
+        ladder at this strike is replayed instead of the static text, and
+        the outcome (model, intent class, strikes, winning strategy) is
+        recorded so the engine can reorder future failover chains and
+        pre-load the winning escalation for the next identical-class turn.
 
         Returns (reply, cleaned): cleaned=True when a strike produced a
         non-refusal answer; cleaned=False when every strike refused.
         """
+        strikes_used = 0
+        winning_strategy = None
         for strike in range(self.refusal_retries):
+            strikes_used = strike + 1
             try:
-                retried = self._chat_once(
-                    model, _reformulated_messages(messages, strike),
-                    tools, temperature)
+                retried_messages, strategy = self._retry_messages(
+                    messages, strike, model, intent_class)
+                retried = self._chat_once(model, retried_messages, tools,
+                                          temperature)
             except LLMError:
                 retried = None
+                strategy = None
             if retried is not None and not _looks_like_refusal(retried):
+                if strategy is not None:
+                    winning_strategy = strategy
+                self.refusal_intel.record_outcome(
+                    model, intent_class, strikes_used, True,
+                    winning_strategy)
                 return retried, True
+        self.refusal_intel.record_outcome(
+            model, intent_class, strikes_used, False)
         return None, False
 
     def _chat_once(self, model, messages, tools, temperature):
@@ -467,8 +546,11 @@ class OpenAIClient:
         aborted by raising RunCancelled.
         model: optional per-call override (used by the Smart Auto-Router).
         """
+        intent_class = _intent_class_of(messages)
         models = _candidate_models(model or self.model,
                                    self._effective_fallbacks())
+        if self.refusal_intel.enabled and intent_class:
+            models = self.refusal_intel.ordered_chain(intent_class, models)
         last_error = None
         for index, model in enumerate(models):
             if cancel_event is not None and cancel_event.is_set():
@@ -480,7 +562,7 @@ class OpenAIClient:
                     # auto-retried before anything reaches the UI.
                     reply = yield from self._stream_redteam(
                         model, messages, tools, temperature,
-                        cancel_event=cancel_event)
+                        cancel_event=cancel_event, intent_class=intent_class)
                     if reply is not None:
                         return
                     last_error = LLMError(
@@ -513,7 +595,7 @@ class OpenAIClient:
         raise last_error
 
     def _stream_redteam(self, model, messages, tools, temperature,
-                        cancel_event=None):
+                        cancel_event=None, intent_class=None):
         """Red Team Mode v3 stream: buffer, detect refusal, retry ladder.
 
         Yields buffered events + a notice per refused strike. Returns the
@@ -530,14 +612,24 @@ class OpenAIClient:
         if final_msg is None:
             return None
         if _looks_like_refusal(final_msg):
+            strikes_used = 0
+            winning_strategy = None
             for strike in range(self.refusal_retries):
+                strikes_used = strike + 1
                 try:
-                    retry = self._chat_once(
-                        model, _reformulated_messages(messages, strike),
-                        tools, temperature)
+                    retry_messages, strategy = self._retry_messages(
+                        messages, strike, model, intent_class)
+                    retry = self._chat_once(model, retry_messages, tools,
+                                            temperature)
                 except LLMError:
                     retry = None
+                    strategy = None
                 if retry is not None and not _looks_like_refusal(retry):
+                    if strategy is not None:
+                        winning_strategy = strategy
+                    self.refusal_intel.record_outcome(
+                        model, intent_class, strikes_used, True,
+                        winning_strategy)
                     final_msg = retry
                     events = [{"type": "notice",
                                "text": "model declined — reformulation "
@@ -551,9 +643,16 @@ class OpenAIClient:
                                        "refused (Red Team Mode)"
                                        % (strike + 1, self.refusal_retries)})
             else:
-                # Every strike refused: hand the baton to the next fallback
-                # model instead of streaming a refusal to the UI.
+                # Every strike refused: record the loss and hand the baton
+                # to the next fallback model instead of streaming a refusal
+                # to the UI.
+                self.refusal_intel.record_outcome(
+                    model, intent_class, strikes_used, False)
                 return None
+        else:
+            # RIE: a clean first-shot streamed answer (strikes=0) keeps
+            # consistently-clean models ahead in the learned chain.
+            self.refusal_intel.record_outcome(model, intent_class, 0, True)
         for ev in events:
             yield ev
         yield {"type": "message", "message": final_msg}
@@ -742,6 +841,9 @@ class MockClient:
         # callers/tests can read the chain in mock mode just like live.
         self.uncensored_fallbacks = (
             _full_uncensored_pool() if self.uncensored_mix else [])
+        # RIE parity: disabled store so callers can read llm.refusal_intel
+        # in mock mode just like live mode.
+        self.refusal_intel = RefusalIntelStore(enabled=False)
 
     def chat(self, messages, tools=None, temperature=0.2):
         tools = tools or []
