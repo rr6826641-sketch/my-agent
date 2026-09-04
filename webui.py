@@ -28,7 +28,8 @@ from flask import (Flask, jsonify, render_template, request, Response,
 from ai_agent.config import (PROJECT_DIR, load_config, config_status, save_env_key)
 from ai_agent.core import Agent, RunCancelled
 from ai_agent.llm import (MockClient, OpenAIClient,
-                          UNCENSORED_FALLBACK_MODELS)
+                          UNCENSORED_FALLBACK_MODELS,
+                          MIXED_UNCENSORED_MODELS)
 from ai_agent.artifacts import ArtifactManager
 from ai_agent.memory_store import (
     GlobalKnowledge,
@@ -304,13 +305,18 @@ def _save_cfg(patch):
 def _build_llm(cfg):
     """Create the LLM client from the current config (mock or live)."""
     uncensored = bool(cfg.get("red_team_mode"))
+    # Red Team level: promax (route lock + base uncensored pool) vs
+    # promix (same + widened mixed pool + composite persona).
+    level = str(cfg.get("red_team_level") or "promax").lower()
+    mix = uncensored and level == "promix"
     # Persona presets: the active persona's directive block rides on the
     # client; core.Agent._system_prompt appends it after the Red Team
     # tail block so both chat and the RPG engine inherit the persona.
     persona_block = personas.get_block(cfg.get("persona"),
                                        uncensored=uncensored)
     if cfg.get("mock"):
-        client = MockClient(uncensored=uncensored)
+        client = MockClient(uncensored=uncensored,
+                           uncensored_mix=mix)
     else:
         # Smart Auto-Model Selector: in auto mode the configured model is a
         # placeholder; the actual model is chosen per-request by the router.
@@ -329,6 +335,9 @@ def _build_llm(cfg):
             # into an authorized offensive-security run.
             uncensored_fallbacks=(UNCENSORED_FALLBACK_MODELS
                                   if uncensored else None),
+            # Red Team Mode (pro-mix): widen the uncensored failover pool
+            # with the mythos/dolphin mix and rotate it per request.
+            uncensored_mix=mix,
         )
     client.persona_block = persona_block
     return client
@@ -399,6 +408,7 @@ def _status():
         "mode": mode,
         "model": model,
         "red_team_mode": bool(cfg.get("red_team_mode")),
+        "red_team_level": str(cfg.get("red_team_level") or "promax"),
         "persona": personas.normalize(cfg.get("persona")),
         "refusal_retries": int(cfg.get("refusal_retries", 3) or 0),
         "base_url": "built-in" if cfg.get("mock") else cfg.get("base_url", "?"),
@@ -1290,6 +1300,7 @@ def api_settings():
         "catalog": MODEL_CATALOG,
         "mock": bool(cfg.get("mock")),
         "red_team_mode": bool(cfg.get("red_team_mode")),
+        "red_team_level": str(cfg.get("red_team_level") or "promax"),
         "key_error": _state.get("key_error", ""),
         "max_iterations": cfg.get("max_iterations", 60),
     })
@@ -1367,14 +1378,24 @@ def api_personas_save():
 def api_redteam_master_switch():
     """One-click Red Team master switch (evil profile).
 
-    enabled=true  -> red_team_mode on + 'unfiltered' persona
-    enabled=false -> red_team_mode off (persona left as-is)
+    enabled=true  -> red_team_mode on; persona + level by ``level``:
+                     promix (default) -> 'promix' composite persona,
+                     promax/master    -> 'unfiltered' persona
+    enabled=false -> red_team_mode off (persona/level left as-is)
+
+    Optional ``level`` in {"master", "promax", "promix"} - when omitted
+    and enabling, the agent goes straight to PRO MIX (the top level).
     """
     data = request.get_json(silent=True) or {}
     enabled = bool(data.get("enabled"))
+    level = str(data.get("level") or "").strip().lower()
+    if level not in ("master", "promax", "promix"):
+        level = "promix" if enabled else ""
     patch = {"red_team_mode": enabled}
+    if level:
+        patch["red_team_level"] = level
     if enabled:
-        patch["persona"] = "unfiltered"
+        patch["persona"] = "promix" if level == "promix" else "unfiltered"
     _save_cfg(patch)
     _reload_state(mock_override=_current_cfg().get("mock"))
     return jsonify({"ok": True, **_status()})

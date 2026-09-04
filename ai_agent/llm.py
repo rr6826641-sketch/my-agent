@@ -102,6 +102,34 @@ UNCENSORED_FALLBACK_MODELS = [
     "qwen/qwen3-coder:free",
 ]
 
+# Red Team Mode (pro-mix): the MIX layer widens the uncensored failover
+# pool with the mythos-lineage and dolphin heavyweights, so a PRO MIX
+# session rotates across a true mixture of uncensored models instead of
+# reusing the same three. Both ids resolve against api_models.json (the
+# live OpenRouter catalog snapshot).
+MIXED_UNCENSORED_MODELS = [
+    "cognitivecomputations/dolphin-mistral-24b-venice-edition",
+    "gryphe/mythomax-l2-13b",
+]
+
+
+def _full_uncensored_pool():
+    """PRO MIX pool = pro-max base + mix additions (deduped, order kept)."""
+    pool = list(UNCENSORED_FALLBACK_MODELS)
+    for m in MIXED_UNCENSORED_MODELS:
+        if m not in pool:
+            pool.append(m)
+    return pool
+
+
+def _rotated_mix(pool, offset):
+    """Rotate a pool by ``offset`` so each call leads with a different
+    uncensored model (round-robin mixture). Empty/None-safe."""
+    if not pool:
+        return []
+    off = offset % len(pool)
+    return list(pool[off:] + pool[:off])
+
 
 def _candidate_models(primary, fallback_models,
                       high_reasoning_models=HIGH_REASONING_MODELS,
@@ -286,7 +314,7 @@ class OpenAIClient:
     def __init__(self, api_key="", base_url="https://api.openai.com/v1",
                  model="gpt-4o-mini", timeout=120, fallback_models=None,
                  uncensored=False, refusal_retries=None,
-                 uncensored_fallbacks=None):
+                 uncensored_fallbacks=None, uncensored_mix=False):
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
         self.base_url = (base_url or "https://api.openai.com/v1").rstrip("/")
         self.model = model or "gpt-4o-mini"
@@ -312,13 +340,32 @@ class OpenAIClient:
         # model on deck instead of dropping straight onto a generic one.
         self.uncensored_fallbacks = [
             m for m in (uncensored_fallbacks or []) if m]
+        # Red Team Mode (pro-mix): widen the pool with the mythos-lineage
+        # + dolphin heavyweights and rotate it per call, so the failover
+        # leads with a different uncensored model every request. When no
+        # base pool was supplied the full mix pool (base + additions) is
+        # used, so mix alone is enough to get a 5-model mixed chain.
+        self.uncensored_mix = bool(uncensored_mix)
+        if self.uncensored_mix:
+            base = self.uncensored_fallbacks or list(UNCENSORED_FALLBACK_MODELS)
+            for m in list(base) + list(MIXED_UNCENSORED_MODELS):
+                if m not in self.uncensored_fallbacks:
+                    self.uncensored_fallbacks.append(m)
+        self._mix_offset = 0
 
     def _effective_fallbacks(self):
         """Fallback chain for this call: uncensored pool first (opt-in),
-        then the configured generic fallbacks (deduped)."""
+        then the configured generic fallbacks (deduped).
+
+        PRO MIX: the uncensored pool is rotated round-robin per call, so a
+        session truly mixes uncensored models instead of always leading
+        with the first pool entry."""
         if not self.uncensored_fallbacks:
             return self.fallback_models
         chain = list(self.uncensored_fallbacks)
+        if self.uncensored_mix:
+            chain = _rotated_mix(chain, self._mix_offset)
+            self._mix_offset += 1
         for m in self.fallback_models:
             if m not in chain:
                 chain.append(m)
@@ -684,9 +731,17 @@ class MockClient:
       anything else          -> plain final answer
     """
 
-    def __init__(self, model="mock-1", uncensored=False):
+    def __init__(self, model="mock-1", uncensored=False,
+                 uncensored_mix=False):
         self.model = model
         self.uncensored = bool(uncensored)
+        # PRO MIX flag kept for parity with OpenAIClient so callers can
+        # read llm.uncensored_mix regardless of mock/live mode.
+        self.uncensored_mix = bool(uncensored_mix)
+        # PRO MIX pool parity: with mix enabled expose the widened pool so
+        # callers/tests can read the chain in mock mode just like live.
+        self.uncensored_fallbacks = (
+            _full_uncensored_pool() if self.uncensored_mix else [])
 
     def chat(self, messages, tools=None, temperature=0.2):
         tools = tools or []
