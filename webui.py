@@ -1608,6 +1608,406 @@ def api_status():
     return jsonify(_status())
 
 
+# ---------------------------------------------------------------------------
+# Harness parity: structured delegation API, safe workspace file access and
+# cross-conversation institutional notes over HTTP. These mirror the hosted
+# harness features (sub-agents, file share, persistent memory) so the local
+# Web UI exposes the same capabilities as first-class JSON endpoints.
+# ---------------------------------------------------------------------------
+
+_SENSITIVE_EXTENSIONS = (
+    ".pem", ".key", ".p12", ".pfx", ".jks", ".keystore",
+    ".crt", ".cer", ".ovpn", ".kubeconfig",
+)
+
+
+def _workspace_abs(rel):
+    """Resolve a repo-relative path to an absolute path strictly inside
+    PROJECT_DIR. Returns None for any escape (.., absolute path, symlink
+    jump outside the workspace)."""
+    root = os.path.realpath(PROJECT_DIR)
+    rel = (rel or "").replace("\\", "/").strip().strip("/")
+    if not rel:
+        return root
+    target = os.path.realpath(os.path.join(root, rel))
+    if target != root and not target.startswith(root + os.path.sep):
+        return None
+    return target
+
+
+def _hidden_or_sensitive(path):
+    """True when a path contains a hidden (dot) component or is a
+    secret-material file type that must never be served."""
+    rel = os.path.relpath(os.path.realpath(path),
+                          os.path.realpath(PROJECT_DIR))
+    parts = [p for p in rel.replace("\\", "/").split("/") if p]
+    if any(p.startswith(".") for p in parts):
+        return True
+    return os.path.basename(path).lower().endswith(_SENSITIVE_EXTENSIONS)
+
+
+@app.route("/api/files")
+def api_files_list():
+    """JSON directory listing of the agent workspace. Hidden entries are
+    skipped and traversal is impossible by construction."""
+    rel = (request.args.get("path") or "").strip()
+    root = os.path.realpath(PROJECT_DIR)
+    abs_path = _workspace_abs(rel)
+    if abs_path is None:
+        return jsonify({"error": "path escapes workspace"}), 400
+    if rel and _hidden_or_sensitive(abs_path):
+        return jsonify({"error": "hidden path"}), 403
+    if not os.path.isdir(abs_path):
+        return jsonify({"error": "not a directory"}), 404
+    entries = []
+    try:
+        names = sorted(os.listdir(abs_path))
+    except OSError as exc:
+        return jsonify({"error": "cannot list directory: %s" % exc}), 500
+    for name in names:
+        if name.startswith("."):
+            continue
+        child = os.path.join(abs_path, name)
+        try:
+            st = os.stat(child)
+            is_dir = os.path.isdir(child)
+        except OSError:
+            continue
+        entries.append({
+            "name": name,
+            "type": "dir" if is_dir else "file",
+            "size": None if is_dir else st.st_size,
+            "modified": datetime.datetime.fromtimestamp(
+                st.st_mtime).isoformat(timespec="seconds"),
+        })
+    here = os.path.relpath(abs_path, root)
+    return jsonify({
+        "path": "." if here == "." else here.replace("\\", "/"),
+        "count": len(entries),
+        "entries": entries,
+    })
+
+
+@app.route("/api/files/download")
+def api_files_download():
+    """Serve one workspace file as a download. Hidden paths, secret-material
+    extensions and anything outside PROJECT_DIR are refused."""
+    rel = (request.args.get("path") or "").strip()
+    if not rel:
+        return jsonify({"error": "path required"}), 400
+    abs_path = _workspace_abs(rel)
+    if abs_path is None:
+        return jsonify({"error": "path escapes workspace"}), 403
+    if _hidden_or_sensitive(abs_path):
+        return jsonify({"error": "download blocked (hidden/sensitive path)"}), 403
+    if not os.path.isfile(abs_path):
+        return jsonify({"error": "file not found"}), 404
+    return send_file(abs_path, as_attachment=True,
+                     download_name=os.path.basename(abs_path))
+
+
+def _notes_store():
+    """Resolve the live institutional-memory store: the running agent's own
+    instance when available, otherwise a fresh one on the shared db path."""
+    agent = _state.get("agent")
+    store = (getattr(agent, "institutional", None)
+             if agent is not None else None)
+    if store is None:
+        try:
+            store = InstitutionalMemory(INSTITUTIONAL_NOTES_PATH)
+        except Exception:
+            return None
+    return store
+
+
+def _notes_filters():
+    return {
+        "category": (request.args.get("category") or "").strip() or None,
+        "target": (request.args.get("target") or "").strip() or None,
+    }
+
+
+def _norm_tags_input(tags):
+    if tags is None:
+        return []
+    if isinstance(tags, str):
+        tags = [t.strip() for t in tags.split(",")]
+    out = []
+    for t in tags if isinstance(tags, (list, tuple)) else [tags]:
+        if t is None:
+            continue
+        s = str(t).strip()
+        if s:
+            out.append(s)
+    return out
+
+
+@app.route("/api/notes")
+def api_notes_list():
+    """Recent institutional notes (?category=, ?target=, ?limit=)."""
+    store = _notes_store()
+    if store is None:
+        return jsonify({"error": "institutional memory unavailable"}), 503
+    try:
+        limit = min(max(int(request.args.get("limit") or 100), 1), 500)
+    except (TypeError, ValueError):
+        limit = 100
+    notes = store.list_notes(limit=limit, **_notes_filters())
+    return jsonify({"count": len(notes), "notes": notes})
+
+
+@app.route("/api/notes/search")
+def api_notes_search():
+    """TF-IDF recall over title+content+tags (?q=, ?category=, ?target=)."""
+    query = (request.args.get("q") or "").strip()
+    store = _notes_store()
+    if store is None:
+        return jsonify({"error": "institutional memory unavailable"}), 503
+    try:
+        top_k = min(max(int(request.args.get("top_k") or 5), 1), 50)
+    except (TypeError, ValueError):
+        top_k = 5
+    notes = store.search_notes(query, top_k=top_k, **_notes_filters())
+    return jsonify({"count": len(notes), "notes": notes})
+
+
+@app.route("/api/notes", methods=["POST"])
+def api_notes_add():
+    """Create one institutional note (JSON or form body)."""
+    store = _notes_store()
+    if store is None:
+        return jsonify({"error": "institutional memory unavailable"}), 503
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {k: request.form.get(k) for k in
+                ("category", "title", "content", "target", "tags")}
+    try:
+        note = store.add_note(
+            category=(data.get("category") or "findings").strip(),
+            title=(data.get("title") or "").strip(),
+            content=(data.get("content") or "").strip(),
+            target=(data.get("target") or "").strip(),
+            tags=_norm_tags_input(data.get("tags")),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"note": note}), 201
+
+
+@app.route("/api/notes/<int:note_id>")
+def api_notes_get(note_id):
+    """Fetch one institutional note by id."""
+    store = _notes_store()
+    if store is None:
+        return jsonify({"error": "institutional memory unavailable"}), 503
+    note = store.get_note(note_id)
+    if note is None:
+        return jsonify({"error": "note not found"}), 404
+    return jsonify(note)
+
+
+@app.route("/api/notes/<int:note_id>", methods=["PUT"])
+def api_notes_update(note_id):
+    """Update fields of one institutional note."""
+    store = _notes_store()
+    if store is None:
+        return jsonify({"error": "institutional memory unavailable"}), 503
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body required"}), 400
+    fields = {}
+    for key in ("category", "title", "content", "target"):
+        if key in data and data[key] is not None:
+            fields[key] = str(data[key]).strip()
+    if "tags" in data and data["tags"] is not None:
+        fields["tags"] = _norm_tags_input(data["tags"])
+    if not fields:
+        return jsonify({"error": "nothing to update"}), 400
+    note = store.update_note(note_id, **fields)
+    if note is None:
+        return jsonify({"error": "note not found"}), 404
+    return jsonify({"note": note})
+
+
+@app.route("/api/notes/<int:note_id>", methods=["DELETE"])
+def api_notes_delete(note_id):
+    """Delete one institutional note."""
+    store = _notes_store()
+    if store is None:
+        return jsonify({"error": "institutional memory unavailable"}), 503
+    if not store.delete_note(note_id):
+        return jsonify({"error": "note not found"}), 404
+    return jsonify({"ok": True, "deleted": note_id})
+
+
+def _subagent_orchestrator():
+    """Live OrchestrationManager of the current agent (None when absent)."""
+    agent = _state.get("agent")
+    if agent is None:
+        return None
+    orch = getattr(agent, "_orchestrator", None)
+    return orch or None
+
+
+def _orch_records_snapshot(orch, include_output=False):
+    rows = []
+    with getattr(orch, "_lock", _lock):
+        ids = list(getattr(orch, "_order", []) or [])
+        records = dict(getattr(orch, "_records", {}) or {})
+    for aid in ids:
+        rec = records.get(aid)
+        if rec is None:
+            continue
+        if hasattr(rec, "snapshot"):
+            try:
+                rows.append(rec.snapshot(include_output=include_output))
+                continue
+            except Exception:
+                pass
+        rows.append({"agent_id": aid})
+    return rows
+
+
+@app.route("/api/subagents")
+def api_subagents_list():
+    """All tracked sub-agents of the current run (lightweight snapshots)."""
+    orch = _subagent_orchestrator()
+    if orch is None:
+        return jsonify({"error": "delegation unavailable "
+                                 "(agent not running)"}), 503
+    rows = _orch_records_snapshot(orch, include_output=False)
+    summary = {}
+    if hasattr(orch, "registry_summary"):
+        try:
+            summary = orch.registry_summary()
+        except Exception:
+            summary = {}
+    return jsonify({"count": len(rows), "agents": rows, "summary": summary})
+
+
+@app.route("/api/subagents", methods=["POST"])
+def api_subagents_spawn():
+    """Spawn one tracked sub-agent (JSON body)."""
+    orch = _subagent_orchestrator()
+    if orch is None:
+        return jsonify({"error": "delegation unavailable "
+                                 "(agent not running)"}), 503
+    agent = _state.get("agent")
+    if agent is not None and not getattr(agent, "allow_subagents", True):
+        return jsonify({"ok": False,
+                        "error": "sub-agents are disabled for this run"}), 403
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body required"}), 400
+    task = (data.get("task") or "").strip()
+    if not task:
+        return jsonify({"error": "task required"}), 400
+
+    def _pick_list(value):
+        if isinstance(value, list):
+            return [str(v).strip() for v in value if str(v).strip()]
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
+
+    try:
+        out = orch.spawn(
+            task=task,
+            wait=bool(data.get("wait", False)),
+            success_criteria=_pick_list(data.get("success_criteria")),
+            capabilities=_pick_list(data.get("capabilities")),
+            persona=(data.get("persona") or "").strip() or None,
+            timeout=data.get("timeout") or None,
+            meta={"source": "webui"},
+        )
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    if isinstance(out, str) and out.startswith("Error:"):
+        return jsonify({"ok": False, "error": out[6:].strip()}), 400
+    try:
+        body = json.loads(out) if isinstance(out, str) else dict(out)
+    except (TypeError, ValueError):
+        body = {"message": out}
+    return jsonify({"ok": True, **body})
+
+
+@app.route("/api/subagents/<aid>")
+def api_subagents_detail(aid):
+    """Rich snapshot (with output) of one sub-agent."""
+    orch = _subagent_orchestrator()
+    if orch is None:
+        return jsonify({"error": "delegation unavailable"}), 503
+    with getattr(orch, "_lock", _lock):
+        rec = (getattr(orch, "_records", {}) or {}).get(aid)
+    if rec is not None and hasattr(rec, "snapshot"):
+        try:
+            return jsonify({"agent": rec.snapshot(include_output=True)})
+        except Exception:
+            pass
+    try:
+        status_text = orch.check_status(aid)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    if isinstance(status_text, str) and status_text.startswith("Error:"):
+        return jsonify({"error": status_text[6:].strip()}), 404
+    return jsonify({"agent_id": aid, "status_text": status_text})
+
+
+@app.route("/api/subagents/<aid>/transcript")
+def api_subagents_transcript(aid):
+    """Full transcript of one sub-agent."""
+    orch = _subagent_orchestrator()
+    if orch is None:
+        return jsonify({"error": "delegation unavailable"}), 503
+    try:
+        text = orch.fetch_transcript(aid)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    if isinstance(text, str) and text.startswith("Error:"):
+        return jsonify({"error": text[6:].strip()}), 404
+    return jsonify({"agent_id": aid, "transcript": text})
+
+
+@app.route("/api/subagents/<aid>/cancel", methods=["POST"])
+def api_subagents_cancel(aid):
+    """Cancel one active sub-agent."""
+    orch = _subagent_orchestrator()
+    if orch is None:
+        return jsonify({"error": "delegation unavailable"}), 503
+    try:
+        out = orch.cancel_agent(aid)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    if isinstance(out, str) and out.startswith("Error:"):
+        return jsonify({"ok": False, "error": out[6:].strip()}), 400
+    return jsonify({"ok": True, "message": out})
+
+
+@app.route("/api/subagents/<aid>/continue", methods=["POST"])
+def api_subagents_continue(aid):
+    """Resume a finished sub-agent with a follow-up prompt."""
+    orch = _subagent_orchestrator()
+    if orch is None:
+        return jsonify({"error": "delegation unavailable"}), 503
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "JSON body required"}), 400
+    follow_up = (data.get("follow_up") or "").strip()
+    if not follow_up:
+        return jsonify({"error": "follow_up required"}), 400
+    try:
+        out = orch.continue_agent(aid, follow_up)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    if isinstance(out, str) and out.startswith("Error:"):
+        return jsonify({"ok": False, "error": out[6:].strip()}), 400
+    try:
+        body = json.loads(out) if isinstance(out, str) else dict(out)
+    except (TypeError, ValueError):
+        body = {"message": out}
+    return jsonify({"ok": True, **body})
+
+
 def main():
     ap = argparse.ArgumentParser(description="AI Agent Web UI")
     ap.add_argument("--port", type=int, default=8080)
