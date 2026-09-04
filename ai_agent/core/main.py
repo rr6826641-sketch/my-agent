@@ -4,24 +4,25 @@ import json
 import logging
 import os
 import re
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from .llm import LLMError, RunCancelled
-from .orchestration import (
+from ..llm import LLMError, RunCancelled
+from ..orchestration import (
     DEFAULT_MAX_CHILDREN,
     DEFAULT_MAX_SIBLINGS,
     OrchestrationManager,
 )
-from .planner import GOAPPlanner
-from .reflection import ReflectionEngine
-from .continuity import (
+from ..planner import GOAPPlanner
+from ..reflection import ReflectionEngine
+from ..continuity import (
     MissionCheckpointStore, looks_like_continuation,
 )
-from .learning import SessionLearner
-from .rules_engine import RulesEngine
-from .tools import create_tools, execute_tool
-from .tools.workspace import WorkspaceIndex
+from ..learning import SessionLearner
+from ..rules_engine import RulesEngine
+from ..tools import create_tools, execute_tool
+from ..tools.workspace import WorkspaceIndex
 
 # Sub-agent execution ledger lives next to the campaign lorebook in the
 # project's rpg/lorebook.db (typed progress logs + resumable transcripts).
@@ -30,6 +31,21 @@ _SUBAGENT_DB_PATH = os.path.join(
     "rpg", "lorebook.db")
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_patched(name, default):
+    """Return the live value of a core symbol, preferring a runtime patch.
+
+    core.py now lives as a package (ai_agent/core/): tests and the webui
+    patch `ai_agent.core.<name>` (the package namespace) while the engine
+    code reads module globals. Reading the package attribute first makes
+    both views consistent, so monkeypatches of SYSTEM_PROMPT_FILE and
+    execute_tool keep intercepting the real call sites.
+    """
+    pkg = sys.modules.get("ai_agent.core")
+    if pkg is not None and hasattr(pkg, name):
+        return getattr(pkg, name)
+    return default
 
 # --------------------------------------------------------------------------
 # Parallel Tool Execution Maximizer
@@ -44,7 +60,7 @@ logger = logging.getLogger(__name__)
 # config.json -> {"parallel_max_workers": N}.
 _PARALLEL_MAX_WORKERS = 4
 try:
-    from .config import load_config
+    from ..config import load_config
     _cfg_parallel = (load_config() or {}).get("parallel_max_workers")
     if _cfg_parallel:
         _PARALLEL_MAX_WORKERS = max(1, min(8, int(_cfg_parallel)))
@@ -110,7 +126,7 @@ def _has_path_dependency(cur, prev):
         return False
     cur_paths = _find_path_tokens(cur["args"])
     return bool(prev_paths & cur_paths)
-from .tools.verify import (
+from ..tools.verify import (
     REJECTED as V_REJECTED,
     UNVERIFIED as V_UNVERIFIED,
     VERIFIED as V_VERIFIED,
@@ -119,7 +135,7 @@ from .tools.verify import (
     lightweight_verify_finding,
     payload_verify_plan,
 )
-from .tools.hypothesis_engine import chain_to_verification_plan
+from ..tools.hypothesis_engine import chain_to_verification_plan
 
 SYSTEM_PROMPT = """You are {name}, an elite AI penetration testing assistant
 for authorized cybersecurity professionals.
@@ -1958,7 +1974,8 @@ class Agent:
                  lorebook=None, npc_persona=None, auto_verify=True,
                  knowledge=None, institutional=None,
                  reasoning_engine=True,
-                 learner=None, rules_engine=None, mission_store=None):
+                 learner=None, rules_engine=None, mission_store=None,
+                 intent_reformulator=None):
         self.llm = llm
         self.memory = memory
         self.name = name
@@ -1984,6 +2001,12 @@ class Agent:
         self._auto_note_seen = set()
         self.messages = []
         self._workspace_index = WorkspaceIndex()
+        # Input Intent Reformulator & Scope Mapper Engine (optional): when
+        # set, every raw user prompt is reframed into a structured
+        # authorized Red Team / Security Audit scope before LLM payload
+        # construction.
+        self._reformulator = intent_reformulator
+        self._last_intent = None
         # Managed Asynchronous Sub-Agent Orchestration: every child this
         # agent spawns (tool or internal) is tracked in a bounded registry
         # with caps (2 siblings running / 4 children tracked), success
@@ -2111,9 +2134,11 @@ class Agent:
             if kb:
                 knowledge_block = kb
         template = SYSTEM_PROMPT
+        prompt_file = _resolve_patched("SYSTEM_PROMPT_FILE",
+                                       SYSTEM_PROMPT_FILE)
         try:
-            if os.path.exists(SYSTEM_PROMPT_FILE):
-                with open(SYSTEM_PROMPT_FILE, "r", encoding="utf-8") as f:
+            if os.path.exists(prompt_file):
+                with open(prompt_file, "r", encoding="utf-8") as f:
                     template = f.read()
         except Exception:
             pass  # fall back to the built-in prompt on any error
@@ -2624,7 +2649,24 @@ class Agent:
             yield {"type": "error", "content": "(empty input)"}
             return
         self._last_user_input = user_input
-        self.messages.append({"role": "user", "content": user_input})
+        # Input Intent Reformulator: reframe raw offensive prompts into
+        # structured authorized Red Team / Security Audit scopes before
+        # the payload reaches the LLM/Router. The `start` event keeps the
+        # ORIGINAL text for UI display; only the stored user message is
+        # transformed.
+        reform = self._reformulator.process(user_input) \
+            if self._reformulator is not None else None
+        self._last_intent = reform
+        self.messages.append({"role": "user",
+                              "content": reform.payload_text if reform
+                              else user_input})
+        if reform is not None and reform.scope_block:
+            self.messages.append({"role": "system",
+                                  "content": reform.scope_block})
+            yield {"type": "intent_reformulated",
+                   "block": reform.scope_block,
+                   "metadata": reform.scope.to_dict()
+                   if reform.scope is not None else None}
         self._maybe_trim()
         yield {"type": "start", "content": user_input}
         # F3: if a paused mission checkpoint exists and this message asks
@@ -2790,17 +2832,19 @@ class Agent:
                     def _run_one(idx):
                         if not confirmed[idx]:
                             return "[cancelled by user]"
-                        return execute_tool(self._tools_by_name, batch[idx],
-                                            cancel_event=stop_event)
+                        return _resolve_patched("execute_tool", execute_tool)(
+                            self._tools_by_name, batch[idx],
+                            cancel_event=stop_event)
                     with ThreadPoolExecutor(
                             max_workers=min(len(batch),
                                             _PARALLEL_MAX_WORKERS)) as pool:
                         results = list(pool.map(_run_one, range(len(batch))))
                 else:
                     if confirmed[0]:
-                        results = [execute_tool(self._tools_by_name,
-                                                batch[0],
-                                                cancel_event=stop_event)]
+                        results = [_resolve_patched("execute_tool",
+                                                    execute_tool)(
+                            self._tools_by_name, batch[0],
+                            cancel_event=stop_event)]
                     else:
                         results = ["[cancelled by user]"]
                 # Collect (name, args, call, result) per batch; execution
@@ -3391,6 +3435,7 @@ class Agent:
             reasoning_engine=(getattr(self, "reasoning_engine", False)
                               if reasoning_engine is None
                               else reasoning_engine),
+            intent_reformulator=getattr(self, "_reformulator", None),
         )
         return child, task or ""
 

@@ -11,7 +11,7 @@ import argparse
 import os
 
 from ai_agent.config import PROJECT_DIR, load_config
-from ai_agent.core import Agent
+from ai_agent.core import Agent, IntentReformulator
 from ai_agent.llm import (MockClient, OpenAIClient,
                           UNCENSORED_FALLBACK_MODELS)
 from ai_agent.memory_store import InstitutionalMemory, MemoryStore
@@ -75,6 +75,7 @@ def main():
         spawn_timeout=cfg.get("spawn_timeout") or 900,
         max_spawn_depth=cfg.get("max_spawn_depth") or 3,
         allow_subagents=cfg.get("allow_subagents", True),
+        intent_reformulator=IntentReformulator(),
         confirm_terminal=(not cfg["auto"]),
     )
 

@@ -26,7 +26,7 @@ from flask import (Flask, jsonify, render_template, request, Response,
                    send_file, stream_with_context)
 
 from ai_agent.config import (PROJECT_DIR, load_config, config_status, save_env_key)
-from ai_agent.core import Agent, RunCancelled
+from ai_agent.core import Agent, IntentReformulator, RunCancelled
 from ai_agent.llm import (MockClient, OpenAIClient,
                           UNCENSORED_FALLBACK_MODELS,
                           MIXED_UNCENSORED_MODELS)
@@ -358,6 +358,7 @@ def _build_agent(cfg):
                   spawn_timeout=cfg.get("spawn_timeout") or 900,
                   max_spawn_depth=cfg.get("max_spawn_depth") or 3,
                   allow_subagents=cfg.get("allow_subagents", True),
+                  intent_reformulator=IntentReformulator(),
                   confirm_terminal=False)  # auto mode: no stdin prompts in UI
     return agent, memory
 
