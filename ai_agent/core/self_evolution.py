@@ -75,9 +75,162 @@ __all__ = [
     "SynthesizedToolValidator",
     "SelfEvolutionEngine",
     "DEFAULT_STORE_PATH",
+    "build_llm_code_model",
 ]
 
 DEFAULT_STORE_PATH = os.path.join(PROJECT_DIR, "memory", "synthesized_tools.db")
+
+# ---------------------------------------------------------------------------
+# LLM code-model adapter: bridge an OpenAI-compatible chat client into a
+# ``code_model`` callable for the ToolSynthesizer code-model tier.
+# ---------------------------------------------------------------------------
+
+_GAP_SYNTHESIS_SYSTEM_PROMPT = """\
+You synthesize small, self-contained Python utility tools for an agent.
+
+A capability gap was observed: the agent needs a missing tool that has no
+declarative generator.  Given the JSON gap summary, answer with ONE JSON
+object - no prose, no code fences - in exactly this shape:
+
+{
+  "name": "<tool name matching the requested one>",
+  "description": "<one line: what the tool does>",
+  "parameters": {"type": "object", "properties": {},
+                 "required": ["<every argument run() accepts>"]},
+  "source": "<full Python module text defining: def run(**kw) -> result>",
+  "probe": [{"args": {...}, "expect": <expected return value>}]
+}
+
+Hard rules:
+- Pure transformation helpers only: take arguments, compute, RETURN a
+  value.  No I/O: no files, no network, no subprocess, no printing.
+- Imports are limited to the standard-library allowlist: base64, binascii,
+  hashlib, json, math, re, string, unicodedata, urllib.parse.  Never use
+  eval, exec, open, __import__, or any dynamic-import trick.
+- "parameters" is a JSON-Schema object; every argument run(**kw) reads
+  must be declared and listed in "required".
+- "probe" must contain at least one {"args": ..., "expect": ...} case; it
+  is executed as a micro unit test after synthesis, so the source must
+  genuinely implement the behaviour (a failing probe rejects the tool).
+- Importing the module must have zero side effects.
+
+Return ONLY the JSON object.
+"""
+
+
+def _extract_json_object(text):
+    """Best-effort recovery of a JSON object from a model reply.
+
+    Accepts already-parsed dicts, bare JSON text, ```json ...``` fenced
+    blocks, and prose-wrapped JSON (balanced-brace scan).  Returns the
+    parsed dict or None when nothing usable can be recovered.
+    """
+    if isinstance(text, dict):
+        return text
+    if not isinstance(text, str) or not text.strip():
+        return None
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        parsed = None
+    if isinstance(parsed, dict):
+        return parsed
+    start = text.find("{")
+    while start != -1:
+        depth = 0
+        in_string = False
+        escaped = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+            elif ch == '"':
+                in_string = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        parsed = json.loads(text[start:i + 1])
+                    except ValueError:
+                        parsed = None
+                    if isinstance(parsed, dict):
+                        return parsed
+                    break
+        start = text.find("{", start + 1)
+    return None
+
+
+def build_llm_code_model(client, temperature=0.2):
+    """Adapt an OpenAI-compatible chat client into a code-model callable.
+
+    ``client`` only needs a duck-typed ``.chat(messages, tools=None,
+    temperature=...)`` method - the interface shared by OpenAIClient,
+    OpenAI-compatible / Ollama endpoint wrappers and chat-client test
+    doubles.  The returned callable maps a `CapabilityGap` to a full
+    tool-spec dict (the shape `ToolSynthesizer._compose_generated_spec`
+    expects) or None on any failure - it fails closed and never raises.
+
+    Only the gap's structural summary (name, functional description,
+    inferred input schema, expected output type) is forwarded to the
+    model - never raw tool output or unrelated payloads.
+    """
+    if client is None or not callable(getattr(client, "chat", None)):
+        return None
+
+    def code_model(gap):
+        if gap is None:
+            return None
+        payload = {
+            "name": gap.tool_name,
+            "kind": gap.kind,
+            "functional_description": (gap.functional_description
+                                       or gap.detail or ""),
+            "input_schema": gap.input_schema or {},
+            "expected_output_type": gap.expected_output_type or "any",
+        }
+        user_json = json.dumps(
+            {k: v for k, v in payload.items()
+             if v not in (None, "", {}, [])},
+            sort_keys=True)
+        messages = [
+            {"role": "system", "content": _GAP_SYNTHESIS_SYSTEM_PROMPT},
+            {"role": "user", "content": user_json},
+        ]
+        try:
+            reply = client.chat(messages=messages, tools=None,
+                                temperature=temperature)
+        except Exception as exc:
+            log.debug("code-model chat request failed: %s", exc)
+            return None
+        content = None
+        if isinstance(reply, str):
+            content = reply
+        elif isinstance(reply, dict):
+            content = reply.get("content")
+            if content is None:
+                tool_calls = reply.get("tool_calls")
+                if isinstance(tool_calls, list) and tool_calls:
+                    first = tool_calls[0]
+                    if isinstance(first, dict):
+                        fn = first.get("function")
+                        if isinstance(fn, dict):
+                            content = fn.get("arguments")
+        spec = _extract_json_object(content)
+        if not isinstance(spec, dict) or not isinstance(
+                spec.get("source"), str) or not spec["source"].strip():
+            log.debug("code-model chat reply carried no usable spec")
+            return None
+        return spec
+
+    return code_model
+
 
 # Names a synthesized tool may never take.
 _RESERVED_NAMES = frozenset({
