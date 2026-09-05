@@ -6,6 +6,8 @@ Tool(...) entry below. The LLM discovers them automatically.
 
 import json
 import os
+import threading
+import weakref
 
 from .base import Tool, execute_tool, truncate
 from .system import (
@@ -184,6 +186,153 @@ def _as_bool(value, default=False):
     if isinstance(value, (int, float)):
         return bool(value)
     return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+# ---------------------------------------------------------------------------
+# Runtime hot-reload machinery for dynamically synthesized tools
+# ---------------------------------------------------------------------------
+
+# Tool objects registered at runtime by the Self-Evolution Engine.
+_SYNTHESIZED_TOOLS = {}
+_SYNTHESIZED_LOCK = threading.RLock()
+
+# Names of built-in tools captured on the last create_tools() run.
+_BUILTIN_NAMES = set()
+
+# Module-level / runner names a synthesized tool may never shadow.
+_SYNTH_RESERVED = frozenset({
+    "Tool", "execute_tool", "create_tools", "hot_reload_tool",
+    "remove_synthesized_tool", "synthesized_tool_catalog",
+    "register_live_catalog", "run",
+})
+
+
+class _LiveToolMap(dict):
+    """dict subclass that fans a new entry out to every registered live
+    tool map, so one hot-loaded tool is visible to all Agents in this
+    process on their very next turn."""
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        for catalog in _live_catalogs():
+            if catalog is not self:
+                catalog.setdefault(key, value)
+
+
+# _LiveToolMap is a dict subclass, hence unhashable, so a WeakSet (which
+# needs hashable elements) cannot hold it. Track live maps as weakref.ref
+# in a plain list instead; _live_catalogs() prunes dead references.
+_LIVE_CATALOGS = []  # list of weakref.ref -> _LiveToolMap
+
+
+def _live_catalogs():
+    """Snapshot of every currently live tool map (drops dead refs)."""
+    alive_refs = []
+    alive = []
+    for ref in _LIVE_CATALOGS:
+        catalog = ref()
+        if catalog is not None:
+            alive_refs.append(ref)
+            alive.append(catalog)
+    _LIVE_CATALOGS[:] = alive_refs
+    return alive
+
+
+def register_live_catalog(tool_map):
+    """Adopt an Agent's {name: Tool} map as a live catalog.
+
+    The caller's dict is drained into a _LiveToolMap (Tool objects keep
+    their identity), which is returned; rebind your attribute to it.
+    Existing synthesized tools are back-filled so a freshly created Agent
+    immediately sees everything hot-loaded earlier in the process.
+    """
+    if not isinstance(tool_map, dict):
+        raise TypeError("tool_map must be a dict of {name: Tool}")
+    if isinstance(tool_map, _LiveToolMap):
+        live = tool_map
+    else:
+        live = _LiveToolMap(tool_map)
+        tool_map.clear()
+    with _SYNTHESIZED_LOCK:
+        for name, tool_obj in _SYNTHESIZED_TOOLS.items():
+            live.setdefault(name, tool_obj)
+    _LIVE_CATALOGS.append(weakref.ref(live))
+    return live
+
+
+def _validate_synthesized_name(name):
+    """True when `name` is safe to hot-register as a tool name."""
+    if not isinstance(name, str) or not name:
+        return False
+    if not name.isidentifier():
+        return False
+    if name.startswith("_") or name in _SYNTH_RESERVED:
+        return False
+    return True
+
+
+def hot_reload_tool(tool):
+    """Register a synthesized Tool (instance or spec dict) process-wide.
+
+    Accepts either a Tool instance or a spec dict of the shape the
+    Self-Evolution Engine persists:
+
+        {"name": ..., "description": ..., "parameters": {...},
+         "source": ..., "probe": [...], "func": callable}
+
+    The spec form requires a callable "func" (the compiled run() body).
+    Returns the registered name; raises ValueError for unsafe or
+    builtin-shadowing names.
+    """
+    if isinstance(tool, dict):
+        name = (tool.get("name") or "").strip()
+        func = tool.get("func")
+        if not callable(func):
+            raise ValueError(
+                "synthesized tool spec requires a callable 'func'")
+        if not _validate_synthesized_name(name):
+            raise ValueError("unsafe synthesized tool name: %r" % (name,))
+        if name in _BUILTIN_NAMES and name not in _SYNTHESIZED_TOOLS:
+            raise ValueError("tool %r would shadow a built-in tool" % name)
+        tool_obj = Tool(
+            name=name,
+            description=tool.get("description", ""),
+            parameters=tool.get("parameters") or {},
+            func=func,
+            confirm=bool(tool.get("confirm", False)),
+        )
+    elif isinstance(tool, Tool):
+        name = (tool.name or "").strip()
+        if not _validate_synthesized_name(name):
+            raise ValueError("unsafe synthesized tool name: %r" % (name,))
+        if name in _BUILTIN_NAMES and name not in _SYNTHESIZED_TOOLS:
+            raise ValueError("tool %r would shadow a built-in tool" % name)
+        tool_obj = tool
+    else:
+        raise TypeError("tool must be a Tool instance or a spec dict")
+    with _SYNTHESIZED_LOCK:
+        _SYNTHESIZED_TOOLS[name] = tool_obj
+    for catalog in _live_catalogs():
+        catalog[name] = tool_obj
+    return name
+
+
+def remove_synthesized_tool(name):
+    """Unregister a hot-loaded tool. Returns True when one was removed."""
+    with _SYNTHESIZED_LOCK:
+        tool_obj = _SYNTHESIZED_TOOLS.pop(name, None)
+        if tool_obj is None:
+            return False
+    for catalog in _live_catalogs():
+        if catalog.get(name) is tool_obj:
+            catalog.pop(name, None)
+    return True
+
+
+def synthesized_tool_catalog():
+    """Snapshot of every currently hot-loaded synthesized Tool."""
+    with _SYNTHESIZED_LOCK:
+        return dict(_SYNTHESIZED_TOOLS)
 
 
 def create_tools(memory, knowledge=None, institutional=None,
@@ -2704,7 +2853,15 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                 policy_json=policy_json or "",
                 timeout=int(timeout or 20))))
 
-    global _REGISTRY
+    global _REGISTRY, _BUILTIN_NAMES
+    _BUILTIN_NAMES = {t.name for t in REGISTRY}
+    with _SYNTHESIZED_LOCK:
+        for _synth in _SYNTHESIZED_TOOLS.values():
+            if _synth.name in _BUILTIN_NAMES:
+                continue
+            if any(_synth.name == t.name for t in REGISTRY):
+                continue
+            REGISTRY.append(_synth)
     _REGISTRY = REGISTRY
     return REGISTRY
 
@@ -2858,4 +3015,9 @@ def _parse_headers(headers_text):
     return out or None
 
 
-__all__ = ["Tool", "execute_tool", "create_tools", "truncate"]
+__all__ = [
+    "Tool", "execute_tool", "truncate", "create_tools",
+    "hot_reload_tool", "register_live_catalog",
+    "remove_synthesized_tool", "synthesized_tool_catalog",
+]
+

@@ -34,3 +34,14 @@ from .refusal_intel import (  # noqa: F401
 )
 
 # (no __all__: mirrors the original module's public-name surface)
+
+from .self_evolution import (  # noqa: F401
+    CapabilityGap,
+    CapabilityGapDetector,
+    DEFAULT_STORE_PATH,
+    SelfEvolutionEngine,
+    SynthesizedToolStore,
+    SynthesizedToolValidator,
+    ToolSynthesizer,
+    is_valid_tool_name,
+)

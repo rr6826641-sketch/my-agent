@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -21,7 +22,9 @@ from ..continuity import (
 )
 from ..learning import SessionLearner
 from ..rules_engine import RulesEngine
-from ..tools import create_tools, execute_tool
+from ..tools import (
+    create_tools, execute_tool, register_live_catalog,
+)
 from ..tools.workspace import WorkspaceIndex
 
 # Sub-agent execution ledger lives next to the campaign lorebook in the
@@ -31,6 +34,59 @@ _SUBAGENT_DB_PATH = os.path.join(
     "rpg", "lorebook.db")
 
 logger = logging.getLogger(__name__)
+
+
+# ----------------------------------------------------------------------
+# Autonomous Self-Evolution & Dynamic Tool Synthesis Engine (lazy)
+#
+# The engine + detector are created on first *real* capability-gap
+# observation, so importing an Agent and running benign turns costs
+# zero extra I/O.  Observed "Unknown tool: X" results / planner
+# needs trigger runtime synthesis + hot-reload (persisted to
+# memory/synthesized_tools.db, gitignored).
+# ----------------------------------------------------------------------
+
+_evolution_engine = None
+_evolution_engine_lock = threading.Lock()
+_evolution_detector = None
+_evolution_detector_lock = threading.Lock()
+
+
+def _get_evolution_detector():
+    """Return the process-wide CapabilityGapDetector (lazily created).
+
+    Cheap regex work only - no file or network I/O - so Agents never
+    touch the synthesized-tool store unless a real capability gap shows
+    up in a tool result / planner fragment.
+    """
+    global _evolution_detector
+    detector = _evolution_detector
+    if detector is None:
+        with _evolution_detector_lock:
+            detector = _evolution_detector
+            if detector is None:
+                from .self_evolution import CapabilityGapDetector
+                detector = _evolution_detector = CapabilityGapDetector()
+    return detector
+
+
+def _get_evolution_engine():
+    """Return the process-wide SelfEvolutionEngine (lazily created).
+
+    The backing SQLite store (memory/synthesized_tools.db, gitignored)
+    is only opened once a valid capability gap is observed, so benign
+    traffic performs zero store I/O.  Synthesized / reloaded tools are
+    hot-registered process-wide via ai_agent.tools.hot_reload_tool.
+    """
+    global _evolution_engine
+    engine = _evolution_engine
+    if engine is None:
+        with _evolution_engine_lock:
+            engine = _evolution_engine
+            if engine is None:
+                from .self_evolution import SelfEvolutionEngine
+                engine = _evolution_engine = SelfEvolutionEngine()
+    return engine
 
 
 def _resolve_patched(name, default):
@@ -1975,7 +2031,8 @@ class Agent:
                  knowledge=None, institutional=None,
                  reasoning_engine=True,
                  learner=None, rules_engine=None, mission_store=None,
-                 intent_reformulator=None):
+                 intent_reformulator=None,
+                 self_evolution=True):
         self.llm = llm
         self.memory = memory
         self.name = name
@@ -2007,6 +2064,11 @@ class Agent:
         # construction.
         self._reformulator = intent_reformulator
         self._last_intent = None
+        # Autonomous Self-Evolution & Dynamic Tool Synthesis Engine
+        # (default on): capability-gap observations on tool results /
+        # planner output synthesize + hot-load new tools at runtime
+        # and persist them to the synthesized-tool store.
+        self._evolution_enabled = bool(self_evolution)
         # Managed Asynchronous Sub-Agent Orchestration: every child this
         # agent spawns (tool or internal) is tracked in a bounded registry
         # with caps (2 siblings running / 4 children tracked), success
@@ -2037,7 +2099,8 @@ class Agent:
                      if game_master else None),
             workspace_index=self._workspace_index,
         )
-        self._tools_by_name = {t.name: t for t in self._tool_list}
+        self._tools_by_name = register_live_catalog(
+            {t.name: t for t in self._tool_list})
         self._verification_results = []
         # Built-In Task Board & State Tracking Engine: every user
         # request (root task) and tool call (step task) is tracked
@@ -2344,6 +2407,65 @@ class Agent:
                 "why": rec.get("why_failed"),
                 "next_mutation": rec.get("next_mutation"),
                 "block": block}
+
+    # -- Self-Evolution: capability-gap watch + absorb -----------------------
+
+    def _evolution_watch(self, result=None, planner_state=None):
+        """Observe a tool result / planner fragment for capability gaps.
+
+        When a gap names a tool this agent does not yet have, the
+        Self-Evolution Engine synthesizes it (or re-loads it from the
+        persistent store), hot-registers it process-wide and the agent
+        absorbs it into its own live catalog for the next iteration.
+
+        Returns a self_evolution event dict when the catalog actually
+        grew, otherwise None (including when the tool is already live,
+        which doubles as natural de-duplication for repeated gaps).
+        """
+        if not self._evolution_enabled:
+            return None
+        try:
+            gaps = _get_evolution_detector().parse(result=result,
+                                                   planner_state=planner_state)
+            if not gaps:
+                return None
+            gap = gaps[0]
+            if not gap.tool_name or gap.tool_name in self._tools_by_name:
+                return None  # already live (built-in / absorbed earlier)
+            out = _get_evolution_engine().observe(result=result,
+                                                  planner_state=planner_state)
+        except Exception as exc:
+            logger.debug("self-evolution watch failed: %s", exc)
+            return None
+        if not out or out.get("status") not in ("synthesized", "reloaded"):
+            return None
+        return self._absorb_synthesized_tool(out)
+
+    def _absorb_synthesized_tool(self, out):
+        """Attach a freshly synthesized / reloaded tool to this agent."""
+        name = out.get("tool_name") or ""
+        tool_obj = self._tools_by_name.get(name)
+        if tool_obj is None:
+            return None
+        if any(t is tool_obj for t in self._tool_list):
+            return None  # already absorbed
+        self._tool_list.append(tool_obj)
+        try:
+            schema = json.dumps(tool_obj.schema(), indent=2)
+        except Exception:
+            schema = "{}"
+        how = ("synthesized at runtime"
+               if out.get("status") == "synthesized"
+               else "re-loaded from the persistent store")
+        note = ("[SELF-EVOLUTION] Tool '%s' was %s and is now available "
+                "to you.\nJSON schema:\n%s" % (name, how, schema))
+        self.messages.append({"role": "system", "content": note})
+        return {"type": "self_evolution",
+                "status": out.get("status"),
+                "name": name,
+                "description": out.get("description", ""),
+                "schema": json.loads(schema),
+                "note": note}
 
     def _episodic_recall_block(self, user_input):
         """Cross-session recall: relevant past payloads / bypasses /
@@ -2703,6 +2825,12 @@ class Agent:
                                       "content": goap_block})
                 yield {"type": "goap_plan", "block": goap_block,
                        "state": self._goap.snapshot()}
+                # Self-Evolution Engine: if the plan tree references
+                # a capability this agent cannot currently run, close
+                # the gap now so iteration #1 already offers the tool.
+                sev = self._evolution_watch(planner_state=goap_block)
+                if sev:
+                    yield sev
             # Cross-session episodic recall: surface archived payloads,
             # bypass techniques, methodologies and failed-attempt
             # lessons relevant to this instruction BEFORE the first
@@ -2713,7 +2841,9 @@ class Agent:
                                       "content": recall_block})
                 yield {"type": "episodic_recall", "block": recall_block}
         final = ""
-        tool_schemas = [t.schema() for t in self._tool_list]
+        # Tool schemas are rebuilt at the top of every iteration so a
+        # runtime-synthesized / hot-reloaded tool is offered to the
+        # LLM immediately after it becomes available.
 
         for _ in range(self.max_iterations):
             if stop_event is not None and stop_event.is_set():
@@ -2721,6 +2851,9 @@ class Agent:
                 if note:
                     yield {"type": "mission_checkpoint", "note": note}
                 raise RunCancelled("run cancelled by user")
+            # Self-Evolution Engine: rebuild schemas so newly
+            # synthesized / reloaded tools reach the LLM right away.
+            tool_schemas = [t.schema() for t in self._tool_list]
             prompt = ([{"role": "system", "content": self._system_prompt()}]
                       + list(self.messages))
             reply = None
@@ -2897,6 +3030,12 @@ class Agent:
                 rev = self._reflection_step(name, args, result)
                 if rev:
                     yield rev
+                # Self-Evolution Engine: an "Unknown tool: X" (or
+                # otherwise gap-signalling) result synthesizes X at
+                # runtime so the agent can retry on the next turn.
+                sev = self._evolution_watch(result=result)
+                if sev:
+                    yield sev
             self._maybe_trim()
 
         # F2/F3: distill lessons and auto-checkpoint so a truncated run can
