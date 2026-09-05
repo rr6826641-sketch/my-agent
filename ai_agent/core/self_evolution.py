@@ -26,6 +26,18 @@ Pipeline
                                 hot-registers new tools into the catalog
                                 via ai_agent.tools.hot_reload_tool().
 
+Phase 2 adds three upgrades on top of that pipeline:
+
+* a gap-driven code-model tier in ToolSynthesizer (``code_model=``
+  callable or chat client) that can generate a tool for capability
+  gaps that have no declarative rule generator;
+* a hardened SynthesizedToolValidator that rejects process/FS/network
+  escapes, dunder games and indirect dynamic execution in addition to
+  the existing import and attribute checks;
+* an IsolatedExecutionSandbox micro unit-test runner so generated
+  tools are executed in a scrubbed, time-boxed subprocess instead of
+  running their probes in the engine's own process.
+
 Everything is lazy: no DB is opened and no module import of the tool
 catalog happens until the first real "Unknown tool:" event.
 """
@@ -33,15 +45,20 @@ catalog happens until the first real "Unknown tool:" event.
 import ast
 import builtins
 import copy
+import inspect
 import json
 import logging
 import os
 import re
+import shutil
 import sqlite3
+import subprocess
+import sys
+import tempfile
 import threading
 import time
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional
 
 from ..config import PROJECT_DIR
 
