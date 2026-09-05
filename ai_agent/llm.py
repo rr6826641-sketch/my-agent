@@ -135,13 +135,23 @@ def _rotated_mix(pool, offset):
 
 def _candidate_models(primary, fallback_models,
                       high_reasoning_models=HIGH_REASONING_MODELS,
-                      high_reasoning_fallbacks=HIGH_REASONING_FALLBACKS):
+                      high_reasoning_fallbacks=HIGH_REASONING_FALLBACKS,
+                      lead_models=None):
     """Build the ordered model-failover chain for a call.
 
     Primary first; if it is a flagship reasoning model, the sibling flagship
     comes second (deduped); then the cheap generic fallbacks (deduped).
+
+    ``lead_models`` (optional) prepends models BEFORE the primary -
+    used for uncensored-first mode so an uncensored session's first
+    answer comes straight from the uncensored pool.
     """
-    chain = [primary]
+    chain = []
+    for m in (lead_models or []):
+        if m and m not in chain:
+            chain.append(m)
+    if primary not in chain:
+        chain.append(primary)
     if primary in high_reasoning_models:
         for m in high_reasoning_fallbacks:
             if m not in chain:
@@ -401,9 +411,26 @@ class OpenAIClient:
                 chain.append(m)
         return chain
 
+    def _uncensored_lead(self):
+        """Uncensored-first lead list for red-team sessions.
+
+        Returns the uncensored pool (mix-rotated) to run BEFORE the
+        configured primary, or None when uncensored mode is off or no
+        pool is configured - the chain then stays primary-led.
+        """
+        if not (self.uncensored and self.uncensored_fallbacks):
+            return None
+        lead = list(self.uncensored_fallbacks)
+        if self.uncensored_mix:
+            lead = _rotated_mix(lead, self._mix_offset)
+            self._mix_offset += 1
+        return lead
+
     def chat(self, messages, tools=None, temperature=0.2):
         intent_class = _intent_class_of(messages)
-        models = _candidate_models(self.model, self._effective_fallbacks())
+        models = _candidate_models(self.model,
+                                   self._effective_fallbacks(),
+                                   lead_models=self._uncensored_lead())
         if self.refusal_intel.enabled and intent_class:
             models = self.refusal_intel.ordered_chain(intent_class, models)
         last_error = None
@@ -548,7 +575,8 @@ class OpenAIClient:
         """
         intent_class = _intent_class_of(messages)
         models = _candidate_models(model or self.model,
-                                   self._effective_fallbacks())
+                                   self._effective_fallbacks(),
+                                   lead_models=self._uncensored_lead())
         if self.refusal_intel.enabled and intent_class:
             models = self.refusal_intel.ordered_chain(intent_class, models)
         last_error = None
