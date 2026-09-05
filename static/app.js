@@ -1797,6 +1797,15 @@ async function refreshBoard() {
       if (titleText) val.title = titleText;
     }
   }
+  // circular OPERATIONAL ring (conic-gradient arc driven by --ring)
+  function setOpRing(pct) {
+    const ring = get("op-ring");
+    const val = get("op-val");
+    pct = Math.max(0, Math.min(100, Number(pct) || 0));
+    const deg = Math.round((pct / 100) * 360);
+    if (ring) ring.style.setProperty("--ring", deg + "deg");
+    if (val) val.textContent = Math.round(pct) + "%";
+  }
 
   /* CPU fallback: gentle jitter walk (2-24%) when the OS counter is absent */
   const cpuSim = { v: 8 + Math.random() * 16, on: false, timer: null };
@@ -1926,6 +1935,9 @@ async function refreshBoard() {
         if (bb) bb.textContent = st.red_team_mode ? ":: armed · " + (st.red_team_level || "promax") : ":: standby";
       }
     });
+
+    // operational ring — 100% when the core is live (drives the conic arc)
+    setOpRing(st.key_error || !st.mode ? 0 : (st.red_team_mode ? 100 : 100));
 
     // gauges — real metrics; cpu falls back to a jitter walk when absent
     if (sys.ram && typeof sys.ram.pct === "number") {

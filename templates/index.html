@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="theme-color" content="#05060c">
+<meta name="theme-color" content="#0c0506">
 <meta name="color-scheme" content="dark">
 <title>HackerAI — Agent Command Center</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23f43f5e'/%3E%3Cstop offset='1' stop-color='%23be123c'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M17.5 5L9 18h6l-1.5 9L23 14h-6z' fill='%2305060c'/%3E%3C/svg%3E">
@@ -25,7 +25,7 @@
   <aside class="sidebar">
     <div class="brand">
       <div class="logo" aria-hidden="true">
-        <svg viewBox="0 0 32 32"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f43f5e"/><stop offset="1" stop-color="#be123c"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><path d="M17.6 4.8 9 18.2h6l-1.6 9 8.6-13.4h-6z" fill="#05060c"/></svg>
+        <svg viewBox="0 0 32 32"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f43f5e"/><stop offset="1" stop-color="#be123c"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><path d="M17.6 4.8 9 18.2h6l-1.6 9 8.6-13.4h-6z" fill="#0c0506"/></svg>
       </div>
       <div class="brand-text">
         <h1>HACKER<span>AI</span></h1>
@@ -130,13 +130,13 @@
                       <path d="M48 8v10" stroke="#f43f5e" stroke-width="4" stroke-linecap="round"/>
                       <circle cx="48" cy="6" r="4" fill="#f43f5e"/>
                       <rect x="22" y="26" width="52" height="42" rx="14" fill="url(#robg)" stroke="#fda4af" stroke-width="2"/>
-                      <rect x="24" y="34" width="48" height="8" rx="4" fill="rgba(5,6,12,.35)"/>
-                      <rect x="32" y="40" width="8" height="6" rx="2" fill="#05060c"/>
-                      <circle cx="38" cy="52" r="5" fill="#05060c"/>
-                      <circle cx="58" cy="52" r="5" fill="#05060c"/>
+                      <rect x="24" y="34" width="48" height="8" rx="4" fill="rgba(12,5,6,.35)"/>
+                      <rect x="32" y="40" width="8" height="6" rx="2" fill="#0c0506"/>
+                      <circle cx="38" cy="52" r="5" fill="#0c0506"/>
+                      <circle cx="58" cy="52" r="5" fill="#0c0506"/>
                       <circle cx="38" cy="52" r="2" fill="#f43f5e"/>
                       <circle cx="58" cy="52" r="2" fill="#f43f5e"/>
-                      <path d="M34 64c4 4 24 4 28 0" stroke="#05060c" stroke-width="3" stroke-linecap="round"/>
+                      <path d="M34 64c4 4 24 4 28 0" stroke="#0c0506" stroke-width="3" stroke-linecap="round"/>
                       <rect x="20" y="62" width="8" height="16" rx="4" fill="url(#robg)"/>
                       <rect x="68" y="62" width="8" height="16" rx="4" fill="url(#robg)"/>
                     </svg>
@@ -182,22 +182,27 @@
                 <h3><span class="ph-ico">◎</span> System Overview</h3>
                 <span class="op-badge"><i></i> 100% OPERATIONAL</span>
               </div>
-              <div class="gauge-grid">
-                <div class="gauge">
-                  <div class="g-top"><span>CPU</span><b id="val-cpu">—</b></div>
-                  <div class="g-track"><div class="g-fill" id="g-cpu"></div></div>
+              <div class="rings-row">
+                <div class="op-ring" id="op-ring" style="--ring:320deg" title="Operational status">
+                  <div class="op-val"><b id="op-val">100%</b><span>Operational</span></div>
                 </div>
-                <div class="gauge">
-                  <div class="g-top"><span>RAM</span><b id="val-ram">—</b></div>
-                  <div class="g-track"><div class="g-fill" id="g-ram"></div></div>
-                </div>
-                <div class="gauge">
-                  <div class="g-top"><span>DISK</span><b id="val-disk">—</b></div>
-                  <div class="g-track"><div class="g-fill" id="g-disk"></div></div>
-                </div>
-                <div class="gauge">
-                  <div class="g-top"><span>NET</span><b id="val-net">LINKED</b></div>
-                  <div class="g-track"><div class="g-fill flow" id="g-net"></div></div>
+                <div class="gauge-grid">
+                  <div class="gauge">
+                    <div class="g-top"><span>CPU</span><b id="val-cpu">—</b></div>
+                    <div class="g-track"><div class="g-fill" id="g-cpu"></div></div>
+                  </div>
+                  <div class="gauge">
+                    <div class="g-top"><span>RAM</span><b id="val-ram">—</b></div>
+                    <div class="g-track"><div class="g-fill" id="g-ram"></div></div>
+                  </div>
+                  <div class="gauge">
+                    <div class="g-top"><span>DISK</span><b id="val-disk">—</b></div>
+                    <div class="g-track"><div class="g-fill" id="g-disk"></div></div>
+                  </div>
+                  <div class="gauge">
+                    <div class="g-top"><span>NET</span><b id="val-net">LINKED</b></div>
+                    <div class="g-track"><div class="g-fill flow" id="g-net"></div></div>
+                  </div>
                 </div>
               </div>
               <div class="stat-strip">

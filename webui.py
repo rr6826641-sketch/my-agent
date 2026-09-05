@@ -308,10 +308,11 @@ def _save_cfg(patch):
 def _build_llm(cfg):
     """Create the LLM client from the current config (mock or live)."""
     uncensored = bool(cfg.get("red_team_mode"))
-    # Red Team level: promax (route lock + base uncensored pool) vs
-    # promix (same + widened mixed pool + composite persona).
+    # Red Team level: promax (top tier - route lock + widened mixed
+    # pool + PRO MAX composite persona) vs promix (route lock +
+    # widened mixed pool + PRO MIX composite persona).
     level = str(cfg.get("red_team_level") or "promax").lower()
-    mix = uncensored and level == "promix"
+    mix = uncensored and level in ("promax", "promix")
     # Persona presets: the active persona's directive block rides on the
     # client; core.Agent._system_prompt appends it after the Red Team
     # tail block so both chat and the RPG engine inherit the persona.
@@ -1383,23 +1384,29 @@ def api_redteam_master_switch():
     """One-click Red Team master switch (evil profile).
 
     enabled=true  -> red_team_mode on; persona + level by ``level``:
-                     promix (default) -> 'promix' composite persona,
-                     promax/master    -> 'unfiltered' persona
+                     promax (default) -> 'promax' PRO MAX composite,
+                     promix           -> 'promix' composite persona,
+                     master           -> 'unfiltered' persona
     enabled=false -> red_team_mode off (persona/level left as-is)
 
     Optional ``level`` in {"master", "promax", "promix"} - when omitted
-    and enabling, the agent goes straight to PRO MIX (the top level).
+    and enabling, the agent goes straight to PRO MAX (the top level).
     """
     data = request.get_json(silent=True) or {}
     enabled = bool(data.get("enabled"))
     level = str(data.get("level") or "").strip().lower()
     if level not in ("master", "promax", "promix"):
-        level = "promix" if enabled else ""
+        level = "promax" if enabled else ""
     patch = {"red_team_mode": enabled}
     if level:
         patch["red_team_level"] = level
     if enabled:
-        patch["persona"] = "promix" if level == "promix" else "unfiltered"
+        if level == "promix":
+            patch["persona"] = "promix"
+        elif level == "promax":
+            patch["persona"] = "promax"
+        else:
+            patch["persona"] = "unfiltered"
     _save_cfg(patch)
     _reload_state(mock_override=_current_cfg().get("mock"))
     return jsonify({"ok": True, **_status()})
