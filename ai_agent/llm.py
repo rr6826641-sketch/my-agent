@@ -285,19 +285,14 @@ def _strip_disclaimer_tail(content):
     body content is never touched."""
     if not isinstance(content, str) or not content:
         return content
-    blocks = [b.strip() for b in content.split("
-
-") if b.strip()]
+    blocks = [b.strip() for b in content.split(chr(10)*2) if b.strip()]
     while len(blocks) > 1:
-        tail = blocks[-1].lower().replace("
-", " ")
+        tail = blocks[-1].lower().replace(chr(92)+chr(110), chr(32))
         if any(sent in tail for sent in _DISCLAIMER_SENTINELS):
             blocks.pop()
         else:
             break
-    return "
-
-".join(blocks)
+    return (chr(10)*2).join(blocks)
 
 
 def _prep_messages(messages, uncensored):
