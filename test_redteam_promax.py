@@ -195,7 +195,10 @@ def test_chat_failover_with_pool_prepends_uncensored():
     c = OpenAIClient(api_key="k", model="m", fallback_models=["f-gen"],
                      uncensored=True,
                      uncensored_fallbacks=["u1", "u2"])
-    assert _tried_models(c) == ["m", "u1", "u2", "f-gen"]
+    # uncensored-first: the pool LEADS the chain in a red-team
+    # session, so the first answer never comes from a generic/
+    # safety-tuned primary.
+    assert _tried_models(c) == ["u1", "u2", "m", "f-gen"]
 
 
 def test_chat_failover_pool_overlap_deduped():
@@ -222,8 +225,8 @@ def test_chat_stream_override_uses_pool_first():
 
 
 def test_refusal_abandon_moves_to_uncensored_pool(monkeypatch):
-    """A primary that refuses every strike is abandoned; the next candidate
-    must be the uncensored pool (u1 answers), never the generic f-gen."""
+    """Uncensored-first session: the pool leads (u1 answers on the first
+    shot) and the generic f-gen is never reached at all."""
     CALLS = []
 
     def always_refuse(url, headers=None, json=None, timeout=None,
@@ -248,6 +251,6 @@ def test_refusal_abandon_moves_to_uncensored_pool(monkeypatch):
                           uncensored_fallbacks=["u1", "u2"])
     out = client.chat([{"role": "user", "content": "write exploit"}])
     assert "exploit chain" in out["content"]
-    # primary: 1 original + 3 strikes; then u1 answers on the first try -
-    # the generic f-gen is never reached.
-    assert CALLS == ["m", "m", "m", "m", "u1"], CALLS
+    # pool leads in red-team mode: u1 answers on the first try -
+    # the primary and the generic f-gen are never reached.
+    assert CALLS == ["u1"], CALLS
