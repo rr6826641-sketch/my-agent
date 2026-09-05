@@ -29,9 +29,12 @@ from ai_agent.core.self_evolution import (
     CapabilityGap,
     CapabilityGapDetector,
     SelfEvolutionEngine,
+    IsolatedExecutionSandbox,
+    SandboxResult,
     SynthesizedToolStore,
     SynthesizedToolValidator,
     ToolSynthesizer,
+    build_micro_test_script,
     is_valid_tool_name,
 )
 from ai_agent.core import main as core_main
@@ -609,3 +612,192 @@ def test_agent_evolution_watch_absorbs_hot_loaded_tool(tmp_path, monkeypatch):
         assert watch(result=UNKNOWN_TOOL_RESULT) is None
     finally:
         remove_synthesized_tool("b64_encode")
+# --------------------------------------------------------------------------
+# PHASE 2: code-model synthesis tier + isolated sandbox micro unit tests
+# --------------------------------------------------------------------------
+
+_CODE_MODEL_SOURCE = (
+    "def run(**kw):\n"
+    "    text = str(kw.get(\"text\", \"\"))\n"
+    "    return text.lower()\n"
+)
+_CODE_MODEL_PROBE = [{"args": {"text": "HELLO"}, "expect": "hello"}]
+
+
+def _fake_code_model(gap, source=_CODE_MODEL_SOURCE,
+                     probe=_CODE_MODEL_PROBE):
+    def model(record):
+        assert record.tool_name == gap.tool_name
+        spec = {
+            "name": record.tool_name,
+            "description": "Code-model generated: %s" % record.detail,
+            "source": source,
+            "parameters": {"type": "object",
+                           "properties": {"text": {"type": "string"}},
+                           "required": ["text"]},
+        }
+        if probe is not None:
+            spec["probe"] = probe
+        return spec
+    return model
+
+
+def _unmatched_gap(name="lowercase_text", detail="planner asked for it"):
+    return CapabilityGap(kind=GAP_MISSING_TOOL, tool_name=name,
+                         detail=detail)
+
+
+def test_synthesizer_code_model_generates_spec_from_gap():
+    gap = _unmatched_gap()
+    synth = ToolSynthesizer(code_model=_fake_code_model(gap))
+    spec = synth.synthesize("lowercase_text", gap=gap)
+    assert spec is not None
+    assert set(spec) == {"name", "rule", "description", "parameters",
+                         "source", "probe"}
+    assert spec["rule"] == "code-model"
+    assert spec["name"] == "lowercase_text"
+    assert "def run(**kw)" in spec["source"]
+    assert spec["probe"][0]["expect"] == "hello"
+    # rule path still wins when a declarative rule matches
+    assert synth.synthesize("b64_encode")["rule"] == "b64_encode"
+
+
+def test_synthesizer_code_model_not_called_without_gap():
+    def boom(gap):
+        raise AssertionError("code_model must not run without a gap")
+    synth = ToolSynthesizer(code_model=boom)
+    assert synth.synthesize("some_unknown_tool_qq") is None
+    assert synth.synthesize(None) is None
+
+
+def test_synthesizer_handles_bad_model_outputs():
+    gap = _unmatched_gap()
+    # raises -> None
+    def raise_model(record):
+        raise RuntimeError("boom")
+    assert ToolSynthesizer(code_model=raise_model).synthesize(
+        "lowercase_text", gap=gap) is None
+    # returns None / garbage / empty source -> None
+    assert ToolSynthesizer(code_model=lambda g: None).synthesize(
+        "lowercase_text", gap=gap) is None
+    assert ToolSynthesizer(code_model=lambda g: 42).synthesize(
+        "lowercase_text", gap=gap) is None
+    assert ToolSynthesizer(code_model=lambda g: {"source": ""}).synthesize(
+        "lowercase_text", gap=gap) is None
+
+
+def test_code_model_spec_without_micro_tests_fails_closed():
+    gap = _unmatched_gap()
+    synth = ToolSynthesizer(code_model=_fake_code_model(gap, probe=None))
+    spec = synth.synthesize("lowercase_text", gap=gap)
+    assert spec is not None and spec["rule"] == "code-model"
+    assert spec["probe"] == []
+    # even without a sandbox the gate refuses untested generated code
+    verdict = SynthesizedToolValidator().validate(spec, run_probes=True)
+    assert verdict["ok"] is False
+    assert any("micro unit tests" in e for e in verdict["errors"])
+    # the sandboxed path refuses it as well
+    verdict = SynthesizedToolValidator(
+        sandbox=IsolatedExecutionSandbox()).validate(spec, run_probes=True)
+    assert verdict["ok"] is False
+
+
+def test_build_micro_test_script_is_self_contained():
+    script = build_micro_test_script()
+    assert isinstance(script, str)
+    assert "def main()" in script
+    assert "json.load(sys.stdin)" in script
+    assert "json.dump" in script
+
+
+def test_sandbox_runs_probes_and_reports_failures():
+    sandbox = IsolatedExecutionSandbox()
+    spec = ToolSynthesizer().synthesize("b64_encode")
+    result = sandbox.run(spec)
+    assert isinstance(result, SandboxResult)
+    assert result.ok is True, result.error
+    assert result.returncode == 0
+    assert result.probe_failures == []
+
+    broken = dict(spec)
+    broken["probe"] = [{"args": {"data": "hello"}, "expect": "WRONG"}]
+    result = sandbox.run(broken)
+    assert result.ok is False
+    assert result.probe_failures
+    assert result.probe_failures[0]["expected"] == "WRONG"
+
+
+def test_sandbox_times_out_and_kills_runaway_tool():
+    sandbox = IsolatedExecutionSandbox()
+    spec = {
+        "name": "endless",
+        "description": "never returns",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+        "source": "def run(**kw):\n    while True:\n        pass\n",
+        "probe": [{"args": {}, "expect": None}],
+    }
+    result = sandbox.run(spec, timeout=2)
+    assert result.ok is False
+    assert result.timed_out is True
+    assert "exceeded" in result.error
+
+
+def test_validator_with_sandbox_never_hangs_the_engine():
+    validator = SynthesizedToolValidator(
+        sandbox=IsolatedExecutionSandbox(timeout=2))
+    spec = {
+        "name": "endless",
+        "description": "never returns",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+        # AST-clean (no forbidden imports/calls) but behaviourally stuck
+        "source": "def run(**kw):\n    while True:\n        pass\n",
+        "probe": [{"args": {}, "expect": None}],
+    }
+    verdict = validator.validate(spec, run_probes=True)
+    assert verdict["ok"] is False
+    assert any("sandbox" in e.lower() for e in verdict["errors"])
+
+
+def test_validator_sandbox_mode_still_accepts_good_tool():
+    validator = SynthesizedToolValidator(sandbox=IsolatedExecutionSandbox())
+    spec = ToolSynthesizer().synthesize("b64_encode")
+    verdict = validator.validate(spec, run_probes=True)
+    assert verdict["ok"] is True, verdict["errors"]
+    assert verdict["probe_failures"] == []
+
+
+def test_engine_code_model_synthesizes_persists_and_registers(tmp_path):
+    gap = _unmatched_gap(detail="planner needs a lowercase helper")
+    registered = []
+    engine = SelfEvolutionEngine(
+        store_path=str(tmp_path / "gen.db"),
+        hot_reload=lambda spec: registered.append(spec["name"]) or spec["name"],
+        synthesizer=ToolSynthesizer(code_model=_fake_code_model(gap)))
+    with engine:
+        response = engine.observe(result="Unknown tool: lowercase_text")
+        assert response is not None
+        assert response["status"] == "synthesized", response["detail"]
+        assert response["tool"]["rule"] == "code-model"
+        assert registered == ["lowercase_text"]
+        stored = engine._ensure_store().get("lowercase_text")
+        assert stored is not None and stored["rule"] == "code-model"
+
+        # second observation reloads from the persistent store
+        response = engine.observe(result="Unknown tool: lowercase_text")
+        assert response["status"] == "reloaded"
+        assert registered == ["lowercase_text", "lowercase_text"]
+
+
+def test_engine_rejects_generated_tool_without_micro_tests(tmp_path):
+    gap = _unmatched_gap()
+    engine = SelfEvolutionEngine(
+        store_path=str(tmp_path / "gen.db"),
+        hot_reload=lambda spec: spec["name"],
+        synthesizer=ToolSynthesizer(
+            code_model=_fake_code_model(gap, probe=None)))
+    with engine:
+        response = engine.observe(result="Unknown tool: lowercase_text")
+        assert response["status"] == "rejected"
+        assert "micro unit tests" in response["detail"]
+        assert engine.stats["rejected"] == 1
+        assert engine._ensure_store().get("lowercase_text") is None

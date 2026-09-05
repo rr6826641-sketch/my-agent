@@ -69,6 +69,9 @@ __all__ = [
     "CapabilityGapDetector",
     "SynthesizedToolStore",
     "ToolSynthesizer",
+    "SandboxResult",
+    "IsolatedExecutionSandbox",
+    "build_micro_test_script",
     "SynthesizedToolValidator",
     "SelfEvolutionEngine",
     "DEFAULT_STORE_PATH",
@@ -953,17 +956,36 @@ def run(**kw):
 
 
 class ToolSynthesizer:
-    """Match a requested tool name against the built-in rule generators.
+    """Match a requested tool name against the built-in rule generators,
+    falling back to a gap-driven code-model tier for capability gaps that
+    have no declarative rule generator.
 
-    Rules live in `_RULES` (declared above): each carries a canonical `key`,
-    a tuple of `aliases`, a JSON-schema `parameters` block, a self-contained
-    module `source` exposing ``def run(**kw)``, and a `probe` list used for
-    self-testing after synthesis.  Matching is done on a normalised form
-    (lowercase, non-alphanumerics stripped) so ``b64 encode``, ``B64_ENCODE``
-    and ``base64encode`` all resolve to the same rule.
+    Rules live in `_RULES` (declared above): each carries a canonical
+    `key`, a tuple of `aliases`, a JSON-schema `parameters` block, a
+    self-contained module `source` exposing ``def run(**kw)``, and a
+    `probe` list used for self-testing after synthesis.  Matching is done
+    on a normalised form (lowercase, non-alphanumerics stripped) so
+    ``b64 encode``, ``B64_ENCODE`` and ``base64encode`` all resolve to the
+    same rule.
+
+    The code-model tier (``code_model=``) is consulted only when no rule
+    matches *and* a `CapabilityGap` is supplied to ``synthesize()``.  The
+    callable receives the full gap record (so the model can use the
+    functional description, inferred input schema and expected output
+    type) and must return either:
+
+    * a complete spec dict with the standard keys (name, description,
+      parameters, source, probe) - recommended; or
+    * a bare module source string (a module exposing ``def run(**kw)``).
+
+    Correctness is enforced by micro unit tests, so a generated tool must
+    ship at least one ``{"args": ..., "expect": ...}`` probe; when the
+    model returns a spec without a probe list, or a bare source that
+    cannot be self-tested, the resulting spec fails closed at the
+    validation gate (the engine never approves untested code).
     """
 
-    def __init__(self, rules=_RULES):
+    def __init__(self, rules=_RULES, code_model=None):
         self._rules = tuple(rules)
         self._index = {}
         for rule in self._rules:
@@ -973,6 +995,7 @@ class ToolSynthesizer:
                 key = _norm(alias)
                 if key and key not in self._index:
                     self._index[key] = rule
+        self.code_model = code_model
 
     def match_rule(self, name):
         """Return the rule dict for `name`, or None when nothing matches."""
@@ -980,26 +1003,75 @@ class ToolSynthesizer:
             return None
         return self._index.get(_norm(name))
 
-    def synthesize(self, name):
-        """Produce a full spec dict for `name`, or None when not synthesizable.
+    # -- code-model tier ---------------------------------------------------
 
-        The returned spec carries exactly the keys the store / validator /
-        hot-reload path expects: name, rule, description, parameters, source,
-        probe.
+    @staticmethod
+    def _default_parameters(gap):
+        schema = dict(gap.input_schema or {})
+        if not schema:
+            return _schema({}, [])
+        if schema.get("type") != "object":
+            return _schema(schema.get("properties") or {},
+                           schema.get("required") or [])
+        return schema
+
+    def _compose_generated_spec(self, name, gap, output):
+        """Normalise the code model's answer into the standard spec shape."""
+        if isinstance(output, str):
+            output = {"source": output}
+        if not isinstance(output, dict):
+            return None
+        source = output.get("source")
+        if not isinstance(source, str) or not source.strip():
+            return None
+        return {
+            "name": name,
+            "rule": "code-model",
+            "description": (output.get("description")
+                            or gap.functional_description
+                            or gap.detail
+                            or "Code-model synthesized tool for %r." % name),
+            "parameters": (output.get("parameters")
+                           if isinstance(output.get("parameters"), dict)
+                           else self._default_parameters(gap)),
+            "source": source,
+            "probe": [dict(p) for p in (output.get("probe") or [])],
+        }
+
+    def synthesize(self, name=None, gap=None):
+        """Produce a full spec dict for `name`, or None when not
+        synthesizable.
+
+        Rule generators are consulted first; when nothing matches and a
+        `CapabilityGap` is supplied, the optional ``code_model`` callable
+        is tried next.  The returned spec carries exactly the keys the
+        store / validator / hot-reload path expects: name, rule,
+        description, parameters, source, probe.
         """
         if not is_valid_tool_name(name):
             return None
         rule = self.match_rule(name)
-        if rule is None:
-            return None
-        return {
-            "name": name,
-            "rule": rule["key"],
-            "description": rule["description"],
-            "parameters": rule["parameters"],
-            "source": rule["source"],
-            "probe": [dict(p) for p in (rule.get("probe") or [])],
-        }
+        if rule is not None:
+            return {
+                "name": name,
+                "rule": rule["key"],
+                "description": rule["description"],
+                "parameters": rule["parameters"],
+                "source": rule["source"],
+                "probe": [dict(p) for p in (rule.get("probe") or [])],
+            }
+        if gap is not None and self.code_model is not None:
+            try:
+                output = self.code_model(gap)
+            except Exception as exc:
+                log.debug("code-model synthesis failed for %r: %s",
+                          name, exc)
+                return None
+            if output:
+                spec = self._compose_generated_spec(name, gap, output)
+                if spec is not None:
+                    return spec
+        return None
 
     def rules(self):
         """Lightweight catalog of the available generators (no source)."""
@@ -1088,8 +1160,9 @@ class SynthesizedToolValidator:
     produced their expected result.
     """
 
-    def __init__(self):
+    def __init__(self, sandbox=None):
         self._exec_globals_template = {"__name__": "__synthesized_tool__"}
+        self.sandbox = sandbox
 
     def allowed_modules(self):
         return sorted(_ALLOWED_MODULE_PATHS)
@@ -1192,22 +1265,51 @@ class SynthesizedToolValidator:
                               % (type(exc).__name__, exc))
         probe_failures = []
         if run_probes and func is not None:
-            for index, probe in enumerate((spec or {}).get("probe") or []):
-                args = dict(probe.get("args") or {})
-                expected = probe.get("expect")
-                try:
-                    actual = func(**args)
-                except Exception as exc:
-                    probe_failures.append({
-                        "probe": index, "args": args, "expected": expected,
-                        "error": "%s: %s" % (type(exc).__name__, exc),
-                    })
-                    continue
-                if actual != expected:
-                    probe_failures.append({
-                        "probe": index, "args": args, "expected": expected,
-                        "actual": actual,
-                    })
+            probes = (spec or {}).get("probe") or []
+            sandbox = self.sandbox
+            if sandbox is not None and probes:
+                # PHASE 2: micro unit tests run in the isolated, time-boxed
+                # subprocess - never in the engine's own process.
+                result = sandbox.run(spec, probes=probes)
+                if result.error and not result.probe_failures:
+                    errors.append("isolated sandbox: %s" % result.error)
+                for failure in result.probe_failures:
+                    idx = failure.get("probe", -1)
+                    src = probes[idx] if 0 <= idx < len(probes) else {}
+                    entry = {
+                        "probe": idx,
+                        "args": dict(src.get("args") or {}),
+                        "expected": src.get("expect"),
+                    }
+                    if "actual" in failure:
+                        entry["actual"] = failure["actual"]
+                    else:
+                        entry["error"] = failure.get(
+                            "error", "sandbox probe failed")
+                    probe_failures.append(entry)
+            elif probes:
+                for index, probe in enumerate(probes):
+                    args = dict(probe.get("args") or {})
+                    expected = probe.get("expect")
+                    try:
+                        actual = func(**args)
+                    except Exception as exc:
+                        probe_failures.append({
+                            "probe": index, "args": args,
+                            "expected": expected,
+                            "error": "%s: %s" % (type(exc).__name__, exc),
+                        })
+                        continue
+                    if actual != expected:
+                        probe_failures.append({
+                            "probe": index, "args": args,
+                            "expected": expected, "actual": actual,
+                        })
+            elif (spec or {}).get("rule") == "code-model":
+                errors.append(
+                    "code-model tool must include auto-generated micro "
+                    "unit tests (probe list) before it can be approved")
+
         return {
             "ok": not errors and func is not None and not probe_failures,
             "errors": errors,
@@ -1215,6 +1317,195 @@ class SynthesizedToolValidator:
             "probe_failures": probe_failures,
         }
 
+
+
+# ---------------------------------------------------------------------------
+# IsolatedExecutionSandbox: run auto-generated micro unit tests for a
+# synthesized tool inside a scrubbed, time-boxed subprocess.  The child
+# never sees the engine's process, its globals, the tool catalog or the
+# network: source + probes arrive over stdin and one JSON verdict line
+# comes back.  A timeout, a non-zero exit or an unreadable reply fails the
+# run, so a broken or malicious tool can never be approved.
+# ---------------------------------------------------------------------------
+
+# The harness the child runs.  It imports only stdlib modules, executes the
+# tool source in a fresh namespace and compares each probe result against
+# its expected value inside the child before anything is serialised back.
+_SANDBOX_HARNESS = '''\
+import io
+import json
+import sys
+import time
+
+
+def _json_safe(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    return repr(value)
+
+
+def main():
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8",
+                                  errors="replace")
+    payload = json.load(sys.stdin)
+    source = payload["source"]
+    probes = payload["probes"]
+    results = []
+    for index, probe in enumerate(probes):
+        record = {"probe": index}
+        args = dict(probe.get("args") or {})
+        expected = probe.get("expect")
+        record["args"] = {str(key): _json_safe(item)
+                          for key, item in args.items()}
+        record["expected"] = _json_safe(expected)
+        started = time.time()
+        try:
+            namespace = {}
+            code = compile(source, "<isolated-tool>", "exec")
+            exec(code, namespace)
+            func = namespace["run"]
+            actual = func(**args)
+            record["ok"] = (actual == expected)
+            record["actual"] = _json_safe(actual)
+        except SystemExit as exc:
+            record["error"] = "SystemExit: %r" % (exc,)
+        except BaseException as exc:
+            record["error"] = "%s: %s" % (type(exc).__name__, exc)
+        record["elapsed_ms"] = int((time.time() - started) * 1000)
+        results.append(record)
+    json.dump({"probes": results}, sys.stdout)
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+def build_micro_test_script() -> str:
+    """Return the self-contained micro unit-test harness source.
+
+    The harness is executed in a fresh interpreter via
+    ``python -c <script>``; it reads one JSON payload from stdin
+    (``{"source": ..., "probes": [...]}``) and writes one JSON
+    object back to stdout.  Exposed for tests and for operators who
+    want to audit exactly what the child process runs.
+    """
+    return _SANDBOX_HARNESS
+
+
+@dataclass
+class SandboxResult:
+    """Verdict of one isolated micro-test run for a synthesized tool.
+
+    ``probe_failures`` carries one record per failing probe (each with
+    probe index, args, expected and either the actual value or the
+    error); ``error`` carries a human-readable summary when the whole
+    run could not complete.
+    """
+    tool_name: str
+    ok: bool = False
+    returncode: int = 0
+    timed_out: bool = False
+    error: str = ""
+    probe_failures: List[Dict] = field(default_factory=list)
+
+
+class IsolatedExecutionSandbox:
+    """Time-boxed subprocess runner for synthesized-tool micro unit tests.
+
+    ``run(spec)`` serialises the tool source plus its auto-generated
+    probes to the harness subprocess and returns a `SandboxResult`.
+    The subprocess gets a scrubbed environment (PATH/SystemRoot only),
+    runs in the system temp dir and is killed when it exceeds the
+    deadline, so runaway or malicious code can neither hang the engine
+    nor reach its process.
+    """
+
+    def __init__(self, executable=None, timeout: float = 15.0):
+        self.executable = executable or sys.executable
+        self.timeout = timeout
+
+    def run(self, spec, probes=None, timeout=None) -> SandboxResult:
+        """Run every micro unit test for `spec` in isolation.
+
+        ``probes`` may override the probes embedded in the spec (used by
+        tests that inject their own micro tests).  Returns a
+        `SandboxResult`; never raises.
+        """
+        tool_name = (spec or {}).get("name", "?")
+        source = (spec or {}).get("source", "")
+        if not source or not isinstance(source, str):
+            return SandboxResult(tool_name=tool_name, ok=False,
+                                 error="spec carries no tool source")
+        probe_list = [dict(p) for p in (probes if probes is not None
+                                        else (spec or {}).get("probe") or [])]
+        if not probe_list:
+            return SandboxResult(tool_name=tool_name, ok=False,
+                                 error="no micro unit tests provided")
+        payload = json.dumps({"source": source, "probes": probe_list})
+        deadline = timeout if timeout is not None else self.timeout
+        env = {
+            "PATH": os.environ.get("PATH", ""),
+            "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONPATH": os.pathsep.join(
+                [p for p in sys.path if p not in ("", os.getcwd())]),
+        }
+        try:
+            proc = subprocess.Popen(
+                [self.executable, "-c", build_micro_test_script()],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, env=env,
+                cwd=tempfile.gettempdir())
+        except (OSError, ValueError) as exc:
+            return SandboxResult(tool_name=tool_name, ok=False,
+                                 error="spawn failed: %s" % exc)
+        timed_out = False
+        try:
+            out, err = proc.communicate(input=payload.encode("utf-8"),
+                                        timeout=deadline)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            try:
+                out, err = proc.communicate(timeout=10)
+            except Exception:
+                out, err = b"", b""
+        if timed_out:
+            return SandboxResult(tool_name=tool_name, ok=False,
+                                 timed_out=True,
+                                 error="sandbox exceeded %.1fs" % deadline)
+        return self._parse_result(tool_name, proc.returncode, out, err)
+
+    @staticmethod
+    def _parse_result(tool_name, returncode, out, err):
+        if returncode != 0:
+            tail = (err or b"").decode("utf-8", "replace")
+            tail = " | ".join(tail.strip().splitlines()[-3:])
+            return SandboxResult(tool_name=tool_name, ok=False,
+                                 returncode=returncode,
+                                 error="sandbox exited %d: %s"
+                                       % (returncode, tail or "no stderr"))
+        try:
+            data = json.loads((out or b"").decode("utf-8", "replace"))
+        except ValueError as exc:
+            return SandboxResult(tool_name=tool_name, ok=False,
+                                 returncode=returncode,
+                                 error="unreadable harness output: %s" % exc)
+        probes = data.get("probes") or []
+        failures = [p for p in probes if not p.get("ok")]
+        return SandboxResult(
+            tool_name=tool_name, ok=not failures,
+            returncode=returncode, probe_failures=failures,
+            error=("" if not failures else "%d/%d micro tests failed"
+                   % (len(failures), len(probes))))
 
 # ---------------------------------------------------------------------------
 # SelfEvolutionEngine: observe -> detect -> synthesize -> validate ->
@@ -1238,15 +1529,23 @@ class SelfEvolutionEngine:
     """
 
     def __init__(self, store_path=None, hot_reload=None, detector=None,
-                 synthesizer=None, validator=None, on_gap=None):
+                 synthesizer=None, validator=None, on_gap=None,
+                 sandbox=None):
         self.store_path = store_path or DEFAULT_STORE_PATH
         self._hot_reload = hot_reload
         self.detector = (detector if detector is not None
                          else CapabilityGapDetector())
         self.synthesizer = (synthesizer if synthesizer is not None
                             else ToolSynthesizer())
+        # PHASE 2: probes for brand-new tools are executed inside the
+        # isolated, time-boxed subprocess (never in this process).
+        self.sandbox = sandbox if sandbox is not None \
+            else IsolatedExecutionSandbox()
         self.validator = (validator if validator is not None
-                          else SynthesizedToolValidator())
+                          else SynthesizedToolValidator(
+                              sandbox=self.sandbox))
+        if self.validator.sandbox is None:
+            self.validator.sandbox = self.sandbox
         self._on_gap = on_gap
         self.gap_log: List[CapabilityGap] = []
         self.last_gap = None
@@ -1358,7 +1657,7 @@ class SelfEvolutionEngine:
                 self.stats["reloaded"] += 1
                 return self._respond("reloaded", name, spec=existing,
                                      detail="loaded from persistent store")
-            spec = self.synthesizer.synthesize(name)
+            spec = self.synthesizer.synthesize(name, gap=gap)
             if spec is None:
                 self.stats["no_match"] += 1
                 return self._respond(
