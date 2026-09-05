@@ -114,6 +114,129 @@ MIXED_UNCENSORED_MODELS = [
     "gryphe/mythomax-l2-13b",
 ]
 
+# ---------------------------------------------------------------------------
+# Local self-hosted models plug-in (Lever 2).
+#
+# Ollama (127.0.0.1:11434) and LM Studio (127.0.0.1:1234) expose
+# OpenAI-compatible /v1/chat/completions endpoints. Self-hosted models are
+# operator-controlled (no third-party safety filter can gate them), so they
+# are the strongest uncensored tier of all. Endpoints are health-probed
+# lazily with a TTL cache and every reachable chat model is spliced into
+# _effective_fallbacks() between the uncensored hosted pool and the cheap
+# generic cloud fallbacks - a running Ollama/LM Studio therefore answers
+# before any possibly safety-tuned free model ever does, and the agent
+# degrades to the cloud only when no local model is up.
+# ---------------------------------------------------------------------------
+LOCAL_ENDPOINT_DEFAULTS = {
+    "ollama": {
+        "name": "ollama",
+        "base_url": "http://127.0.0.1:11434/v1",
+        "api_key": "",
+        "default_models": [],   # empty -> auto-discover via GET /models
+        "timeout": 3.0,
+    },
+    "lmstudio": {
+        "name": "lmstudio",
+        "base_url": "http://127.0.0.1:1234/v1",
+        "api_key": "",
+        "default_models": [],
+        "timeout": 3.0,
+    },
+}
+
+# Auto-discovery skips non-chat models local servers also list
+# (embeddings / rerankers / vision-only tags).
+_LOCAL_SKIP_SUBSTR = ("embed", "minilm", "bge-", "nomic", "rerank")
+
+
+def _normalize_local_endpoints(endpoints):
+    """Normalize the ``local_endpoints`` plug-in hook into endpoint specs.
+
+    Accepts any mix of:
+      * shorthand names: "ollama", "lmstudio" (localhost defaults)
+      * raw URLs:        "http://127.0.0.1:11434/v1" (auto model list)
+      * dicts:           {"name": "ollama", "base_url": ...,
+                          "api_key": ...,
+                          "models": ["qwen2.5:14b-instruct"]}
+
+    Returns a list of endpoint specs; unknown/empty entries are dropped.
+    """
+    if not endpoints:
+        return []
+    if isinstance(endpoints, str):
+        endpoints = [endpoints]
+    out = []
+    for ep in endpoints:
+        spec = None
+        if isinstance(ep, str):
+            key = ep.strip().lower()
+            if key in LOCAL_ENDPOINT_DEFAULTS:
+                spec = dict(LOCAL_ENDPOINT_DEFAULTS[key])
+            elif key.startswith("http://") or key.startswith("https://"):
+                spec = {"name": "local", "base_url": key.rstrip("/"),
+                        "api_key": "", "default_models": [],
+                        "timeout": 3.0}
+        elif isinstance(ep, dict):
+            key = str(ep.get("name") or ep.get("type")
+                      or "local").strip().lower()
+            base = ep.get("base_url") or ep.get("url") or \
+                ep.get("endpoint") or ""
+            if not base and key in LOCAL_ENDPOINT_DEFAULTS:
+                base = LOCAL_ENDPOINT_DEFAULTS[key]["base_url"]
+            spec = {
+                "name": key,
+                "base_url": str(base).rstrip("/"),
+                "api_key": ep.get("api_key", ""),
+                "default_models": ep.get("models") or ep.get("model")
+                or [],
+                "timeout": float(ep.get("timeout") or 3.0),
+            }
+        if not spec or not spec.get("base_url"):
+            continue
+        models = spec.get("default_models") or []
+        if isinstance(models, str):
+            models = [m.strip() for m in models.replace(";", ",").split(",")
+                      if m.strip()]
+        spec["default_models"] = models
+        spec["api_key"] = str(spec.get("api_key") or "")
+        out.append(spec)
+    return out
+
+
+def _probe_local_endpoint(spec):
+    """Probe one local endpoint. Returns reachable chat-model ids.
+
+    Endpoint reachable + /models parseable -> the model ids (explicit
+    ``default_models`` honoured first, auto-discovered list otherwise,
+    non-chat models filtered out). Any failure -> [] so a machine without
+    Ollama/LM Studio running simply contributes nothing to the chain.
+    """
+    url = spec.get("base_url", "").rstrip("/") + "/models"
+    try:
+        resp = requests.get(
+            url, timeout=float(spec.get("timeout") or 3.0),
+            headers={"Content-Type": "application/json"})
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+    except Exception:
+        return []
+    explicit = list(spec.get("default_models") or [])
+    ids = []
+    for item in data.get("data") or []:
+        mid = (item.get("id") or "").strip()
+        if not mid:
+            continue
+        low = mid.lower()
+        if any(s in low for s in _LOCAL_SKIP_SUBSTR):
+            continue
+        if mid not in ids:
+            ids.append(mid)
+    for mid in explicit:
+        if mid and mid not in ids:
+            ids.append(mid)
+    return ids
+
 
 def _full_uncensored_pool():
     """PRO MIX pool = pro-max base + mix additions (deduped, order kept)."""
@@ -402,7 +525,10 @@ class OpenAIClient:
     def __init__(self, api_key="", base_url="https://api.openai.com/v1",
                  model="gpt-4o-mini", timeout=120, fallback_models=None,
                  uncensored=False, refusal_retries=None,
-                 uncensored_fallbacks=None, uncensored_mix=False):
+                 uncensored_fallbacks=None, uncensored_mix=False,
+                 pin_uncensored=False, pin_strict=False,
+                 local_endpoints=None, local_first=False,
+                 local_probe_ttl=60.0):
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
         self.base_url = (base_url or "https://api.openai.com/v1").rstrip("/")
         self.model = model or "gpt-4o-mini"
@@ -414,6 +540,15 @@ class OpenAIClient:
         self.fallback_models = list(fallback_models or self.FALLBACK_MODELS)
         # Red Team Mode: refusal auto-retry + uncensored request framing.
         self.uncensored = bool(uncensored)
+        # Red Team Mode (PRO-MAX PIN, Lever 6): red-team mode pins the
+        # session directly onto the uncensored pool - the configured
+        # primary model is dropped from the chain instead of merely
+        # running after it. Direct pin, no failover to the primary. Pin
+        # implies uncensored framing + RIE (via self.uncensored below).
+        self.pin_uncensored = bool(pin_uncensored)
+        self.pin_strict = bool(pin_strict)
+        if self.pin_uncensored:
+            self.uncensored = True
         # Red Team Mode v3: reformulation strikes before abandoning the
         # model and letting the next fallback candidate answer.
         try:
@@ -440,29 +575,65 @@ class OpenAIClient:
                 if m not in self.uncensored_fallbacks:
                     self.uncensored_fallbacks.append(m)
         self._mix_offset = 0
+        # Local self-hosted models plug-in (Lever 2): optional Ollama /
+        # LM Studio endpoints are health-probed once per TTL and every
+        # reachable chat model is spliced into the failover chain (see
+        # _refresh_local_models / _local_fallback_models / _request_target).
+        self.local_first = bool(local_first)
+        try:
+            self.local_probe_ttl = max(0.0, float(local_probe_ttl or 0.0))
+        except (TypeError, ValueError):
+            self.local_probe_ttl = 60.0
+        self._local_endpoints = _normalize_local_endpoints(local_endpoints)
+        # _local_route: local model id -> (base_url, api_key) for every
+        # reachable local model, so _request_target() can route a chain
+        # entry back to the endpoint that actually hosts it.
+        self._local_route = {}
+        self._local_probe_at = 0.0
+        self._local_lock = threading.Lock()
         # Refusal Intelligence Engine: persistent outcome learner for the
         # uncensored failover chain. Enabled together with uncensored mode;
         # learns per-intent model reliability + winning escalation text and
         # replays them across restarts (memory/refusal_intel.json).
-        self.refusal_intel = RefusalIntelStore(enabled=bool(uncensored))
+        self.refusal_intel = RefusalIntelStore(enabled=bool(self.uncensored))
 
     def _effective_fallbacks(self):
         """Fallback chain for this call: uncensored pool first (opt-in),
-        then the configured generic fallbacks (deduped).
+        then reachable local self-hosted models (Lever 2 plug-in), then
+        the configured generic cloud fallbacks (deduped).
 
         PRO MIX: the uncensored pool is rotated round-robin per call, so a
         session truly mixes uncensored models instead of always leading
-        with the first pool entry."""
-        if not self.uncensored_fallbacks:
+        with the first pool entry.
+
+        LOCAL-FIRST (Lever 2): when local_first is set, reachable local
+        models run BEFORE the hosted uncensored pool - operator-controlled
+        hardware answers before any third-party host does.
+        """
+        if not self.uncensored_fallbacks and not self._local_endpoints:
             return self.fallback_models
-        chain = list(self.uncensored_fallbacks)
-        if self.uncensored_mix:
-            chain = _rotated_mix(chain, self._mix_offset)
-            self._mix_offset += 1
+        chain = []
+        if not self.local_first:
+            pool = list(self.uncensored_fallbacks)
+            if self.uncensored_mix:
+                pool = _rotated_mix(pool, self._mix_offset)
+                self._mix_offset += 1
+            chain = list(pool)
+        for m in self._local_fallback_models():
+            if m not in chain:
+                chain.append(m)
+        if self.local_first:
+            pool = list(self.uncensored_fallbacks)
+            if self.uncensored_mix:
+                pool = _rotated_mix(pool, self._mix_offset)
+                self._mix_offset += 1
+            for m in pool:
+                if m not in chain:
+                    chain.append(m)
         for m in self.fallback_models:
             if m not in chain:
                 chain.append(m)
-        return chain
+        return chain or list(self.fallback_models)
 
     def _uncensored_lead(self):
         """Uncensored-first lead list for red-team sessions.
@@ -470,20 +641,139 @@ class OpenAIClient:
         Returns the uncensored pool (mix-rotated) to run BEFORE the
         configured primary, or None when uncensored mode is off or no
         pool is configured - the chain then stays primary-led.
+
+        LOCAL-FIRST (Lever 2): reachable local models lead the chain when
+        configured. PIN (Lever 6): a pinned session never leads - the
+        whole chain IS the uncensored tier (see _pinned_models), so the
+        lead is None and no primary ever runs.
         """
-        if not (self.uncensored and self.uncensored_fallbacks):
+        if self.pin_uncensored:
             return None
-        lead = list(self.uncensored_fallbacks)
-        if self.uncensored_mix:
-            lead = _rotated_mix(lead, self._mix_offset)
+        lead = []
+        if self.local_first:
+            for m in self._local_fallback_models():
+                if m not in lead:
+                    lead.append(m)
+        if self.uncensored and self.uncensored_fallbacks:
+            pool = list(self.uncensored_fallbacks)
+            if self.uncensored_mix:
+                pool = _rotated_mix(pool, self._mix_offset)
+                self._mix_offset += 1
+            for m in pool:
+                if m not in lead:
+                    lead.append(m)
+        return lead or None
+
+    def _refresh_local_models(self):
+        """Health-probe every configured local endpoint (TTL-cached).
+
+        Populates self._local_route: local model id -> (base_url, api_key)
+        for every reachable chat model, so _request_target() can route a
+        chain entry back to the endpoint that hosts it. Endpoints whose
+        base_url equals the configured cloud base_url are skipped (they
+        already ARE the primary host). Double-checked locking keeps
+        concurrent callers to a single probe run per TTL window.
+        """
+        if not self._local_endpoints:
+            self._local_route = {}
+            return
+        now = time.time()
+        if now < self._local_probe_at:
+            return
+        with self._local_lock:
+            if now < self._local_probe_at:
+                return
+            self._local_probe_at = now + self.local_probe_ttl
+            route = {}
+            cloud_base = (self.base_url or "").rstrip("/")
+            for spec in self._local_endpoints:
+                base = (spec.get("base_url") or "").rstrip("/")
+                if not base or base == cloud_base:
+                    continue
+                for mid in _probe_local_endpoint(spec):
+                    if mid and mid not in route:
+                        route[mid] = (base, str(spec.get("api_key") or ""))
+            self._local_route = route
+
+    def _local_fallback_models(self):
+        """Reachable local model ids for this call (probe TTL-cached).
+
+        Empty when no local endpoints are configured - the plug-in then
+        contributes nothing and costs nothing (no probes, no routing).
+        """
+        if not self._local_endpoints:
+            return []
+        self._refresh_local_models()
+        return list(self._local_route)
+
+    def _pinned_models(self):
+        """Lever 6: model chain for a pinned red-team session.
+
+        The configured primary model is dropped entirely - every candidate
+        comes from the uncensored tier (hosted pool + reachable local
+        self-hosted models), so there is no failover onto a primary or
+        onto a possibly safety-tuned generic model. Direct pin, no
+        failover to the primary.
+
+        A caller-supplied uncensored pool keeps its order (static); when
+        the pool was defaulted - or mix is on - it is rotated per call so
+        a long session spreads across the whole uncensored catalogue.
+        pin_strict keeps the generic cloud fallbacks out of the chain;
+        otherwise they still trail as an absolute last resort.
+        """
+        pool_defaulted = not self.uncensored_fallbacks
+        pool = (list(self.uncensored_fallbacks)
+                or _full_uncensored_pool())
+        if self.uncensored_mix or pool_defaulted:
+            pool = _rotated_mix(pool, self._mix_offset)
             self._mix_offset += 1
-        return lead
+        locals_ = [m for m in self._local_fallback_models()
+                   if m not in pool]
+        if self.local_first:
+            chain = locals_ + pool
+        else:
+            chain = list(pool) + locals_
+        if not self.pin_strict:
+            for m in self.fallback_models:
+                if m not in chain:
+                    chain.append(m)
+        return chain or list(self.fallback_models)
+
+    def _chain_for_call(self, model=None):
+        """Model chain for one call.
+
+        PIN (Lever 6): a pinned session skips the primary entirely and
+        answers straight from _pinned_models() - direct pin, no failover
+        to the configured primary. Otherwise the normal primary-led chain
+        (uncensored/local lead + primary + generic fallbacks) is built.
+        """
+        if self.pin_uncensored:
+            return self._pinned_models()
+        return _candidate_models(model or self.model,
+                                 self._effective_fallbacks(),
+                                 lead_models=self._uncensored_lead())
+
+    def _request_target(self, model):
+        """Resolve (base_url, headers) for one chain entry.
+
+        Local plug-in (Lever 2): models discovered on a local endpoint
+        route to that endpoint's base_url + api_key. Everything else goes
+        to the configured cloud base_url with the configured API key.
+        """
+        base_url = self.base_url
+        api_key = self.api_key
+        if model and self._local_route:
+            entry = self._local_route.get(model)
+            if entry:
+                base_url, api_key = entry
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = "Bearer " + api_key
+        return base_url, headers
 
     def chat(self, messages, tools=None, temperature=0.2):
         intent_class = _intent_class_of(messages)
-        models = _candidate_models(self.model,
-                                   self._effective_fallbacks(),
-                                   lead_models=self._uncensored_lead())
+        models = self._chain_for_call()
         if self.refusal_intel.enabled and intent_class:
             models = self.refusal_intel.ordered_chain(intent_class, models)
         last_error = None
@@ -601,10 +891,8 @@ class OpenAIClient:
         }
         if tools:
             payload["tools"] = tools
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = "Bearer " + self.api_key
-        url = self.base_url + "/chat/completions"
+        base_url, headers = self._request_target(model)
+        url = base_url + "/chat/completions"
         # Transient network errors (DNS failure, dropped connection,
         # timeouts) are retried with exponential backoff before a hard
         # NetworkError with the friendly fallback message is raised.
@@ -641,9 +929,7 @@ class OpenAIClient:
         model: optional per-call override (used by the Smart Auto-Router).
         """
         intent_class = _intent_class_of(messages)
-        models = _candidate_models(model or self.model,
-                                   self._effective_fallbacks(),
-                                   lead_models=self._uncensored_lead())
+        models = self._chain_for_call(model)
         if self.refusal_intel.enabled and intent_class:
             models = self.refusal_intel.ordered_chain(intent_class, models)
         last_error = None
@@ -766,10 +1052,8 @@ class OpenAIClient:
         }
         if tools:
             payload["tools"] = tools
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = "Bearer " + self.api_key
-        url = self.base_url + "/chat/completions"
+        base_url, headers = self._request_target(model)
+        url = base_url + "/chat/completions"
         # Same bounded exponential-backoff retry as chat(): a dead network
         # must fail loudly (NetworkError) instead of silently hanging the
         # agent in a working state while the fallback chain is walked.
@@ -926,16 +1210,36 @@ class MockClient:
     """
 
     def __init__(self, model="mock-1", uncensored=False,
-                 uncensored_mix=False):
+                 uncensored_mix=False, pin_uncensored=False,
+                 pin_strict=False, local_endpoints=None,
+                 local_first=False, local_probe_ttl=60.0):
         self.model = model
         self.uncensored = bool(uncensored)
+        # PIN parity (Lever 6): pinning implies uncensored framing, and
+        # the mock exposes the same pool the live client would use.
+        self.pin_uncensored = bool(pin_uncensored)
+        self.pin_strict = bool(pin_strict)
+        if self.pin_uncensored:
+            self.uncensored = True
         # PRO MIX flag kept for parity with OpenAIClient so callers can
         # read llm.uncensored_mix regardless of mock/live mode.
         self.uncensored_mix = bool(uncensored_mix)
-        # PRO MIX pool parity: with mix enabled expose the widened pool so
-        # callers/tests can read the chain in mock mode just like live.
+        # Local plug-in parity (Lever 2): the mock never probes or routes
+        # (rule-based), but exposes the same configuration surface so
+        # callers can read llm.local_first etc. in mock mode just like
+        # live mode.
+        self.local_first = bool(local_first)
+        try:
+            self.local_probe_ttl = max(0.0, float(local_probe_ttl or 0.0))
+        except (TypeError, ValueError):
+            self.local_probe_ttl = 60.0
+        self._local_endpoints = _normalize_local_endpoints(local_endpoints)
+        # PRO MIX / PIN pool parity: with mix or pin enabled expose the
+        # widened uncensored pool so callers/tests can read the chain in
+        # mock mode just like live.
         self.uncensored_fallbacks = (
-            _full_uncensored_pool() if self.uncensored_mix else [])
+            _full_uncensored_pool()
+            if (self.uncensored_mix or self.pin_uncensored) else [])
         # RIE parity: disabled store so callers can read llm.refusal_intel
         # in mock mode just like live mode.
         self.refusal_intel = RefusalIntelStore(enabled=False)
