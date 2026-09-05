@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#05060c">
 <meta name="color-scheme" content="dark">
 <title>HackerAI — Agent Command Center</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2322d3ee'/%3E%3Cstop offset='1' stop-color='%237c3aed'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M17.5 5L9 18h6l-1.5 9L23 14h-6z' fill='%2305060c'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23f43f5e'/%3E%3Cstop offset='1' stop-color='%23be123c'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M17.5 5L9 18h6l-1.5 9L23 14h-6z' fill='%2305060c'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -25,7 +25,7 @@
   <aside class="sidebar">
     <div class="brand">
       <div class="logo" aria-hidden="true">
-        <svg viewBox="0 0 32 32"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><path d="M17.6 4.8 9 18.2h6l-1.6 9 8.6-13.4h-6z" fill="#05060c"/></svg>
+        <svg viewBox="0 0 32 32"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f43f5e"/><stop offset="1" stop-color="#be123c"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><path d="M17.6 4.8 9 18.2h6l-1.6 9 8.6-13.4h-6z" fill="#05060c"/></svg>
       </div>
       <div class="brand-text">
         <h1>HACKER<span>AI</span></h1>
@@ -41,7 +41,7 @@
     <div class="session-section">
       <div class="session-head">
         <span>Chats</span>
-        <b id="b-current" class="ses-count" hidden></b>
+        <b class="ses-count" hidden></b>
       </div>
       <div class="session-list" id="session-list"></div>
     </div>
@@ -95,23 +95,175 @@
         <div class="header-actions">
           <span class="pill mode-pill" id="pill-mode">—</span>
           <button class="pill export" id="pill-export" title="Export this chat as a Markdown pentest report">⬇ Export</button>
+          <span class="pill clock" id="cc-clock" title="local time">--:--:--</span>
           <button class="pill redteam-off" id="pill-redteam" title="Red Team master switch — one-click maximum uncensored profile">🩸 RED TEAM OFF</button>
         </div>
       </header>
 
-      <div class="chat-log" id="chat-log">
-        <div class="welcome">
-          <div class="welcome-orb" aria-hidden="true">
-            <div class="welcome-icon">🤖</div>
+      <div class="cc-stage">
+
+        <!-- conversation layer: scrollable chat surface (JS appends .msg/.typing/… here) -->
+        <div class="chat-log" id="chat-log"></div>
+
+        <!-- ============ COMMAND CENTER DASHBOARD (idle / pre-chat state) ============ -->
+        <div class="cc-dash" id="cc-dash">
+
+          <!-- ---------- top: hero status + system overview ---------- -->
+          <div class="dash-grid dash-top">
+
+            <!-- HERO — AI AGENT STATUS -->
+            <section class="panel hero" aria-label="AI Agent status">
+              <div class="hero-head">
+                <div class="hero-tags">
+                  <span class="tag-live"><i></i> AI AGENT STATUS</span>
+                  <span class="tag-soft">LOCAL · PRIVATE · ELITE</span>
+                </div>
+                <div class="hero-rings" aria-hidden="true">
+                  <div class="ring r1"></div><div class="ring r2"></div>
+                  <div class="robot">
+                    <svg viewBox="0 0 96 96" fill="none">
+                      <defs>
+                        <linearGradient id="robg" x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0" stop-color="#fda4af"/><stop offset="1" stop-color="#be123c"/>
+                        </linearGradient>
+                      </defs>
+                      <path d="M48 8v10" stroke="#f43f5e" stroke-width="4" stroke-linecap="round"/>
+                      <circle cx="48" cy="6" r="4" fill="#f43f5e"/>
+                      <rect x="22" y="26" width="52" height="42" rx="14" fill="url(#robg)" stroke="#fda4af" stroke-width="2"/>
+                      <rect x="24" y="34" width="48" height="8" rx="4" fill="rgba(5,6,12,.35)"/>
+                      <rect x="32" y="40" width="8" height="6" rx="2" fill="#05060c"/>
+                      <circle cx="38" cy="52" r="5" fill="#05060c"/>
+                      <circle cx="58" cy="52" r="5" fill="#05060c"/>
+                      <circle cx="38" cy="52" r="2" fill="#f43f5e"/>
+                      <circle cx="58" cy="52" r="2" fill="#f43f5e"/>
+                      <path d="M34 64c4 4 24 4 28 0" stroke="#05060c" stroke-width="3" stroke-linecap="round"/>
+                      <rect x="20" y="62" width="8" height="16" rx="4" fill="url(#robg)"/>
+                      <rect x="68" y="62" width="8" height="16" rx="4" fill="url(#robg)"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              <div class="hero-title">
+                <h2>ONLINE <em>&amp; READY</em></h2>
+                <p>HackerAI command core is live — smart router active, every scan, exploit and report stays <b>local &amp; private</b>. Type below, or launch from a quick action.</p>
+              </div>
+
+              <div class="sec-label">CAPABILITIES</div>
+              <div class="caps">
+                <span class="cap"><b class="c-ico">⌘</b>Exec Shell</span>
+                <span class="cap"><b class="c-ico">📡</b>Network Scan</span>
+                <span class="cap"><b class="c-ico">🌀</b>Web Fuzz</span>
+                <span class="cap"><b class="c-ico">🔍</b>Web Search</span>
+                <span class="cap"><b class="c-ico">🗂️</b>File Ops</span>
+                <span class="cap"><b class="c-ico">🧠</b>Persistent Memory</span>
+                <span class="cap"><b class="c-ico">📦</b>Artifact Export</span>
+                <span class="cap"><b class="c-ico">☠</b>Red Team</span>
+              </div>
+
+              <div class="sec-label">QUICK ACTIONS</div>
+              <div class="quickacts">
+                <button class="chip qk" data-msg="port scan 127.0.0.1"><b>🛰</b><span>Port Scan</span></button>
+                <button class="chip qk" data-msg="list files in current folder"><b>📁</b><span>List Files</span></button>
+                <button class="chip qk" data-msg="system info"><b>🖥</b><span>System Info</span></button>
+                <button class="chip qk" data-msg="subdomain_enum example.com"><b>🌐</b><span>Subdomain Enum</span></button>
+                <button class="chip qk" data-msg="what tools do you have?"><b>🛠</b><span>Tool Catalog</span></button>
+              </div>
+
+              <button class="btn-launch" id="launch-agent">
+                <span class="launch-ico"><svg viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11L9.5 22 19 9.5h-6.5z"/></svg></span>
+                <span><b>LAUNCH AGENT</b><small>start a new command session</small></span>
+              </button>
+            </section>
+
+            <!-- SYSTEM OVERVIEW -->
+            <section class="panel sys-ov" aria-label="System overview">
+              <div class="panel-head">
+                <h3><span class="ph-ico">◎</span> System Overview</h3>
+                <span class="op-badge"><i></i> 100% OPERATIONAL</span>
+              </div>
+              <div class="gauge-grid">
+                <div class="gauge">
+                  <div class="g-top"><span>CPU</span><b id="val-cpu">—</b></div>
+                  <div class="g-track"><div class="g-fill" id="g-cpu"></div></div>
+                </div>
+                <div class="gauge">
+                  <div class="g-top"><span>RAM</span><b id="val-ram">—</b></div>
+                  <div class="g-track"><div class="g-fill" id="g-ram"></div></div>
+                </div>
+                <div class="gauge">
+                  <div class="g-top"><span>DISK</span><b id="val-disk">—</b></div>
+                  <div class="g-track"><div class="g-fill" id="g-disk"></div></div>
+                </div>
+                <div class="gauge">
+                  <div class="g-top"><span>NET</span><b id="val-net">LINKED</b></div>
+                  <div class="g-track"><div class="g-fill flow" id="g-net"></div></div>
+                </div>
+              </div>
+              <div class="stat-strip">
+                <div class="stat"><span>UPTIME</span><b id="cc-stat-uptime">—</b></div>
+                <div class="stat"><span>SESSIONS</span><b id="cc-stat-sessions">—</b></div>
+                <div class="stat"><span>MODEL</span><b id="cc-stat-model">—</b></div>
+                <div class="stat"><span>TOOLS</span><b id="cc-stat-tools">—</b></div>
+              </div>
+              <div class="traffic">
+                <div class="t-head"><span>LIVE TRAFFIC</span><span class="t-legend"><i class="lg-in"></i>in <i class="lg-out"></i>out</span></div>
+                <div class="t-bars">
+                  <i style="--h:42%"></i><i style="--h:68%"></i><i style="--h:35%"></i><i style="--h:82%"></i>
+                  <i style="--h:54%"></i><i style="--h:26%"></i><i style="--h:74%"></i><i style="--h:48%"></i>
+                  <i style="--h:90%"></i><i style="--h:38%"></i><i style="--h:62%"></i><i style="--h:30%"></i>
+                  <i style="--h:78%"></i><i style="--h:52%"></i><i style="--h:66%"></i><i style="--h:44%"></i>
+                  <i class="alt" style="--h:60%"></i><i class="alt" style="--h:24%"></i><i class="alt" style="--h:70%"></i><i class="alt" style="--h:46%"></i>
+                  <i class="alt" style="--h:86%"></i><i class="alt" style="--h:40%"></i><i class="alt" style="--h:58%"></i><i class="alt" style="--h:72%"></i>
+                </div>
+              </div>
+            </section>
           </div>
-          <h3>AI Agent <span>ready</span></h3>
-          <p>Terminal chala sakta hoon, networks scan karta hoon, web apps fuzz karta hoon, web search karta hoon — aur files + memory har session mein manage karta hoon.</p>
-          <div class="chips" id="chips">
-            <button class="chip" data-msg="list files in current folder"><b>📁</b><span>list files</span></button>
-            <button class="chip" data-msg="port scan 127.0.0.1"><b>🔎</b><span>port scan 127.0.0.1</span></button>
-            <button class="chip" data-msg="system info"><b>🖥️</b><span>system info</span></button>
-            <button class="chip" data-msg="subdomain_enum example.com"><b>🌐</b><span>subdomains of example.com</span></button>
-            <button class="chip" data-msg="what tools do you have?"><b>🛠️</b><span>what tools do you have?</span></button>
+
+          <!-- ---------- six system info cards ---------- -->
+          <div class="dash-cards">
+            <div class="pcard"><span class="pc-ico">🪟</span><div><small>OS</small><b id="cc-os">…</b><em id="cc-os-sub">detecting…</em></div></div>
+            <div class="pcard"><span class="pc-ico">🌐</span><div><small>IP</small><b id="cc-ip">…</b><em id="cc-ip-sub">detecting…</em></div></div>
+            <div class="pcard"><span class="pc-ico">📍</span><div><small>LOCATION</small><b id="cc-loc">…</b><em id="cc-loc-sub">detecting…</em></div></div>
+            <div class="pcard"><span class="pc-ico">👤</span><div><small>USER</small><b id="cc-user">…</b><em id="cc-user-sub">detecting…</em></div></div>
+            <div class="pcard"><span class="pc-ico">💻</span><div><small>SHELL</small><b id="cc-shell">…</b><em id="cc-shell-sub">detecting…</em></div></div>
+            <div class="pcard"><span class="pc-ico">🧬</span><div><small>AGENT VERSION</small><b id="cc-ver">…</b><em id="cc-ver-sub">detecting…</em></div></div>
+          </div>
+
+          <!-- ---------- three-column row ---------- -->
+          <div class="dash-grid dash-cols">
+            <section class="panel colp" aria-label="Active sessions">
+              <div class="panel-head"><h3><span class="ph-ico">◷</span> Active Sessions</h3><span class="op-badge soft">LOCAL VAULT</span></div>
+              <div class="ss-list" id="cc-session-list">
+                <div class="ss-empty">loading…</div>
+              </div>
+            </section>
+            <section class="panel colp" aria-label="Terminal preview">
+              <div class="panel-head"><h3><span class="ph-ico">&gt;_</span> Terminal</h3><span class="op-badge soft" id="cc-term-state">SHELL READY</span></div>
+              <div class="term">
+                <div class="term-line" style="--d:0s">agent core <b>:: boot</b></div>
+                <div class="term-line" style="--d:.18s">router <b>:: smart-auto</b> · model <b id="cc-term-model">—</b></div>
+                <div class="term-line" style="--d:.36s">tools <b>:: <span id="cc-term-tools">—</span> registered</b></div>
+                <div class="term-line" style="--d:.54s">memory <b>:: vault mounted</b> · sessions persistent</div>
+                <div class="term-line" style="--d:.72s">red team <b>:: standby</b></div>
+                <div class="term-line prompt" style="--d:.9s"><span class="t-sym">❯</span> type below to command the agent<span class="caret"></span></div>
+              </div>
+            </section>
+            <section class="panel colp" aria-label="Recent activity">
+              <div class="panel-head"><h3><span class="ph-ico">≡</span> Recent Activity</h3><span class="op-badge soft">LIVE</span></div>
+              <div class="ss-list" id="cc-activity">
+                <div class="ss-empty">loading…</div>
+              </div>
+            </section>
+          </div>
+
+          <!-- ---------- bottom status bar ---------- -->
+          <div class="cc-statusbar">
+            <span class="st ok"><i></i> agent core online</span>
+            <span class="st ok"><i></i> router <b id="cc-sb-mode">auto</b></span>
+            <span class="st ok"><i></i> local &amp; private</span>
+            <span class="st" id="cc-sb-extra">—</span>
+            <span class="st-right">session <b id="cc-sb-session">—</b> · tools <b id="cc-sb-tools">—</b> · <span id="cc-clock2">--:--:--</span></span>
           </div>
         </div>
       </div>

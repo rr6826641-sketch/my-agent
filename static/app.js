@@ -92,9 +92,9 @@ function welcome() {
 }
 
 document.addEventListener("click", (e) => {
-  if (e.target.classList && e.target.classList.contains("chip") && e.target.dataset.msg) {
-    sendMessage(e.target.dataset.msg);
-  }
+  if (!(e.target instanceof Element)) return;
+  const chip = e.target.closest(".chip[data-msg]");
+  if (chip) sendMessage(chip.dataset.msg);
 });
 
 /* ---------------- chat sessions (persistent history) ---------------- */
@@ -102,7 +102,6 @@ function newChat() {
   if (busy) return;
   currentSessionId = null;
   chatLog.innerHTML = "";
-  welcome();
   updateExportPill();
   loadSessions();
 }
@@ -153,7 +152,7 @@ async function deleteSession(id) {
   if (id === currentSessionId) {
     currentSessionId = null;
     chatLog.innerHTML = "";
-    welcome();
+    updateExportPill();
   }
   loadSessions();
 }
@@ -1705,4 +1704,312 @@ async function refreshBoard() {
   await loadSessions();
   if (currentSessionId) openSession(currentSessionId);
   refreshBoard();
+})();
+
+/* ============================================================
+   Command Center dashboard glue (idle / pre-chat state)
+
+   - watches #chat-log so `body.chat-active` mirrors whether a
+     conversation is open (CSS contract: body:not(.chat-active)
+     shows .cc-dash and hides .chat-log, and vice versa)
+   - live clock, /api/dash polling (graceful fallback for older
+     backends), gauge/stat/card filling, session list + recent
+     activity rows, terminal lines, traffic-bar ambience
+   ============================================================ */
+(() => {
+  const get = (id) => document.getElementById(id);
+  const q = (sel) => document.querySelector(sel);
+  const chatLogEl = get("chat-log");
+  const bodyEl = document.body;
+
+  /* ---------------- chat <-> dashboard visibility toggle ---------------- */
+  function updateChatActive() {
+    const active = !!chatLogEl && chatLogEl.childElementCount > 0;
+    bodyEl.classList.toggle("chat-active", active);
+  }
+  if (chatLogEl && window.MutationObserver) {
+    const mo = new MutationObserver(updateChatActive);
+    mo.observe(chatLogEl, { childList: true });
+  }
+
+  /* ---------------- live clock (header pill + statusbar) ---------------- */
+  const pad = (n) => String(n).padStart(2, "0");
+  const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  function tickClock() {
+    const now = new Date();
+    const hms = pad(now.getHours()) + ":" + pad(now.getMinutes()) + ":" + pad(now.getSeconds());
+    const c1 = get("cc-clock");
+    if (c1) c1.textContent = hms;
+    const c2 = get("cc-clock2");
+    if (c2) c2.textContent = hms + " · " + DAYS[now.getDay()] + " " +
+      now.getDate() + " " + MONTHS[now.getMonth()];
+  }
+  tickClock();
+  setInterval(tickClock, 1000);
+
+  /* ---------------- small formatters ---------------- */
+  function setTxt(node, val) {
+    if (!node) return;
+    node.textContent = (val === null || val === undefined || val === "")
+      ? "—" : String(val);
+  }
+  function fmtUptime(s) {
+    s = Math.max(0, Math.floor(Number(s) || 0));
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (d > 0) return d + "d " + h + "h";
+    if (h > 0) return h + "h " + m + "m";
+    if (m > 0) return m + "m " + sec + "s";
+    return sec + "s";
+  }
+  function timeAgo(ts) {
+    let t = Number(ts) || 0;
+    if (!t) return "—";
+    if (t > 1e12) t = t / 1000;                 // ms epoch -> seconds
+    const diff = Math.max(0, Date.now() / 1000 - t);
+    if (diff < 60) return "just now";
+    if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+    if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
+    return Math.floor(diff / 86400) + "d ago";
+  }
+  function truncate(s, n) {
+    s = String(s || "");
+    return s.length > n ? s.slice(0, n - 1) + "…" : s;
+  }
+  function modelLabel(model) {
+    if (model === "auto") return "smart-auto";
+    if (model === "mock-1") return "mock-1";
+    return String(model || "?");
+  }
+
+  /* ---------------- gauges ---------------- */
+  function setGauge(valId, fillId, pct, titleText, valueText) {
+    const val = get(valId);
+    const fill = get(fillId);
+    pct = Math.max(0, Math.min(100, Number(pct) || 0));
+    if (fill) fill.style.width = pct + "%";
+    if (val) {
+      val.textContent = valueText || Math.round(pct) + "%";
+      if (titleText) val.title = titleText;
+    }
+  }
+
+  /* CPU fallback: gentle jitter walk (2-24%) when the OS counter is absent */
+  const cpuSim = { v: 8 + Math.random() * 16, on: false, timer: null };
+  function cpuJitterTick() {
+    cpuSim.v = Math.max(2, Math.min(24, cpuSim.v + (Math.random() * 14 - 7)));
+    setGauge("val-cpu", "g-cpu", cpuSim.v, "live load estimate");
+  }
+  function cpuJitterStart() {
+    if (cpuSim.on) return;
+    cpuSim.on = true;
+    cpuJitterTick();
+    cpuSim.timer = setInterval(cpuJitterTick, 1600);
+  }
+  function cpuJitterStop() {
+    cpuSim.on = false;
+    if (cpuSim.timer) { clearInterval(cpuSim.timer); cpuSim.timer = null; }
+  }
+
+  /* traffic bars ambience */
+  function jitterTraffic() {
+    const bars = document.querySelectorAll(".traffic .t-bars i");
+    bars.forEach((b) => b.style.setProperty("--h", (8 + Math.random() * 88) + "%"));
+  }
+
+  /* ---------------- active sessions list (max 7, click to open) ---------------- */
+  function fillSessions(list) {
+    const box = get("cc-session-list");
+    if (!box) return;
+    const rows = (list || []).slice(0, 7);
+    box.innerHTML = "";
+    if (!rows.length) {
+      const empty = document.createElement("div");
+      empty.className = "ss-empty";
+      empty.textContent = "no saved sessions yet";
+      box.appendChild(empty);
+      return;
+    }
+    rows.forEach((s) => {
+      const item = document.createElement("div");
+      item.className = "ss-item clickable";
+      item.dataset.sid = s.id || "";
+      item.title = (s.preview || "open this session");
+      const ico = document.createElement("span");
+      ico.className = "ss-ico";
+      ico.textContent = "◷";
+      const txt = document.createElement("div");
+      txt.className = "ss-txt";
+      const b = document.createElement("b");
+      b.textContent = s.title || "New chat";
+      const small = document.createElement("small");
+      small.textContent = timeAgo(s.updated) + (s.count ? " · " + s.count + " msgs" : "");
+      txt.appendChild(b);
+      txt.appendChild(small);
+      const go = document.createElement("span");
+      go.className = "ss-go";
+      go.textContent = "→";
+      item.appendChild(ico);
+      item.appendChild(txt);
+      item.appendChild(go);
+      box.appendChild(item);
+    });
+  }
+  const sessBox = get("cc-session-list");
+  if (sessBox) {
+    sessBox.addEventListener("click", (e) => {
+      const row = e.target instanceof Element ? e.target.closest(".ss-item[data-sid]") : null;
+      if (!row || busy) return;
+      openSession(row.dataset.sid);
+    });
+  }
+
+  /* ---------------- recent activity rows (non-clickable) ---------------- */
+  function fillActivity(st) {
+    const box = get("cc-activity");
+    if (!box) return;
+    const nMem = Number(st.memory_entries) || 0;
+    const modeTxt = st.mode === "mock" ? "mock engine"
+      : (st.mode === "auto" ? "smart-auto router" : "live model");
+    const rows = [
+      { ico: "🧠", title: "memory vault", sub: nMem + (nMem === 1 ? " note" : " notes") + " stored" },
+      { ico: "☠", title: "red team", sub: st.red_team_mode ? "armed · level " + (st.red_team_level || "promax") : "standby" },
+      { ico: "🛠", title: "tools", sub: (Number(st.tools) || 0) + " registered" },
+      { ico: "🤖", title: "router", sub: modeTxt + " · " + modelLabel(st.model) },
+    ];
+    box.innerHTML = "";
+    rows.forEach((r) => {
+      const item = document.createElement("div");
+      item.className = "ss-item";
+      const ico = document.createElement("span");
+      ico.className = "ss-ico";
+      ico.textContent = r.ico;
+      const txt = document.createElement("div");
+      txt.className = "ss-txt";
+      const b = document.createElement("b");
+      b.textContent = r.title;
+      const small = document.createElement("small");
+      small.textContent = r.sub;
+      txt.appendChild(b);
+      txt.appendChild(small);
+      item.appendChild(ico);
+      item.appendChild(txt);
+      box.appendChild(item);
+    });
+  }
+
+  /* ---------------- fill everything from one /api/dash payload ---------------- */
+  function applyDash(d) {
+    const st = d.status || {};
+    const sys = d.sys || {};
+    const toolsN = (typeof st.tools === "number" ? st.tools : (Number(st.tools) || 0));
+    const modeTxt = st.mode === "mock" ? "MOCK MODE"
+      : (st.mode === "auto" ? "SMART ROUTER" : "LIVE MODEL");
+
+    // stat strip + terminal
+    setTxt(get("cc-stat-uptime"), fmtUptime(d.uptime_s));
+    setTxt(get("cc-stat-sessions"), Number(d.total_sessions) || 0);
+    setTxt(get("cc-stat-model"), modelLabel(st.model));
+    setTxt(get("cc-stat-tools"), toolsN);
+    setTxt(get("cc-term-model"), modelLabel(st.model));
+    setTxt(get("cc-term-tools"), toolsN);
+    setTxt(get("cc-term-state"), modeTxt);
+
+    // red-team terminal line (armed/standby)
+    document.querySelectorAll(".term-line").forEach((ln) => {
+      if (/red team/i.test(ln.textContent)) {
+        const bb = ln.querySelector("b");
+        if (bb) bb.textContent = st.red_team_mode ? ":: armed · " + (st.red_team_level || "promax") : ":: standby";
+      }
+    });
+
+    // gauges — real metrics; cpu falls back to a jitter walk when absent
+    if (sys.ram && typeof sys.ram.pct === "number") {
+      setGauge("val-ram", "g-ram", sys.ram.pct, sys.ram.used_gb + " / " + sys.ram.total_gb + " GB used");
+    }
+    if (sys.disk && typeof sys.disk.pct === "number") {
+      setGauge("val-disk", "g-disk", sys.disk.pct, sys.disk.used_gb + " / " + sys.disk.total_gb + " GB used");
+    }
+    if (typeof sys.cpu_pct === "number") {
+      cpuJitterStop();
+      setGauge("val-cpu", "g-cpu", sys.cpu_pct, "live load");
+    } else {
+      cpuJitterStart();
+    }
+
+    // six system cards
+    const card = (idV, idS, val, sub) => { setTxt(get(idV), val); setTxt(get(idS), sub); };
+    card("cc-os", "cc-os-sub", sys.os, sys.os_ver || "system info unavailable");
+    card("cc-ip", "cc-ip-sub", sys.ip || sys.adapter_ip,
+         sys.adapter_ip ? "adapter " + sys.adapter_ip
+         : (sys.gateway ? "gw " + sys.gateway : (sys.ip6 || "resolving…")));
+    card("cc-loc", "cc-loc-sub", sys.host || "this machine",
+         (sys.machine || "machine") + (sys.cores ? " · " + sys.cores + " cores" : ""));
+    card("cc-user", "cc-user-sub", sys.user, "local account");
+    card("cc-shell", "cc-shell-sub", sys.shell || "cmd",
+         sys.python ? "python " + sys.python : "webui build");
+    card("cc-ver", "cc-ver-sub", d.version ? "v" + d.version : "—", "webui build");
+
+    // bottom status bar
+    setTxt(get("cc-sb-mode"), modeTxt.toLowerCase() === "smart router" ? "auto" : (st.mode || "auto"));
+    setTxt(get("cc-sb-extra"), st.red_team_mode
+      ? "red team · " + (st.red_team_level || "promax")
+      : "persona · " + truncate(st.persona, 22));
+    setTxt(get("cc-sb-session"), (currentSessionId || "").slice(0, 6) || "—");
+    setTxt(get("cc-sb-tools"), toolsN);
+
+    fillSessions(d.recent);
+    fillActivity(st);
+  }
+
+  /* ---------------- polling ---------------- */
+  async function ccFill() {
+    try {
+      const d = await fetchJSON("/api/dash");
+      applyDash(d);
+    } catch {
+      // older backend without /api/dash: degrade gracefully
+      try {
+        const [st, sess] = await Promise.all([
+          fetchJSON("/api/status").catch(() => null),
+          fetchJSON("/api/sessions").catch(() => null),
+        ]);
+        const list = sess && Array.isArray(sess.sessions) ? sess.sessions : [];
+        applyDash({
+          status: st,
+          total_sessions: list.length,
+          recent: list,
+          version: null,
+          uptime_s: null,
+          sys: null,
+        });
+      } catch { /* keep placeholders */ }
+    }
+    jitterTraffic();
+  }
+
+  /* ---------------- LAUNCH AGENT ---------------- */
+  const launchBtn = get("launch-agent");
+  if (launchBtn) {
+    launchBtn.addEventListener("click", () => {
+      if (busy) return;
+      newChat();
+      updateChatActive();
+      const stage = q(".cc-stage");
+      const dash = get("cc-dash");
+      if (stage) stage.scrollTop = 0;
+      if (dash) dash.scrollTop = 0;
+      if (inputBox) inputBox.focus();
+    });
+  }
+
+  /* boot the dashboard: initial state + 10 s refresh */
+  updateChatActive();
+  jitterTraffic();
+  ccFill();
+  setInterval(ccFill, 10000);
 })();

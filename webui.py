@@ -53,6 +53,9 @@ INSTITUTIONAL_NOTES_PATH = os.path.join(PROJECT_DIR, "institutional_notes.db")
 # serializes all reads/writes of chats.json
 _chat_lock = threading.Lock()
 
+# wall-clock boot instant, drives the Command Center uptime counter
+_WEBUI_BOOT_TS = time.time()
+
 # one stop_event per active /api/chat run so the Stop button can cancel it
 _run_lock = threading.Lock()
 _active_runs = {}  # run_id -> threading.Event
@@ -1628,6 +1631,228 @@ def api_system():
 @app.route("/api/status")
 def api_status():
     return jsonify(_status())
+
+
+# ---------------------------------------------------------------------------
+# Command Center dashboard data (/api/dash).
+#
+# Every metric helper is best-effort: a failure on one subsystem (e.g. no
+# ctypes on a bare build, wmic missing) degrades to None instead of taking
+# down the whole payload. No third-party dependencies -- the gauges sample
+# kernel counters directly. Blocks that sleep do so only inside the request
+# thread (threaded=True), never under a lock.
+# ---------------------------------------------------------------------------
+
+
+def _dash_cpu_pct():
+    """CPU load % from two 0.35 s-apart samples of the kernel counters."""
+    try:
+        if os.name == "nt":
+            import ctypes
+
+            class _FT(ctypes.Structure):
+                _fields_ = [("dwLowDateTime", ctypes.c_uint32),
+                            ("dwHighDateTime", ctypes.c_uint32)]
+
+            def _ms(ft):
+                return ((ft.dwHighDateTime << 32) | ft.dwLowDateTime) / 10000.0
+
+            k32 = ctypes.windll.kernel32
+            a_idle, a_kern, a_user = _FT(), _FT(), _FT()
+            if not k32.GetSystemTimes(ctypes.byref(a_idle), ctypes.byref(a_kern),
+                                      ctypes.byref(a_user)):
+                return None
+            time.sleep(0.35)
+            b_idle, b_kern, b_user = _FT(), _FT(), _FT()
+            if not k32.GetSystemTimes(ctypes.byref(b_idle), ctypes.byref(b_kern),
+                                      ctypes.byref(b_user)):
+                return None
+            idle = _ms(b_idle) - _ms(a_idle)
+            kern = _ms(b_kern) - _ms(a_kern)   # kernel ticks include idle
+            user = _ms(b_user) - _ms(a_user)
+            total = kern + user
+            if total <= 0:
+                return None
+            busy = (kern - idle) + user
+            return max(0.0, min(100.0, busy / total * 100.0))
+        else:
+            def _stat():
+                with open("/proc/stat", "r", encoding="utf-8") as f:
+                    parts = f.readline().split()
+                if not parts or parts[0] != "cpu" or len(parts) < 5:
+                    return None
+                return [int(x) for x in parts[1:]]
+
+            first = _stat()
+            if first is None:
+                return None
+            time.sleep(0.35)
+            second = _stat()
+            if second is None:
+                return None
+            n = min(len(first), len(second))
+            first, second = first[:n], second[:n]
+            delta = [b - a for a, b in zip(first, second)]
+            # layout: user nice system idle iowait irq softirq steal ...
+            idle = (delta[3] if n > 3 else 0) + (delta[4] if n > 4 else 0)
+            total = sum(delta)
+            if total <= 0:
+                return None
+            return max(0.0, min(100.0, (total - idle) / total * 100.0))
+    except Exception:
+        return None
+
+
+def _dash_ram():
+    """Memory used/total (GB) + used %."""
+    try:
+        if os.name == "nt":
+            import ctypes
+
+            class _MS(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_uint32),
+                    ("dwMemoryLoad", ctypes.c_uint32),
+                    ("ullTotalPhys", ctypes.c_uint64),
+                    ("ullAvailPhys", ctypes.c_uint64),
+                    ("ullTotalPageFile", ctypes.c_uint64),
+                    ("ullAvailPageFile", ctypes.c_uint64),
+                    ("ullTotalVirtual", ctypes.c_uint64),
+                    ("ullAvailVirtual", ctypes.c_uint64),
+                    ("ullAvailExtendedVirtual", ctypes.c_uint64),
+                ]
+
+            ms = _MS()
+            ms.dwLength = ctypes.sizeof(_MS)
+            if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms)):
+                return None
+            total_gb = ms.ullTotalPhys / (1024.0 ** 3)
+            used_gb = (ms.ullTotalPhys - ms.ullAvailPhys) / (1024.0 ** 3)
+            return {"total_gb": round(total_gb, 1), "used_gb": round(used_gb, 1),
+                    "pct": max(0.0, min(100.0, float(ms.dwMemoryLoad)))}
+        with open("/proc/meminfo", "r", encoding="utf-8") as f:
+            mem = {}
+            for line in f:
+                parts = line.split(":")
+                if len(parts) == 2:
+                    kb = parts[1].strip().split()
+                    if kb:
+                        mem[parts[0]] = int(kb[0])
+        total_kb = mem.get("MemTotal")
+        avail_kb = mem.get("MemAvailable") or mem.get("MemFree")
+        if not total_kb or avail_kb is None:
+            return None
+        used_kb = total_kb - avail_kb
+        total_gb = total_kb / (1024.0 ** 2)
+        used_gb = used_kb / (1024.0 ** 2)
+        return {"total_gb": round(total_gb, 1), "used_gb": round(used_gb, 1),
+                "pct": max(0.0, min(100.0, used_gb / total_gb * 100.0))}
+    except Exception:
+        return None
+
+
+def _dash_disk():
+    """Disk usage of the volume hosting the project."""
+    try:
+        import shutil
+        drive = os.path.splitdrive(PROJECT_DIR)[0]
+        root = (drive + os.sep) if drive else PROJECT_DIR
+        usage = shutil.disk_usage(root)
+        return {"total_gb": round(usage.total / (1024.0 ** 3), 1),
+                "used_gb": round(usage.used / (1024.0 ** 3), 1),
+                "free_gb": round(usage.free / (1024.0 ** 3), 1),
+                "pct": max(0.0, min(100.0, usage.used / usage.total * 100.0))}
+    except Exception:
+        return None
+
+
+def _dash_sys():
+    """Parsed system facts + live gauges for the Command Center.
+
+    Reuses the project's own system tools (ai_agent.tools.system) and parses
+    their "key: value" output lines so the dashboard never drifts from what
+    the agent itself reports.
+    """
+    sys_raw, ip_raw = {}, {}
+    try:
+        from ai_agent.tools.system import tool_system_info, tool_ip_info
+        for raw, dst in ((tool_system_info(), sys_raw),
+                         (tool_ip_info(), ip_raw)):
+            for line in str(raw).splitlines():
+                if ":" in line:
+                    key, _, val = line.partition(":")
+                    key = key.strip().lower().replace(" ", "_")
+                    val = val.strip()
+                    if key and val:
+                        dst.setdefault(key, val)
+    except Exception:
+        pass
+
+    os_label = str(sys_raw.get("os") or "").lower()
+    friendly = {"windows": "Windows", "windows_nt": "Windows", "linux": "Linux",
+                "darwin": "macOS", "java": "Java", "posix": "POSIX"}
+    os_name = friendly.get(os_label) or sys_raw.get("os") or ("Windows" if os.name == "nt" else os.name)
+    os_ver = sys_raw.get("version") or sys_raw.get("release") or ""
+
+    shell = os.environ.get("SHELL") or os.environ.get("COMSPEC")
+    if shell:
+        shell = os.path.basename(shell).replace(".exe", "").lower()
+
+    return {
+        "host": sys_raw.get("hostname"),
+        "user": sys_raw.get("user"),
+        "os": os_name,
+        "os_ver": os_ver,
+        "machine": sys_raw.get("machine"),
+        "cores": sys_raw.get("cpu_cores"),
+        "python": sys_raw.get("python"),
+        "shell": shell,
+        "platform": sys_raw.get("platform"),
+        "ip": ip_raw.get("ipv4"),
+        "adapter_ip": ip_raw.get("adapter_ipv4"),
+        "ip6": ip_raw.get("ipv6") or ip_raw.get("ipv6_address"),
+        "gateway": ip_raw.get("gateway"),
+        "ram": _dash_ram(),
+        "disk": _dash_disk(),
+        "cpu_pct": _dash_cpu_pct(),
+    }
+
+
+@app.route("/api/dash")
+def api_dash():
+    """Command Center dashboard: status + sessions + version + live sys gauges."""
+    fallback = {"status": None, "total_sessions": 0, "recent": [],
+                "version": None, "uptime_s": None, "sys": None}
+    try:
+        with _chat_lock:
+            sessions = _read_chats_unlocked().get("sessions", {})
+
+        def _sort_key(s):
+            try:
+                return float(s.get("updated") or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        recent = []
+        for s in sorted(sessions.values(), key=_sort_key, reverse=True)[:8]:
+            try:
+                recent.append(_session_summary(s))
+            except Exception:
+                continue
+        try:
+            from ai_agent import __version__ as _webui_version
+        except Exception:
+            _webui_version = None
+        return jsonify({
+            "status": _status(),
+            "total_sessions": len(sessions),
+            "recent": recent,
+            "version": _webui_version,
+            "uptime_s": max(0, int(time.time() - _WEBUI_BOOT_TS)),
+            "sys": _dash_sys(),
+        })
+    except Exception:
+        return jsonify(fallback)
 
 
 # ---------------------------------------------------------------------------
