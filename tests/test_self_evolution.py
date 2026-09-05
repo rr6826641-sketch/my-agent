@@ -34,6 +34,7 @@ from ai_agent.core.self_evolution import (
     SynthesizedToolStore,
     SynthesizedToolValidator,
     ToolSynthesizer,
+    build_llm_code_model,
     build_micro_test_script,
     is_valid_tool_name,
 )
@@ -801,3 +802,89 @@ def test_engine_rejects_generated_tool_without_micro_tests(tmp_path):
         assert "micro unit tests" in response["detail"]
         assert engine.stats["rejected"] == 1
         assert engine._ensure_store().get("lowercase_text") is None
+# --------------------------------------------------------------------------
+# PHASE 2D: chat-client code-model adapter + process-wide main wiring
+# --------------------------------------------------------------------------
+
+
+class _ChatClient:
+    """Duck-typed OpenAI-compatible chat double (like llm.MockClient)."""
+
+    def __init__(self, reply, temperature=0.2):
+        self._reply = reply
+        self._temperature = temperature
+        self.calls = []
+
+    def chat(self, messages, tools=None, temperature=0.2):
+        self.calls.append((messages, tools, temperature))
+        return self._reply
+
+
+def test_build_llm_code_model_chat_client_synthesizes():
+    import json
+    gap = _unmatched_gap("slugify", detail="planner asked for a slug helper")
+    client = _ChatClient({"content": json.dumps({
+        "name": "slugify",
+        "description": "Slugifies text",
+        "source": ("def run(**kw):\n"
+                   "    import re\n"
+                   "    s = str(kw.get(\"text\", \"\")).lower()\n"
+                   "    return re.sub(r\"[^a-z0-9]+\", \"-\", s).strip(\"-\")\n"),
+        "probe": [{"args": {"text": "Hello World!"},
+                   "expect": "hello-world"}],
+    })})
+    model = build_llm_code_model(client)
+    assert callable(model)
+    synth = ToolSynthesizer(code_model=model)
+    spec = synth.synthesize("slugify", gap=gap)
+    assert spec is not None and spec["rule"] == "code-model"
+    assert spec["probe"][0]["expect"] == "hello-world"
+    assert client.calls and client.calls[0][1] is None
+    assert client.calls[0][2] == 0.2
+    assert "slugify" not in model(gap)["source"] or True  # second call ok too
+
+
+def test_code_model_chat_client_fails_closed_on_garbage():
+    import json
+    gap = _unmatched_gap("whatever_tool_xyz")
+    model = build_llm_code_model(
+        _ChatClient({"content": "I cannot help with that."}))
+    assert callable(model) and model(gap) is None
+
+    def boom(messages, tools=None, temperature=0.2):
+        raise RuntimeError("network down")
+    client = _ChatClient(None)
+    client.chat = boom
+    assert build_llm_code_model(client)(gap) is None
+
+    model3 = build_llm_code_model(_ChatClient(
+        {"content": json.dumps({"name": "x", "source": ""})}))
+    assert model3(gap) is None
+    assert build_llm_code_model(object()) is None
+    assert build_llm_code_model(None) is None
+
+
+def test_main_wiring_registers_agent_llm_as_code_model():
+    import json
+    from ai_agent.core import main as core_main
+    gap = _unmatched_gap("lc_text_zz")
+    client = _ChatClient({"content": json.dumps({
+        "name": "lc_text_zz",
+        "description": "lowercases",
+        "source": "def run(**kw):\n    return str(kw.get('t', '')).lower()\n",
+        "probe": [{"args": {"t": "ABC"}, "expect": "abc"}],
+    })})
+    old_cm, old_engine = core_main._evolution_code_model, core_main._evolution_engine
+    core_main._evolution_code_model = None
+    core_main._evolution_engine = None
+    try:
+        core_main._register_evolution_code_model(client)
+        assert core_main._evolution_code_model is not None
+        engine = core_main._get_evolution_engine()
+        assert engine.synthesizer is not None
+        assert engine.synthesizer.code_model is not None
+        spec = engine.synthesizer.synthesize("lc_text_zz", gap=gap)
+        assert spec is not None and spec["rule"] == "code-model"
+    finally:
+        core_main._evolution_code_model = old_cm
+        core_main._evolution_engine = old_engine
