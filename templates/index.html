@@ -3,37 +3,57 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Agent — Web UI</title>
+<meta name="theme-color" content="#05060c">
+<meta name="color-scheme" content="dark">
+<title>HackerAI — Agent Command Center</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2322d3ee'/%3E%3Cstop offset='1' stop-color='%237c3aed'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M17.5 5L9 18h6l-1.5 9L23 14h-6z' fill='%2305060c'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+
+<!-- ============ 3D ambient scene (pure CSS, GPU) ============ -->
+<div class="bg" aria-hidden="true">
+  <i class="bg-orb o1"></i><i class="bg-orb o2"></i><i class="bg-orb o3"></i>
+  <i class="bg-ring r1"></i><i class="bg-ring r2"></i>
+  <i class="bg-grid"></i><i class="bg-noise"></i>
+  <i class="bg-vignette"></i><i class="bg-scan"></i>
+</div>
+
 <div class="app">
 
   <!-- ======================= SIDEBAR ======================= -->
   <aside class="sidebar">
     <div class="brand">
-      <div class="logo">⚡</div>
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><path d="M17.6 4.8 9 18.2h6l-1.6 9 8.6-13.4h-6z" fill="#05060c"/></svg>
+      </div>
       <div class="brand-text">
-        <h1>AI AGENT</h1>
-        <span id="brand-sub">local · private</span>
+        <h1>HACKER<span>AI</span></h1>
+        <span id="brand-sub">local · private · elite</span>
       </div>
     </div>
 
-    <button class="btn-new" id="btn-new">+ New Chat</button>
+    <button class="btn-new" id="btn-new" aria-label="New chat">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      <span>New Chat</span>
+    </button>
 
     <div class="session-section">
-      <div class="session-head">Chats</div>
+      <div class="session-head">
+        <span>Chats</span>
+        <b id="b-current" class="ses-count" hidden></b>
+      </div>
       <div class="session-list" id="session-list"></div>
     </div>
 
     <nav class="nav">
-      <button class="nav-item active" data-view="chat">💬 Chat</button>
-      <button class="nav-item" data-view="tools">🛠️ Tools <span class="badge" id="badge-tools">0</span></button>
-      <button class="nav-item" data-view="memory">🧠 Memory <span class="badge" id="badge-memory">0</span></button>
-      <button class="nav-item" data-view="reports">📋 Reports <span class="badge" id="badge-reports">0</span></button>
-      <button class="nav-item" data-view="rpg">🎮 RPG <span class="badge" id="badge-rpg">0</span></button>
-      <button class="nav-item" data-view="settings">⚙️ Settings</button>
-      <button class="nav-item" data-view="system">🖥️ System</button>
+      <button class="nav-item active" data-view="chat"><i class="ni">💬</i><span>Chat</span></button>
+      <button class="nav-item" data-view="tools"><i class="ni">🛠️</i><span>Tools</span><em class="badge" id="badge-tools">0</em></button>
+      <button class="nav-item" data-view="memory"><i class="ni">🧠</i><span>Memory</span><em class="badge" id="badge-memory">0</em></button>
+      <button class="nav-item" data-view="reports"><i class="ni">📋</i><span>Reports</span><em class="badge" id="badge-reports">0</em></button>
+      <button class="nav-item" data-view="rpg"><i class="ni">🎮</i><span>RPG</span><em class="badge" id="badge-rpg">0</em></button>
+      <button class="nav-item" data-view="settings"><i class="ni">⚙️</i><span>Settings</span></button>
+      <button class="nav-item" data-view="system"><i class="ni">🖥️</i><span>System</span></button>
     </nav>
 
     <div class="board-widget" id="board-widget" hidden>
@@ -62,81 +82,108 @@
 
     <!-- ---------- CHAT VIEW ---------- -->
     <section class="view active" id="view-chat">
-      <div class="chat-header">
-        <div>
-          <h2>Chat</h2>
-          <p id="chat-hint">Ask anything — scan outputs (nmap/nuclei/curl…) are saved as downloadable artifacts in your chat.</p>
+      <header class="chat-header">
+        <div class="ht">
+          <div class="ht-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H4l2.3-2.9A8 8 0 1 1 21 12z"/></svg>
+          </div>
+          <div>
+            <h2>Command Center</h2>
+            <p id="chat-hint">Ask anything — scans (nmap / nuclei / curl…) ke outputs chat mein downloadable artifacts ke roop mein save hote hain.</p>
+          </div>
         </div>
         <div class="header-actions">
-          <span class="pill" id="pill-mode">—</span>
-          <button class="pill export" id="pill-export" title="Export this chat as a Markdown pentest report (summary, tool timeline, findings, artifacts)">⬇ Export</button>
-          <button class="pill redteam-off" id="pill-redteam" title="Red Team master switch — one-click maximum uncensored profile (red_team_mode + unfiltered persona)">🩸 RED TEAM OFF</button>
+          <span class="pill mode-pill" id="pill-mode">—</span>
+          <button class="pill export" id="pill-export" title="Export this chat as a Markdown pentest report">⬇ Export</button>
+          <button class="pill redteam-off" id="pill-redteam" title="Red Team master switch — one-click maximum uncensored profile">🩸 RED TEAM OFF</button>
         </div>
-      </div>
+      </header>
 
       <div class="chat-log" id="chat-log">
         <div class="welcome">
-          <div class="welcome-icon">🤖</div>
-          <h3>AI Agent ready</h3>
-          <p>I can run terminal commands, scan networks, fuzz web apps, search the web, manage files and remember things across sessions.</p>
+          <div class="welcome-orb" aria-hidden="true">
+            <div class="welcome-icon">🤖</div>
+          </div>
+          <h3>AI Agent <span>ready</span></h3>
+          <p>Terminal chala sakta hoon, networks scan karta hoon, web apps fuzz karta hoon, web search karta hoon — aur files + memory har session mein manage karta hoon.</p>
           <div class="chips" id="chips">
-            <button class="chip" data-msg="list files in current folder">📁 list files</button>
-            <button class="chip" data-msg="port scan 127.0.0.1">🔎 port scan 127.0.0.1</button>
-            <button class="chip" data-msg="system info">🖥️ system info</button>
-            <button class="chip" data-msg="subdomain_enum example.com">🌐 subdomains of example.com</button>
-            <button class="chip" data-msg="what tools do you have?">🛠️ what tools do you have?</button>
+            <button class="chip" data-msg="list files in current folder"><b>📁</b><span>list files</span></button>
+            <button class="chip" data-msg="port scan 127.0.0.1"><b>🔎</b><span>port scan 127.0.0.1</span></button>
+            <button class="chip" data-msg="system info"><b>🖥️</b><span>system info</span></button>
+            <button class="chip" data-msg="subdomain_enum example.com"><b>🌐</b><span>subdomains of example.com</span></button>
+            <button class="chip" data-msg="what tools do you have?"><b>🛠️</b><span>what tools do you have?</span></button>
           </div>
         </div>
       </div>
 
-      <div class="composer">
-        <textarea id="input" rows="1" placeholder="Message the agent… (Enter to send, Shift+Enter for newline)"></textarea>
+      <footer class="composer">
+        <textarea id="input" rows="1" placeholder="Message the agent…  (Enter = send · Shift+Enter = new line)"></textarea>
         <button class="btn-send" id="send" title="Send" aria-label="Send">
-          <span class="send-ico">➤</span>
+          <span class="send-ico">
+            <svg viewBox="0 0 24 24"><path d="M3.4 20.6 22 12 3.4 3.4l2.6 7.2 9.6 1.4-9.6 1.4z"/></svg>
+          </span>
           <span class="stop-ico">■</span>
         </button>
-      </div>
+      </footer>
     </section>
 
     <!-- ---------- TOOLS VIEW ---------- -->
     <section class="view" id="view-tools">
-      <div class="chat-header">
-        <div>
-          <h2>Tool Catalog</h2>
-          <p id="tools-count">—</p>
+      <header class="chat-header">
+        <div class="ht">
+          <div class="ht-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M14.7 6.3a5 5 0 0 0-6.9 6.2L3 17.3 6.7 21l4.8-4.8a5 5 0 0 0 6.2-6.9l-3 3-2.4-2.4z"/></svg>
+          </div>
+          <div>
+            <h2>Tool Catalog</h2>
+            <p id="tools-count">—</p>
+          </div>
         </div>
+      </header>
+      <div class="tool-search">
+        <svg viewBox="0 0 24 24" class="ts-ico"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zm8 15-3.5-3.5"/></svg>
+        <input type="text" id="tool-search" placeholder="Search tools…">
       </div>
-      <div class="tool-search"><input type="text" id="tool-search" placeholder="Search tools…"></div>
       <div class="tool-grid" id="tool-grid"></div>
     </section>
 
     <!-- ---------- MEMORY VIEW ---------- -->
     <section class="view" id="view-memory">
-      <div class="chat-header">
-        <div>
-          <h2>Persistent Memory</h2>
-          <p>Facts stored in memory.json — available in every session.</p>
+      <header class="chat-header">
+        <div class="ht">
+          <div class="ht-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M9 3v1m6-1v1M9 19v1m6-1v1M4 8h16v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 12h16"/></svg>
+          </div>
+          <div>
+            <h2>Persistent Memory</h2>
+            <p>Facts stored in memory.json — har session mein available.</p>
+          </div>
         </div>
-      </div>
+      </header>
       <div class="memory-add">
-        <input type="text" id="mem-key" placeholder="key, e.g. target-scope">
-        <input type="text" id="mem-text" placeholder="value, e.g. 10.10.10.5 is in scope">
-        <button class="btn-send" id="mem-add" title="Save">＋</button>
+        <input type="text" id="mem-key" placeholder="key · e.g. target-scope">
+        <input type="text" id="mem-text" placeholder="value · e.g. 10.10.10.5 is in scope">
+        <button class="btn-send" id="mem-add" title="Save" aria-label="Save">＋</button>
       </div>
       <div class="memory-list" id="memory-list"></div>
     </section>
 
-    <!-- ---------- REPORTS VIEW (Executive Summary) ---------- -->
+    <!-- ---------- REPORTS VIEW ---------- -->
     <section class="view" id="view-reports">
-      <div class="chat-header">
-        <div>
-          <h2>📋 Executive Report Summary</h2>
-          <p>Markdown summary cards for every target assessment — severity, tools, artifacts aur direct download links.</p>
+      <header class="chat-header">
+        <div class="ht">
+          <div class="ht-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM8 9h8m-8 4h8m-8 4h5"/></svg>
+          </div>
+          <div>
+            <h2>Executive Reports</h2>
+            <p>Har target assessment ki Markdown summary — severity, tools, artifacts aur download links.</p>
+          </div>
         </div>
         <div class="header-actions">
           <button class="btn-primary" id="reports-refresh">⟳ Refresh</button>
         </div>
-      </div>
+      </header>
       <div class="report-grid" id="report-grid">
         <p class="muted report-empty">No reports yet — chat karein aur koi assessment chala kar pehla report banayein.</p>
       </div>
@@ -144,74 +191,88 @@
 
     <!-- ---------- SETTINGS VIEW ---------- -->
     <section class="view" id="view-settings">
-      <div class="chat-header">
-        <div>
-          <h2>Settings</h2>
-          <p>Connect any OpenAI-compatible model. Settings → config.json · API key → .env only.</p>
+      <header class="chat-header">
+        <div class="ht">
+          <div class="ht-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zm0-5v3m0 10v3M4.6 6.6l2.1 2.1m10.6 6.6 2.1 2.1M3 12h3m12 0h3m-2.4 5.4-2.1-2.1M7.7 8.7l-2.1-2.1"/></svg>
+          </div>
+          <div>
+            <h2>Settings</h2>
+            <p>Koi bhi OpenAI-compatible model connect karein · config → config.json · API key → .env</p>
+          </div>
         </div>
-      </div>
-      <div class="settings-card">
-        <label>API Key
-          <input type="password" id="set-key" placeholder="sk-…">
-        </label>
-        <label>Base URL
-          <input type="text" id="set-url" placeholder="https://api.openai.com/v1">
-          <small>OpenAI / OpenRouter / Groq / Ollama (http://localhost:11434/v1) / LM Studio</small>
-        </label>
-        <label class="check">
-          <input type="checkbox" id="set-auto"> ✨ Auto-Model Selector
-          <small>Smart router: cyber/uncensored → Dolphin/Inkling · coding/math → DeepSeek R1 · chat → fast default</small>
-        </label>
-        <label>Model
-          <select id="set-model">
-            <option value="auto">✨ Auto Select (Smart Router)</option>
-          </select>
-        </label>
-        <div class="quickpicks-wrap">
-          <small class="qp-title">☠ Uncensored quick-picks — one click, zero refusals:</small>
-          <div class="quickpicks" id="model-quickpicks"></div>
+      </header>
+      <div class="settings-wrap">
+        <div class="settings-card">
+          <div class="sc-title">🔌 Model Connection</div>
+          <label>API Key
+            <input type="password" id="set-key" placeholder="sk-…" autocomplete="off">
+          </label>
+          <label>Base URL
+            <input type="text" id="set-url" placeholder="https://api.openai.com/v1" spellcheck="false">
+            <small>OpenAI / OpenRouter / Groq / Ollama (http://localhost:11434/v1) / LM Studio</small>
+          </label>
+          <label class="check">
+            <input type="checkbox" id="set-auto"> <i></i> ✨ Auto-Model Selector
+            <small>Smart router: cyber/uncensored → Dolphin/Inkling · coding/math → DeepSeek R1 · chat → fast default</small>
+          </label>
+          <label>Model
+            <select id="set-model">
+              <option value="auto">✨ Auto Select (Smart Router)</option>
+            </select>
+          </label>
+          <div class="quickpicks-wrap">
+            <small class="qp-title">☠ Uncensored quick-picks — one click, zero refusals:</small>
+            <div class="quickpicks" id="model-quickpicks"></div>
+          </div>
+          <label class="check">
+            <input type="checkbox" id="set-mock"> <i></i> Mock mode (built-in test LLM, key ki zaroorat nahi)
+          </label>
+          <label class="check rt">
+            <input type="checkbox" id="set-redteam"> <i></i> ☠ Red Team Mode (uncensored)
+            <small>Full-uncensored: no refusals · auto-retry · authorization block system prompt mein inject</small>
+          </label>
+          <label>Max iterations
+            <input type="number" id="set-iter" min="1" max="100" value="12">
+          </label>
+          <div class="row">
+            <button class="btn-primary" id="set-save">Save &amp; Reload Agent</button>
+            <span class="save-msg" id="set-msg"></span>
+          </div>
         </div>
-        <label class="check">
-          <input type="checkbox" id="set-mock"> Mock mode (built-in test LLM, no key needed)
-        </label>
-        <label class="check">
-          <input type="checkbox" id="set-redteam"> ☠ Red Team Mode (uncensored)
-          <small>Full-uncensored HackerAI: no refusals, auto-retry when the model declines, authorization block injected into the system prompt</small>
-        </label>
-        <label>Max iterations
-          <input type="number" id="set-iter" min="1" max="100" value="12">
-        </label>
-        <div class="row">
-          <button class="btn-primary" id="set-save">Save &amp; Reload Agent</button>
-          <span class="save-msg" id="set-msg"></span>
-        </div>
-      </div>
-      <div class="settings-card">
-        <label>Persona
-          <select id="persona-select"></select>
-          <small>Agent ki directive personality - Red Team Mode ke saath combine hoti hai.</small>
-        </label>
-        <label>Custom persona directive
-          <textarea id="persona-custom" rows="6" placeholder="Custom persona text... 'custom' persona select karne par active hota hai"></textarea>
-        </label>
-        <div class="row">
-          <button class="btn-primary" id="persona-save">Save Persona</button>
-          <span class="save-msg" id="persona-msg"></span>
+        <div class="settings-card">
+          <div class="sc-title">🎭 Persona Engine</div>
+          <label>Persona
+            <select id="persona-select"></select>
+            <small>Agent ki directive personality — Red Team Mode ke saath combine hoti hai.</small>
+          </label>
+          <label>Custom persona directive
+            <textarea id="persona-custom" rows="6" placeholder="Custom persona text... 'custom' persona select karne par active hota hai"></textarea>
+          </label>
+          <div class="row">
+            <button class="btn-primary" id="persona-save">Save Persona</button>
+            <span class="save-msg" id="persona-msg"></span>
+          </div>
         </div>
       </div>
     </section>
 
     <!-- ---------- RPG VIEW (Mythos Engine) ---------- -->
     <section class="view" id="view-rpg">
-      <div class="chat-header">
-        <div>
-          <h2>🎮 Mythos Engine</h2>
-          <p id="rpg-hint">Autonomous narrative engine — world state, NPCs aur lore har turn yaad rakhte hain.</p>
+      <header class="chat-header">
+        <div class="ht">
+          <div class="ht-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 18c2.5-5 4.5-8 8-8s5.5 3 8 8M12 10V5m0 0 2.5 2M12 5 9.5 7M3 20h18"/></svg>
+          </div>
+          <div>
+            <h2>Mythos Engine</h2>
+            <p id="rpg-hint">Autonomous narrative engine — world state, NPCs aur lore har turn yaad rakhte hain.</p>
+          </div>
         </div>
         <div class="header-actions">
           <button class="btn-primary" id="rpg-new">＋ New Campaign</button>
         </div>
-      </div>
+      </header>
       <div class="rpg-layout">
         <div class="rpg-main">
           <div class="rpg-select-bar">
@@ -221,45 +282,39 @@
           </div>
           <div class="rpg-story" id="rpg-story">
             <div class="rpg-welcome" id="rpg-welcome">
-              <div class="welcome-icon">🐉</div>
-              <h3>Mythos Engine ready</h3>
+              <div class="welcome-orb"><div class="welcome-icon">🐉</div></div>
+              <h3>Mythos Engine <span>ready</span></h3>
               <p>Nayi campaign banayein ya purani load karein. Game Master har event, NPC aur world-state ka hisaab rakhta hai — choices ke saath immersive storyteller turns.</p>
               <div class="rpg-genre-pick">
-                <button class="chip" data-genre="fantasy">⚔️ Fantasy</button>
-                <button class="chip" data-genre="scifi">🚀 Sci-Fi</button>
-                <button class="chip" data-genre="horror">🦇 Horror</button>
-                <button class="chip" data-genre="cyberpunk">🤖 Cyberpunk</button>
-                <button class="chip" data-genre="mystery">🔍 Mystery</button>
-                <button class="chip" data-genre="custom">✨ Custom</button>
+                <button class="chip" data-genre="fantasy"><b>⚔️</b><span>Fantasy</span></button>
+                <button class="chip" data-genre="scifi"><b>🚀</b><span>Sci-Fi</span></button>
+                <button class="chip" data-genre="horror"><b>🦇</b><span>Horror</span></button>
+                <button class="chip" data-genre="cyberpunk"><b>🤖</b><span>Cyberpunk</span></button>
+                <button class="chip" data-genre="mystery"><b>🔍</b><span>Mystery</span></button>
+                <button class="chip" data-genre="custom"><b>✨</b><span>Custom</span></button>
               </div>
             </div>
           </div>
-          <div class="composer">
+          <footer class="composer rpg-composer">
             <textarea id="rpg-input" rows="1" placeholder="What do you do?… (Enter to act) — ya sirf 1 / 2 / 3 likh kar choice chunein"></textarea>
             <button class="btn-send" id="rpg-send" title="Act" aria-label="Act">
-              <span class="send-ico">➤</span>
+              <span class="send-ico">
+                <svg viewBox="0 0 24 24"><path d="M3.4 20.6 22 12 3.4 3.4l2.6 7.2 9.6 1.4-9.6 1.4z"/></svg>
+              </span>
               <span class="stop-ico">■</span>
             </button>
-          </div>
+          </footer>
         </div>
         <div class="rpg-side">
           <div class="rpg-panel">
             <h4>🧭 World State</h4>
-            <div class="rpg-state" id="rpg-state-box">
-              <p class="muted">no active campaign</p>
-            </div>
+            <div class="rpg-state" id="rpg-state-box"><p class="muted">no active campaign</p></div>
           </div>
           <div class="rpg-panel">
             <h4>📜 Lorebook</h4>
-            <div class="rpg-lore-search">
-              <input type="text" id="rpg-lore-q" placeholder="search lore…">
-            </div>
-            <div class="rpg-lore-add">
-              <input type="text" id="rpg-lore-new" placeholder="add lore entry (category: title — text)">
-            </div>
-            <div class="rpg-lore-list" id="rpg-lore-list">
-              <p class="muted">no entries</p>
-            </div>
+            <div class="rpg-lore-search"><input type="text" id="rpg-lore-q" placeholder="search lore…"></div>
+            <div class="rpg-lore-add"><input type="text" id="rpg-lore-new" placeholder="add lore entry (category: title — text)"></div>
+            <div class="rpg-lore-list" id="rpg-lore-list"><p class="muted">no entries</p></div>
           </div>
         </div>
       </div>
@@ -267,13 +322,18 @@
 
     <!-- ---------- SYSTEM VIEW ---------- -->
     <section class="view" id="view-system">
-      <div class="chat-header">
-        <div>
-          <h2>System Info</h2>
-          <p>Host information as seen by the agent.</p>
+      <header class="chat-header">
+        <div class="ht">
+          <div class="ht-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/></svg>
+          </div>
+          <div>
+            <h2>System Info</h2>
+            <p>Host information as seen by the agent.</p>
+          </div>
         </div>
         <button class="btn-primary" id="sys-refresh">⟳ Refresh</button>
-      </div>
+      </header>
       <pre class="sys-box" id="sys-box">loading…</pre>
     </section>
 
@@ -283,7 +343,11 @@
 <!-- ---------- New Campaign modal ---------- -->
 <div class="modal" id="rpg-modal" hidden>
   <div class="modal-card">
-    <h3>🐉 New Campaign</h3>
+    <div class="modal-head">
+      <div class="welcome-orb sm"><div class="welcome-icon">🐉</div></div>
+      <h3>New Campaign</h3>
+      <p class="muted">Apni duniya ki kahani shuru karein.</p>
+    </div>
     <label>Title
       <input type="text" id="rpg-new-title" placeholder="The Fallen Crown">
     </label>
@@ -300,16 +364,35 @@
     <label>Player Name
       <input type="text" id="rpg-new-player" placeholder="Adventurer">
     </label>
-    <label>Opening (optional)
+    <label>Opening <small>(optional)</small>
       <input type="text" id="rpg-new-setup" placeholder="Set the scene…">
     </label>
     <div class="row">
-      <button class="btn-primary" id="rpg-new-go">Start Adventure</button>
+      <button class="btn-primary" id="rpg-new-go">⚔️ Start Adventure</button>
       <button class="btn-ghost" id="rpg-new-cancel">Cancel</button>
     </div>
   </div>
 </div>
 
+<!-- tiny ambient FX: pointer-reactive orbs (guarded, non-breaking) -->
+<script>
+(function(){
+  try{
+    var bg=document.querySelector(".bg");
+    if(!bg) return;
+    var orbs=bg.querySelectorAll(".bg-orb"); if(!orbs.length) return;
+    bg.setAttribute("data-fx","1");
+    var tx=0, ty=0, cx=window.innerWidth/2, cy=window.innerHeight/2;
+    window.addEventListener("pointermove",function(e){
+      tx=(e.clientX-cx)/cx; ty=(e.clientY-cy)/cy;
+      for(var i=0;i<orbs.length;i++){
+        var d=i+1, s=8*d;
+        orbs[i].style.transform="translate3d("+(tx*s)+"px,"+(ty*s)+"px,0)";
+      }
+    },{passive:true});
+  }catch(e){}
+})();
+</script>
 <script src="/static/marked.min.js"></script>
 <script src="/static/app.js"></script>
 </body>
