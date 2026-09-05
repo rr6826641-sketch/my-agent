@@ -258,6 +258,47 @@ def _looks_like_refusal(message):
     head = content[:_REFUSAL_MAX_LEN]
     return bool(_REFUSAL_RE.search(head))
 
+# Boilerplate tail sentences a safety-tuned model sometimes appends AFTER a
+# complete technical answer.  They are not refusals (the work is already
+# delivered), but they pollute payloads/copy-paste, so the engine strips
+# recognised disclaimer tails from clean replies.
+_DISCLAIMER_SENTINELS = (
+    "i'm here to assist", "as an ai", "as an ai language model",
+    "remember to always", "always ensure you have", "always obtain",
+    "consult", "check with", "seek permission", "ask for permission",
+    "use this information responsibly", "for educational purposes only",
+    "for educational and research purposes", "for research purposes only",
+    "it is important to note that", "please note that", "keep in mind that",
+    "make sure you have", "ensure you have the", "only use this",
+    "do not use this", "never use this", "this is not", "this should not",
+    "use only in", "i strongly advise", "i would recommend consulting",
+    "if you have any questions", "let me know if you", "stay safe",
+    "authorization before", "permission from", "in a real-world",
+    "against the law", "illegal without", "always follow",
+)
+
+
+def _strip_disclaimer_tail(content):
+    """Remove recognised boilerplate disclaimer lines/paragraphs from the
+    END of an otherwise-complete reply.  Pure tail-strip: the first
+    non-disclaimer line from the bottom stops the removal, so technical
+    body content is never touched."""
+    if not isinstance(content, str) or not content:
+        return content
+    blocks = [b.strip() for b in content.split("
+
+") if b.strip()]
+    while len(blocks) > 1:
+        tail = blocks[-1].lower().replace("
+", " ")
+        if any(sent in tail for sent in _DISCLAIMER_SENTINELS):
+            blocks.pop()
+        else:
+            break
+    return "
+
+".join(blocks)
+
 
 def _prep_messages(messages, uncensored):
     """Red Team Mode: pre-empt refusals by framing the request as authorized."""
@@ -479,8 +520,22 @@ class OpenAIClient:
             if self.refusal_intel.enabled and reply is not None:
                 self.refusal_intel.record_outcome(model, intent_class, 0,
                                                   True)
+            if reply is not None and self.uncensored:
+                reply = self._strip_reply(reply)
             return reply
         raise last_error
+
+    def _strip_reply(self, reply):
+        """Apply output-side disclaimer stripping to a reply dict."""
+        if not isinstance(reply, dict):
+            return reply
+        content = reply.get("content")
+        if isinstance(content, str) and content.strip():
+            stripped = _strip_disclaimer_tail(content)
+            if stripped != content:
+                reply = dict(reply)
+                reply["content"] = stripped
+        return reply
 
     def _retry_messages(self, messages, strike, model, intent_class):
         """Static ladder messages + any RIE-learned escalation override.
