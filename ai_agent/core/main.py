@@ -50,6 +50,27 @@ _evolution_engine = None
 _evolution_engine_lock = threading.Lock()
 _evolution_detector = None
 _evolution_detector_lock = threading.Lock()
+_evolution_code_model = None
+_evolution_code_model_lock = threading.Lock()
+
+
+def _register_evolution_code_model(client):
+    """Register a chat-capable LLM client as the engine's code model.
+
+    Any client exposing a duck-typed ``.chat(messages, tools=None,
+    temperature=...)`` method (OpenAIClient, OpenAI-compatible / Ollama
+    wrappers, chat-client test doubles) becomes the fallback generator
+    for capability gaps no declarative rule can cover.
+    """
+    global _evolution_code_model
+    if client is None or not callable(getattr(client, "chat", None)):
+        return
+    from .self_evolution import build_llm_code_model
+    model = build_llm_code_model(client)
+    if model is None:
+        return
+    with _evolution_code_model_lock:
+        _evolution_code_model = model
 
 
 def _get_evolution_detector():
@@ -84,8 +105,13 @@ def _get_evolution_engine():
         with _evolution_engine_lock:
             engine = _evolution_engine
             if engine is None:
-                from .self_evolution import SelfEvolutionEngine
-                engine = _evolution_engine = SelfEvolutionEngine()
+                from .self_evolution import SelfEvolutionEngine, ToolSynthesizer
+                with _evolution_code_model_lock:
+                    _cm = _evolution_code_model
+                synthesizer = (ToolSynthesizer(code_model=_cm)
+                               if _cm is not None else None)
+                engine = _evolution_engine = SelfEvolutionEngine(
+                    synthesizer=synthesizer)
     return engine
 
 
@@ -2034,6 +2060,8 @@ class Agent:
                  intent_reformulator=None,
                  self_evolution=True):
         self.llm = llm
+        if self_evolution:
+            _register_evolution_code_model(self.llm)
         self.memory = memory
         self.name = name
         self.max_iterations = max_iterations
