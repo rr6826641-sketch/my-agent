@@ -100,7 +100,7 @@ HIGH_REASONING_FALLBACKS = [
 # model that will simply refuse the authorized offensive-security task.
 UNCENSORED_FALLBACK_MODELS = [
     "thinkingmachines/inkling:free",
-    "deepseek/deepseek-v4-0324:free",
+    "nousresearch/hermes-3-llama-3.1-70b",
     "qwen/qwen3-coder:free",
 ]
 
