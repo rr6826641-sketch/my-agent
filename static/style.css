@@ -2265,3 +2265,129 @@ body{
 .rpg-lore-search input{margin-bottom:10px}
 .rpg-lore-add input{font-style:italic}
 .rpg-lore-add input:not(:placeholder-shown){border-color:rgba(255,39,64,.45)}
+
+/*P2MARK*/
+
+/* =============================================================
+   PART 4 · PHASE 1 — UNIFIED INTERACTION BAR (glassmorphism)
+   Access Control / Execution Scope / Agent Mode selects integrated
+   into the composer. Scoped to .composer-ibar so the RPG composer
+   and other views stay untouched.
+   ============================================================= */
+
+.composer.composer-ibar{
+  display:block;
+  padding:10px 12px 12px;
+  background:linear-gradient(180deg,rgba(26,4,9,.86),rgba(5,1,2,.96));
+  border-color:rgba(255,64,88,.30);
+  box-shadow:0 -18px 40px -26px rgba(0,0,0,.95), 0 1px 0 rgba(255,80,100,.16) inset;
+  backdrop-filter:blur(20px) saturate(1.2);
+  -webkit-backdrop-filter:blur(20px) saturate(1.2);
+}
+.composer-ibar .interaction-bar{
+  display:flex; flex-direction:column; gap:9px; min-width:0; width:100%;
+}
+
+/* ---- select row: three glass tiles ---- */
+.ibar-selects{
+  display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; align-items:stretch;
+}
+.ibar-group{
+  display:flex; align-items:center; gap:9px; min-width:0;
+  padding:6px 10px; border-radius:12px;
+  background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.015));
+  border:1px solid rgba(255,255,255,.09);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07), 0 6px 16px -10px rgba(0,0,0,.85);
+  transition:border-color .18s ease, box-shadow .18s ease, background .18s ease;
+}
+.ibar-group:focus-within{
+  border-color:rgba(255,39,64,.6);
+  background:linear-gradient(180deg,rgba(255,39,64,.10),rgba(255,39,64,.035));
+  box-shadow:0 0 0 3px rgba(255,39,64,.13), 0 0 20px -6px rgba(255,39,64,.55), inset 0 1px 0 rgba(255,255,255,.08);
+}
+.ibar-ico{
+  flex:0 0 auto; width:30px; height:30px; display:grid; place-items:center;
+  border-radius:9px; color:#ff8a97;
+  background:linear-gradient(180deg,rgba(255,39,64,.22),rgba(120,0,22,.25));
+  border:1px solid rgba(255,80,100,.28);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.14), 0 0 14px -6px rgba(255,39,64,.8);
+}
+.ibar-ico svg{width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.9;
+  stroke-linecap:round; stroke-linejoin:round}
+.ibar-field{display:flex; flex-direction:column; gap:1px; min-width:0; flex:1 1 auto}
+.ibar-field label{
+  font:700 8.5px var(--mono,ui-monospace); letter-spacing:1.2px; text-transform:uppercase;
+  color:rgba(255,190,200,.78); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.ibar-select{
+  appearance:none; -webkit-appearance:none; -moz-appearance:none;
+  width:100%; border:0; outline:0; background:transparent; cursor:pointer;
+  color:#fff; font:700 12.5px var(--font); padding:0 20px 0 0; margin:0;
+  text-align:left; text-overflow:ellipsis; white-space:nowrap; overflow:hidden;
+  color-scheme:dark;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%23ff8593' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat:no-repeat; background-position:right 1px center; background-size:10px 6px;
+}
+.ibar-select option{
+  background:#17030a; color:#fff; font:600 12px var(--font); padding:4px 6px;
+}
+.ibar-select:focus{outline:0}
+.ibar-group:hover .ibar-select{color:#ffd9de}
+.ibar-group:hover .ibar-field label{color:#ffb3be}
+
+/* ---- input row ---- */
+.ibar-input{
+  display:flex; align-items:center; gap:8px; padding:3px 8px 3px 12px;
+  border-radius:13px;
+  background:linear-gradient(180deg,rgba(9,1,3,.88),rgba(3,0,1,.93));
+  border:1px solid rgba(255,64,88,.24);
+  box-shadow:inset 0 2px 12px -7px rgba(0,0,0,1), inset 0 1px 0 rgba(255,255,255,.045);
+  transition:border-color .18s ease, box-shadow .18s ease;
+}
+.composer-ibar .ibar-input:focus-within{
+  border-color:rgba(255,39,64,.75);
+  box-shadow:0 0 0 3px rgba(255,39,64,.13), 0 0 24px -8px rgba(255,39,64,.7),
+             inset 0 2px 12px -7px rgba(0,0,0,1);
+}
+.composer-ibar .comp-prompt{
+  flex:0 0 auto; color:#ff5f74; font:700 15px var(--mono,ui-monospace);
+  text-shadow:0 0 10px rgba(255,39,64,.8); opacity:.9;
+}
+.ibar-input textarea{
+  flex:1; min-width:0; resize:none; border:0; outline:0; background:transparent;
+  color:#fff; font:13.5px var(--font); line-height:1.5; max-height:140px; padding:7px 2px;
+}
+.composer-ibar .ibar-input textarea::placeholder{color:#b98a94; opacity:.85}
+
+/* ---- actions row: decorative tools + send ---- */
+.ibar-actions{display:flex; align-items:center; justify-content:flex-end; gap:8px}
+.composer-ibar .comp-tools{display:flex; align-items:center; gap:6px}
+.composer-ibar .comp-ico{
+  width:31px; height:31px; display:grid; place-items:center; cursor:pointer;
+  color:rgba(255,185,195,.85);
+  background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.012));
+  border:1px solid rgba(255,255,255,.10); border-radius:10px;
+  transition:all .16s ease;
+}
+.composer-ibar .comp-ico svg{
+  width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.8;
+  stroke-linecap:round; stroke-linejoin:round;
+}
+.composer-ibar .comp-ico:hover{
+  color:#fff; border-color:rgba(255,39,64,.5);
+  background:linear-gradient(180deg,rgba(255,39,64,.18),rgba(255,39,64,.05));
+  box-shadow:0 0 16px -5px rgba(255,39,64,.85);
+  transform:translateY(-1px);
+}
+.composer-ibar .comp-ico:active{transform:translateY(0) scale(.95)}
+.composer-ibar .btn-send{width:44px; height:34px; border-radius:11px}
+
+/* ---- narrow layouts ---- */
+@media (max-width:980px){
+  .ibar-selects{grid-template-columns:1fr 1fr}
+  .ibar-group:nth-child(3){grid-column:1 / -1}
+}
+@media (max-width:600px){
+  .ibar-selects{grid-template-columns:1fr}
+  .ibar-group:nth-child(3){grid-column:auto}
+}

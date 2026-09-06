@@ -175,25 +175,62 @@
         </div>
 
         <!-- composer -->
-        <footer class="composer">
-          <span class="comp-prompt" aria-hidden="true">&gt;</span>
-          <textarea id="input" rows="1" placeholder="Awaiting input — type a command or request…"></textarea>
-          <div class="comp-tools">
-            <button class="comp-ico" type="button" title="Voice input" aria-label="Voice">
-              <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
-            </button>
-            <button class="comp-ico" type="button" title="Insert code" aria-label="Code">
-              <svg viewBox="0 0 24 24"><path d="M8 6 2 12l6 6M16 6l6 6-6 6"/></svg>
-            </button>
-            <button class="comp-ico" type="button" title="AI assistant" aria-label="AI">
-              <svg viewBox="0 0 24 24"><path d="M12 3l1.6 4.6L18 9l-4.4 1.4L12 15l-1.6-4.6L6 9l4.4-1.4z"/><path d="M18 14l.9 2.6L21 17l-2.1.9L18 20l-.9-2.1L15 17l2.1-.4z"/></svg>
-            </button>
-          </div>
-          <button class="btn-send" id="send" title="Send" aria-label="Send">
-            <span class="send-ico"><svg viewBox="0 0 24 24"><path d="M3.4 20.6 22 12 3.4 3.4l2.6 7.2 9.6 1.4-9.6 1.4z"/></svg></span>
-            <span class="stop-ico">■</span>
-          </button>
+        <footer class="composer composer-ibar">
+          <form class="interaction-bar" id="interaction-bar" autocomplete="off">
+            <div class="ibar-selects">
+              <div class="ibar-group">
+                <span class="ibar-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span>
+                <div class="ibar-field">
+                  <label for="ibar-access">Access Control</label>
+                  <select id="ibar-access" class="ibar-select" title="Gate agent permissions">
+                    <option value="full" selected>Full Access</option>
+                    <option value="readonly">Read-Only</option>
+                    <option value="labonly">Lab-Only</option>
+                  </select>
+                </div>
+              </div>
+              <div class="ibar-group">
+                <span class="ibar-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></span>
+                <div class="ibar-field">
+                  <label for="ibar-scope">Execution Scope</label>
+                  <select id="ibar-scope" class="ibar-select" title="Where commands run">
+                    <option value="local" selected>Local</option>
+                    <option value="docker">Docker</option>
+                    <option value="remote">Remote</option>
+                  </select>
+                </div>
+              </div>
+              <div class="ibar-group">
+                <span class="ibar-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg></span>
+                <div class="ibar-field">
+                  <label for="ibar-mode">Agent Mode</label>
+                  <select id="ibar-mode" class="ibar-select" title="Driving style">
+                    <option value="auto" selected>Auto &middot; Auto-Pilot</option>
+                    <option value="step">Step-By-Step &middot; Interactive</option>
+                    <option value="research">Research-Only</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="ibar-input">
+              <span class="comp-prompt" aria-hidden="true">&gt;</span>
+              <textarea id="input" rows="1" placeholder="Awaiting input — type a command or request…"></textarea>
+            </div>
+            <div class="ibar-actions">
+              <div class="comp-tools">
+                <button class="comp-ico" type="button" title="Voice input" aria-label="Voice"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+                <button class="comp-ico" type="button" title="Insert code" aria-label="Code"><svg viewBox="0 0 24 24"><path d="M8 6 2 12l6 6M16 6l6 6-6 6"/></svg></button>
+                <button class="comp-ico" type="button" title="AI assistant" aria-label="AI"><svg viewBox="0 0 24 24"><path d="M12 3l1.6 4.6L18 9l-4.4 1.4L12 15l-1.6-4.6L6 9l4.4-1.4z"/><path d="M18 14l.9 2.6L21 17l-2.1.9L18 20l-.9-2.1L15 17l2.1-.4z"/></svg></button>
+              </div>
+              <button class="btn-send" id="send" title="Send" aria-label="Send">
+                <span class="send-ico"><svg viewBox="0 0 24 24"><path d="M3.4 20.6 22 12 3.4 3.4l2.6 7.2 9.6 1.4-9.6 1.4z"/></svg></span>
+                <span class="stop-ico">■</span>
+              </button>
+            </div>
+          </form>
         </footer>
+
+
 
         <!-- bottom status bar -->
         <div class="cc-statusbar">
