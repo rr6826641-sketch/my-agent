@@ -1888,3 +1888,166 @@ a{color:#ff4d63}
   box-shadow:0 0 0 1px rgba(255,255,255,.2) inset, 0 0 18px -2px rgba(255,39,64,.55)}
 .msg.assistant .avatar{background:radial-gradient(circle at 32% 28%,#3a3d4a,#0d0e14 70%);
   box-shadow:0 0 0 1px rgba(255,39,64,.4) inset, 0 0 18px -2px rgba(255,39,64,.5)}
+
+/* ============================================================
+   PART 5 — DANGER OPS v4 SKIN (professional threat-console)
+   Obsidian carbon base · molten-crimson accents · armed-state
+   systems. Replaces the candy-red glass with a serious,
+   weapons-console aesthetic while preserving every layout.
+   ============================================================ */
+
+/* ---- obsidian war-room base ---- */
+body{
+  background:
+    radial-gradient(1200px 760px at 82% -12%, rgba(255,39,64,.12), transparent 58%),
+    radial-gradient(960px 640px at -8% 110%, rgba(190,18,60,.15), transparent 55%),
+    linear-gradient(165deg,#0b0103 0%,#160206 45%,#060102 100%);
+}
+
+/* ---- carbon shell panels ---- */
+.sidebar{
+  position:relative;
+  background:linear-gradient(180deg,rgba(30,4,8,.97),rgba(10,1,3,.99));
+  border-color:rgba(255,64,88,.26);
+  box-shadow:
+    0 30px 70px -28px rgba(0,0,0,.92),
+    0 0 0 1px rgba(255,39,64,.06) inset,
+    0 0 46px -20px rgba(255,39,64,.45),
+    0 1px 0 rgba(255,64,88,.10) inset;
+}
+.sidebar::before,.main::before{
+  content:""; position:absolute; top:0; left:0; right:0; height:2px; z-index:4;
+  background:linear-gradient(90deg,transparent,rgba(255,39,64,.9) 28%,#ff7d92 50%,rgba(255,39,64,.9) 72%,transparent);
+  box-shadow:0 0 16px 1px rgba(255,39,64,.55);
+}
+.main{
+  background:
+    radial-gradient(900px 520px at 50% -18%, rgba(255,39,64,.07), transparent 60%),
+    linear-gradient(175deg,rgba(22,3,6,.95),rgba(8,1,2,.98));
+  border-color:rgba(255,64,88,.26);
+  box-shadow:
+    0 30px 80px -30px rgba(0,0,0,.9),
+    0 0 0 1px rgba(255,39,64,.05) inset,
+    0 0 60px -24px rgba(255,39,64,.35),
+    0 1px 0 rgba(255,64,88,.08) inset;
+}
+.main::before{z-index:6; border-radius:20px 20px 0 0}
+
+/* ---- obsidian cards: every surface gets serious ---- */
+.panel,.settings-card,.modal-card,.rpg-panel,.report-card,.toolcard,
+.welcome,.rpg-welcome,.dash-shell,.term-shell{
+  background:linear-gradient(170deg,rgba(30,4,8,.90),rgba(11,1,3,.95)) !important;
+  border-color:rgba(255,64,88,.20);
+  box-shadow:0 0 0 1px rgba(255,39,64,.05) inset, 0 14px 30px -18px rgba(0,0,0,.9);
+}
+.panel:hover,.report-card:hover{border-color:rgba(255,64,88,.34)}
+
+/* keep inner top shimmer hairlines legible on obsidian */
+.panel::before,.modal-card::before,.report-card::before{
+  background:linear-gradient(90deg,transparent,rgba(255,122,140,.55),transparent) !important;
+  box-shadow:0 0 12px rgba(255,39,64,.35);
+}
+
+/* ---- tactical micro-labels: mono + crimson ---- */
+.session-head,#brand-sub,.panel-head,.sc-title,.rpg-panel h4,
+.ses-count,.board-head{
+  font-family:var(--mono);
+  color:#ffb3bf !important;
+  text-shadow:0 0 10px rgba(255,39,64,.45);
+}
+.brand-text h1{text-shadow:0 0 22px rgba(255,39,64,.35)}
+#brand-sub{color:#ff93a4 !important; letter-spacing:3px}
+
+/* ---- headers: neon title + threat hairline ---- */
+.chat-header{position:relative; border-bottom-color:rgba(255,64,88,.10)}
+.chat-header::after{
+  content:""; position:absolute; left:0; right:0; bottom:-1px; height:1px;
+  background:linear-gradient(90deg,transparent,rgba(255,56,80,.75) 22%,#ff8ba0 50%,rgba(255,56,80,.75) 78%,transparent);
+  box-shadow:0 0 10px 0 rgba(255,39,64,.5);
+}
+.chat-header h2{filter:drop-shadow(0 0 12px rgba(255,39,64,.5))}
+.chat-header p{color:#e8a9b4}
+.ht-ico{
+  background:linear-gradient(150deg,rgba(255,39,64,.18),rgba(120,0,20,.24));
+  border-color:rgba(255,64,88,.42);
+  box-shadow:0 0 0 1px rgba(255,39,64,.18) inset, 0 0 24px -6px rgba(255,39,64,.7);
+}
+
+/* ---- armed buttons: breathing combat glow ---- */
+.btn-primary,.btn-new,.btn-send{
+  animation:armedPulse 4.2s ease-in-out infinite; will-change:filter;
+}
+.btn-primary{
+  background:linear-gradient(140deg,#ff2b4a,#b4041c 120%);
+  box-shadow:0 1px 0 rgba(255,255,255,.38) inset, 0 -10px 20px -8px rgba(70,0,10,.9) inset,
+             0 12px 26px -10px rgba(255,39,64,.55), 0 0 30px -8px rgba(255,39,64,.65);
+}
+.btn-new{
+  background:linear-gradient(135deg,#ff2f4f,#b4041c 140%);
+  box-shadow:0 1px 0 rgba(255,255,255,.4) inset, 0 -6px 16px -8px rgba(60,0,8,.9) inset,
+             0 12px 26px -10px rgba(255,39,64,.5), 0 0 30px -8px rgba(255,39,64,.6);
+}
+.btn-send{
+  background:linear-gradient(140deg,#ff2b4a,#b4041c 130%);
+  box-shadow:0 1px 0 rgba(255,255,255,.42) inset, 0 -8px 18px -8px rgba(60,0,8,.9) inset,
+             0 10px 26px -8px rgba(255,39,64,.6), 0 0 26px -4px rgba(255,39,64,.7);
+}
+@keyframes armedPulse{
+  0%,100%{filter:brightness(1) saturate(1)}
+  50%{filter:brightness(1.16) saturate(1.25)}
+}
+.btn-primary:hover,.btn-new:hover,.btn-send:hover{animation-play-state:paused; filter:brightness(1.25) saturate(1.3)}
+
+/* ---- messages: obsidian glass + crimson rims ---- */
+.msg.assistant .bubble{
+  background:linear-gradient(165deg,rgba(52,6,12,.88),rgba(16,1,4,.94));
+  border-color:rgba(255,64,88,.38);
+  box-shadow:0 0 0 1px rgba(255,39,64,.08) inset, 0 14px 30px -18px rgba(0,0,0,.9),
+             0 0 30px -12px rgba(255,39,64,.4);
+}
+.msg.user .bubble{
+  background:linear-gradient(140deg,rgba(120,30,40,.28),rgba(40,6,12,.42));
+  border-color:rgba(255,120,135,.35);
+}
+.msg.assistant.thinking .bubble{
+  border-color:rgba(255,64,88,.6);
+  background:linear-gradient(165deg,rgba(60,6,12,.85),rgba(20,1,4,.9));
+}
+.msg.assistant.thinking .bubble::before{
+  color:#ff8096; background:#1c0206;
+  box-shadow:0 0 10px rgba(255,39,64,.5); letter-spacing:2px;
+}
+.msg.assistant .avatar{
+  box-shadow:0 0 0 1px rgba(255,255,255,.25) inset, 0 0 26px -2px rgba(255,39,64,.95), 0 0 0 1px rgba(255,39,64,.5);
+}
+
+/* ---- composer: dark command bar with red muzzle line ---- */
+.composer{
+  background:linear-gradient(180deg,rgba(30,4,8,.9),rgba(8,1,2,.96));
+  border-color:rgba(255,64,88,.30);
+  box-shadow:0 -18px 40px -24px rgba(0,0,0,.95), 0 1px 0 rgba(255,64,88,.15) inset;
+}
+.composer:focus-within{border-color:rgba(255,39,64,.65);
+  box-shadow:0 0 0 1px rgba(255,39,64,.28) inset, 0 -18px 40px -24px rgba(0,0,0,.95),
+             0 0 34px -10px rgba(255,39,64,.7)}
+
+/* ---- session list: dark rows, active = loaded weapon ---- */
+.session-item.active{
+  background:linear-gradient(120deg,rgba(255,39,64,.16),rgba(120,0,16,.14));
+  border-color:rgba(255,64,88,.5);
+  box-shadow:0 0 24px -8px rgba(255,39,64,.6), 0 1px 0 rgba(255,255,255,.08) inset;
+}
+.session-item:hover{background:rgba(255,64,88,.08)}
+
+/* ---- status / mode text ---- */
+.status-line,.status-sub,#status-model,.term-line{font-family:var(--mono)}
+.dot.live{background:#ff2740; box-shadow:0 0 0 3px rgba(255,39,64,.16), 0 0 14px 2px rgba(255,39,64,.9)}
+.dot.mock{background:#ff2740; box-shadow:0 0 0 3px rgba(255,39,64,.14), 0 0 12px 1px rgba(255,39,64,.7)}
+
+/* ---- avatars, chips, pills: keep crimson identity, sharpen edges ---- */
+.pill.redteam-on,.pill.redteam-off:hover{animation:rtPulse 1.8s ease-in-out infinite}
+.qp-chip{border-color:rgba(255,64,88,.6); color:#ffd6da}
+.qp-chip:hover{box-shadow:0 0 20px -4px rgba(255,39,64,.95)}
+
+/* ---- global selection + link identity ---- */
+::selection{background:rgba(255,39,64,.55); color:#fff}
