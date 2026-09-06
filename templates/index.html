@@ -3,15 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="theme-color" content="#6e0011">
+<meta name="theme-color" content="#05060c">
 <meta name="color-scheme" content="dark">
 <title>HackerAI — Agent Command Center</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23f43f5e'/%3E%3Cstop offset='1' stop-color='%23be123c'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M17.5 5L9 18h6l-1.5 9L23 14h-6z' fill='%2305060c'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23ff2740'/%3E%3Cstop offset='1' stop-color='%23900e1a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M17.5 5L9 18h6l-1.5 9L23 14h-6z' fill='%2305060c'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
-<!-- ============ 3D ambient scene (pure CSS, GPU) ============ -->
+<!-- ============ ambient background (pure CSS) ============ -->
 <div class="bg" aria-hidden="true">
   <i class="bg-orb o1"></i><i class="bg-orb o2"></i><i class="bg-orb o3"></i>
   <i class="bg-ring r1"></i><i class="bg-ring r2"></i>
@@ -25,7 +25,7 @@
   <aside class="sidebar">
     <div class="brand">
       <div class="logo" aria-hidden="true">
-        <svg viewBox="0 0 32 32"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f43f5e"/><stop offset="1" stop-color="#be123c"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><path d="M17.6 4.8 9 18.2h6l-1.6 9 8.6-13.4h-6z" fill="#52000c"/></svg>
+        <svg viewBox="0 0 32 32"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff2740"/><stop offset="1" stop-color="#a20e1c"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><path d="M17.6 4.8 9 18.2h6l-1.6 9 8.6-13.4h-6z" fill="#5a000d"/></svg>
       </div>
       <div class="brand-text">
         <h1>HACKER<span>AI</span></h1>
@@ -56,21 +56,23 @@
       <button class="nav-item" data-view="system"><i class="ni">🖥️</i><span>System</span></button>
     </nav>
 
-    <div class="board-widget" id="board-widget" hidden>
+    <div class="board-widget" id="board-widget">
       <div class="board-head">📋 Task Board</div>
       <div class="board-row">
         <span class="b-chip b-todo">todo <b id="b-todo">0</b></span>
         <span class="b-chip b-prog">in_progress <b id="b-prog">0</b></span>
         <span class="b-chip b-done">completed <b id="b-done">0</b></span>
       </div>
-      <div class="board-list" id="board-list"></div>
       <div class="board-current" id="b-current">idle</div>
+      <div class="board-progress"><i class="b-progress-fill" id="b-progress-fill"></i></div>
+      <div class="board-progress-pct" id="b-progress-pct"></div>
+      <div class="board-list" id="board-list"></div>
     </div>
 
     <div class="sidebar-footer">
       <div class="status-line">
         <span class="dot" id="dot-mode"></span>
-        <span id="status-mode">loading…</span>
+        <span id="status-mode">connecting…</span>
       </div>
       <div class="status-sub" id="status-model"></div>
     </div>
@@ -80,12 +82,12 @@
   <main class="main">
     <div class="env-banner hidden" id="env-warn" role="alert"></div>
 
-    <!-- ---------- CHAT VIEW ---------- -->
+    <!-- ---------- CHAT / COMMAND CENTER VIEW ---------- -->
     <section class="view active" id="view-chat">
       <header class="chat-header">
         <div class="ht">
           <div class="ht-ico" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H4l2.3-2.9A8 8 0 1 1 21 12z"/></svg>
+            <svg viewBox="0 0 24 24"><rect x="1" y="5" width="15" height="14" rx="2"/><path d="M23 7l-7 5 7 5V7z"/></svg>
           </div>
           <div>
             <h2>Command Center</h2>
@@ -93,350 +95,188 @@
           </div>
         </div>
         <div class="header-actions">
-          <span class="pill mode-pill" id="pill-mode">—</span>
-          <button class="pill export" id="pill-export" title="Export this chat as a Markdown pentest report">⬇ Export</button>
-          <span class="pill clock" id="cc-clock" title="local time">--:--:--</span>
-          <button class="pill redteam-off" id="pill-redteam" title="Red Team master switch — one-click maximum uncensored profile">🩸 RED TEAM OFF</button>
+          <span class="pill smart" id="pill-mode" title="Auto &amp; Smart Router"><i class="led green"></i>AUTO · SMART ROUTER &#9662;</span>
+          <button class="pill export" id="pill-export" title="Export this chat as a Markdown pentest report">⬇ EXPORT</button>
+          <span class="pill redteam" id="pill-redteam" title="Red Team master switch">RED TEAM · PROMIX &#9662;</span>
         </div>
       </header>
 
       <div class="cc-stage">
 
-        <!-- conversation layer: scrollable chat surface (JS appends .msg/.typing/… here) -->
+        <!-- conversation layer -->
         <div class="chat-log" id="chat-log"></div>
 
-        <!-- ============ COMMAND CENTER DASHBOARD (idle / pre-chat state) ============ -->
+        <!-- ============ COMMAND CENTER DASHBOARD (idle pre-chat) ============ -->
         <div class="cc-dash" id="cc-dash">
 
-          <!-- ---------- top: hero status + system overview ---------- -->
-          <div class="dash-grid dash-top">
-
-            <!-- HERO — AI AGENT STATUS -->
-            <section class="panel hero" aria-label="AI Agent status">
-              <div class="hero-head">
-                <div class="hero-tags">
-                  <span class="tag-live"><i></i> AI AGENT STATUS</span>
-                  <span class="tag-soft">LOCAL · PRIVATE · ELITE</span>
-                </div>
-                <div class="hero-rings" aria-hidden="true">
-                  <div class="ring r1"></div><div class="ring r2"></div>
-                  <div class="robot">
-                    <svg viewBox="0 0 96 96" fill="none">
-                      <defs>
-                        <linearGradient id="robg" x1="0" y1="0" x2="1" y2="1">
-                          <stop offset="0" stop-color="#fda4af"/><stop offset="1" stop-color="#be123c"/>
-                        </linearGradient>
-                      </defs>
-                      <path d="M48 8v10" stroke="#f43f5e" stroke-width="4" stroke-linecap="round"/>
-                      <circle cx="48" cy="6" r="4" fill="#f43f5e"/>
-                      <rect x="22" y="26" width="52" height="42" rx="14" fill="url(#robg)" stroke="#fda4af" stroke-width="2"/>
-                      <rect x="24" y="34" width="48" height="8" rx="4" fill="rgba(90,0,14,.42)"/>
-                      <rect x="32" y="40" width="8" height="6" rx="2" fill="#6e0011"/>
-                      <circle cx="38" cy="52" r="5" fill="#6e0011"/>
-                      <circle cx="58" cy="52" r="5" fill="#6e0011"/>
-                      <circle cx="38" cy="52" r="2" fill="#f43f5e"/>
-                      <circle cx="58" cy="52" r="2" fill="#f43f5e"/>
-                      <path d="M34 64c4 4 24 4 28 0" stroke="#6e0011" stroke-width="3" stroke-linecap="round"/>
-                      <rect x="20" y="62" width="8" height="16" rx="4" fill="url(#robg)"/>
-                      <rect x="68" y="62" width="8" height="16" rx="4" fill="url(#robg)"/>
-                    </svg>
-                  </div>
-                </div>
-              </div>
-
-              <div class="hero-title">
-                <h2>ONLINE <em>&amp; READY</em></h2>
-                <p>HackerAI command core is live — smart router active, every scan, exploit and report stays <b>local &amp; private</b>. Type below, or launch from a quick action.</p>
-              </div>
-
-              <div class="sec-label">CAPABILITIES</div>
-              <div class="caps">
-                <span class="cap"><b class="c-ico">⌘</b>Exec Shell</span>
-                <span class="cap"><b class="c-ico">📡</b>Network Scan</span>
-                <span class="cap"><b class="c-ico">🌀</b>Web Fuzz</span>
-                <span class="cap"><b class="c-ico">🔍</b>Web Search</span>
-                <span class="cap"><b class="c-ico">🗂️</b>File Ops</span>
-                <span class="cap"><b class="c-ico">🧠</b>Persistent Memory</span>
-                <span class="cap"><b class="c-ico">📦</b>Artifact Export</span>
-                <span class="cap"><b class="c-ico">☠</b>Red Team</span>
-              </div>
-
-              <div class="sec-label">QUICK ACTIONS</div>
-              <div class="quickacts">
-                <button class="chip qk" data-msg="port scan 127.0.0.1"><b>🛰</b><span>Port Scan</span></button>
-                <button class="chip qk" data-msg="list files in current folder"><b>📁</b><span>List Files</span></button>
-                <button class="chip qk" data-msg="system info"><b>🖥</b><span>System Info</span></button>
-                <button class="chip qk" data-msg="subdomain_enum example.com"><b>🌐</b><span>Subdomain Enum</span></button>
-                <button class="chip qk" data-msg="what tools do you have?"><b>🛠</b><span>Tool Catalog</span></button>
-              </div>
-
-              <button class="btn-launch" id="launch-agent">
-                <span class="launch-ico"><svg viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11L9.5 22 19 9.5h-6.5z"/></svg></span>
-                <span><b>LAUNCH AGENT</b><small>start a new command session</small></span>
-              </button>
-            </section>
-
-            <!-- SYSTEM OVERVIEW -->
-            <section class="panel sys-ov" aria-label="System overview">
-              <div class="panel-head">
-                <h3><span class="ph-ico">◎</span> System Overview</h3>
-                <span class="op-badge"><i></i> 100% OPERATIONAL</span>
-              </div>
-              <div class="rings-row">
-                <div class="op-ring" id="op-ring" style="--ring:320deg" title="Operational status">
-                  <div class="op-val"><b id="op-val">100%</b><span>Operational</span></div>
-                </div>
-                <div class="gauge-grid">
-                  <div class="gauge">
-                    <div class="g-top"><span>CPU</span><b id="val-cpu">—</b></div>
-                    <div class="g-track"><div class="g-fill" id="g-cpu"></div></div>
-                  </div>
-                  <div class="gauge">
-                    <div class="g-top"><span>RAM</span><b id="val-ram">—</b></div>
-                    <div class="g-track"><div class="g-fill" id="g-ram"></div></div>
-                  </div>
-                  <div class="gauge">
-                    <div class="g-top"><span>DISK</span><b id="val-disk">—</b></div>
-                    <div class="g-track"><div class="g-fill" id="g-disk"></div></div>
-                  </div>
-                  <div class="gauge">
-                    <div class="g-top"><span>NET</span><b id="val-net">LINKED</b></div>
-                    <div class="g-track"><div class="g-fill flow" id="g-net"></div></div>
-                  </div>
-                </div>
-              </div>
-              <div class="stat-strip">
-                <div class="stat"><span>UPTIME</span><b id="cc-stat-uptime">—</b></div>
-                <div class="stat"><span>SESSIONS</span><b id="cc-stat-sessions">—</b></div>
-                <div class="stat"><span>MODEL</span><b id="cc-stat-model">—</b></div>
-                <div class="stat"><span>TOOLS</span><b id="cc-stat-tools">—</b></div>
-              </div>
-              <div class="traffic">
-                <div class="t-head"><span>LIVE TRAFFIC</span><span class="t-legend"><i class="lg-in"></i>in <i class="lg-out"></i>out</span></div>
-                <div class="t-bars">
-                  <i style="--h:42%"></i><i style="--h:68%"></i><i style="--h:35%"></i><i style="--h:82%"></i>
-                  <i style="--h:54%"></i><i style="--h:26%"></i><i style="--h:74%"></i><i style="--h:48%"></i>
-                  <i style="--h:90%"></i><i style="--h:38%"></i><i style="--h:62%"></i><i style="--h:30%"></i>
-                  <i style="--h:78%"></i><i style="--h:52%"></i><i style="--h:66%"></i><i style="--h:44%"></i>
-                  <i class="alt" style="--h:60%"></i><i class="alt" style="--h:24%"></i><i class="alt" style="--h:70%"></i><i class="alt" style="--h:46%"></i>
-                  <i class="alt" style="--h:86%"></i><i class="alt" style="--h:40%"></i><i class="alt" style="--h:58%"></i><i class="alt" style="--h:72%"></i>
-                </div>
-              </div>
-            </section>
+          <!-- hero -->
+          <div class="cc-hero">
+            <div class="cc-avatar">
+              <svg viewBox="0 0 160 160" class="cc-av-svg" aria-hidden="true">
+                <defs>
+                  <radialGradient id="avGlow" cx="50%" cy="50%" r="50%">
+                    <stop offset="0%" stop-color="#ff2740" stop-opacity=".9"/>
+                    <stop offset="55%" stop-color="#7a0d1c" stop-opacity=".4"/>
+                    <stop offset="100%" stop-color="#05060c" stop-opacity="0"/>
+                  </radialGradient>
+                  <linearGradient id="avFace" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#2a2a33"/><stop offset="100%" stop-color="#0d0d14"/>
+                  </linearGradient>
+                </defs>
+                <circle cx="80" cy="80" r="78" fill="url(#avGlow)"/>
+                <circle cx="80" cy="80" r="70" fill="#0a0b11" stroke="rgba(255,39,64,.4)" stroke-width="1"/>
+                <circle cx="80" cy="80" r="63" fill="none" stroke="rgba(255,39,64,.28)" stroke-width="1" stroke-dasharray="3 7"/>
+                <circle cx="80" cy="80" r="56" fill="none" stroke="rgba(255,39,64,.12)" stroke-width="1" stroke-dasharray="1 5"/>
+                <path d="M48 114c2 16 14 24 32 24s30-8 32-24z" fill="#111219" stroke="rgba(255,39,64,.3)" stroke-width="1"/>
+                <rect x="72" y="96" width="16" height="16" rx="3" fill="#0c0c12"/>
+                <rect x="56" y="40" width="48" height="58" rx="14" fill="url(#avFace)" stroke="rgba(255,39,64,.5)" stroke-width="1.5"/>
+                <rect x="60" y="52" width="40" height="26" rx="8" fill="#05060c" stroke="rgba(255,39,64,.4)"/>
+                <circle cx="74" cy="65" r="4" fill="#ff2740"/><circle cx="74.5" cy="64.5" r="1.4" fill="#ffc2cc"/>
+                <circle cx="86" cy="65" r="4" fill="#ff2740"/><circle cx="86.5" cy="64.5" r="1.4" fill="#ffc2cc"/>
+                <rect x="72" y="82" width="16" height="3" rx="1.5" fill="#ff2740" opacity=".9"/>
+                <line x1="80" y1="40" x2="80" y2="30" stroke="rgba(255,39,64,.5)" stroke-width="2"/>
+                <circle cx="80" cy="28" r="3" fill="#ff2740"/>
+                <circle cx="56" cy="70" r="2" fill="rgba(255,39,64,.65)"/><circle cx="104" cy="70" r="2" fill="rgba(255,39,64,.65)"/>
+              </svg>
+            </div>
+            <h1 class="cc-title">AI Agent ready</h1>
+            <p class="cc-sub">I can run terminal commands, scan networks, fuzz web apps, search the web, manage files and remember things across sessions.</p>
+            <button class="cc-cta" id="cc-cta">How can I help you today? <span class="cc-cta-ar">&#8250;</span></button>
           </div>
 
-          <!-- ---------- six system info cards ---------- -->
-          <div class="dash-cards">
-            <div class="pcard"><span class="pc-ico">🪟</span><div><small>OS</small><b id="cc-os">…</b><em id="cc-os-sub">detecting…</em></div></div>
-            <div class="pcard"><span class="pc-ico">🌐</span><div><small>IP</small><b id="cc-ip">…</b><em id="cc-ip-sub">detecting…</em></div></div>
-            <div class="pcard"><span class="pc-ico">📍</span><div><small>LOCATION</small><b id="cc-loc">…</b><em id="cc-loc-sub">detecting…</em></div></div>
-            <div class="pcard"><span class="pc-ico">👤</span><div><small>USER</small><b id="cc-user">…</b><em id="cc-user-sub">detecting…</em></div></div>
-            <div class="pcard"><span class="pc-ico">💻</span><div><small>SHELL</small><b id="cc-shell">…</b><em id="cc-shell-sub">detecting…</em></div></div>
-            <div class="pcard"><span class="pc-ico">🧬</span><div><small>AGENT VERSION</small><b id="cc-ver">…</b><em id="cc-ver-sub">detecting…</em></div></div>
-          </div>
-
-          <!-- ---------- three-column row ---------- -->
-          <div class="dash-grid dash-cols">
-            <section class="panel colp" aria-label="Active sessions">
-              <div class="panel-head"><h3><span class="ph-ico">◷</span> Active Sessions</h3><span class="op-badge soft">LOCAL VAULT</span></div>
-              <div class="ss-list" id="cc-session-list">
-                <div class="ss-empty">loading…</div>
-              </div>
-            </section>
-            <section class="panel colp" aria-label="Terminal preview">
-              <div class="panel-head"><h3><span class="ph-ico">&gt;_</span> Terminal</h3><span class="op-badge soft" id="cc-term-state">SHELL READY</span></div>
-              <div class="term">
-                <div class="term-line" style="--d:0s">agent core <b>:: boot</b></div>
-                <div class="term-line" style="--d:.18s">router <b>:: smart-auto</b> · model <b id="cc-term-model">—</b></div>
-                <div class="term-line" style="--d:.36s">tools <b>:: <span id="cc-term-tools">—</span> registered</b></div>
-                <div class="term-line" style="--d:.54s">memory <b>:: vault mounted</b> · sessions persistent</div>
-                <div class="term-line" style="--d:.72s">red team <b>:: standby</b></div>
-                <div class="term-line prompt" style="--d:.9s"><span class="t-sym">❯</span> type below to command the agent<span class="caret"></span></div>
-              </div>
-            </section>
-            <section class="panel colp" aria-label="Recent activity">
-              <div class="panel-head"><h3><span class="ph-ico">≡</span> Recent Activity</h3><span class="op-badge soft">LIVE</span></div>
-              <div class="ss-list" id="cc-activity">
-                <div class="ss-empty">loading…</div>
-              </div>
-            </section>
-          </div>
-
-          <!-- ---------- bottom status bar ---------- -->
-          <div class="cc-statusbar">
-            <span class="st ok"><i></i> agent core online</span>
-            <span class="st ok"><i></i> router <b id="cc-sb-mode">auto</b></span>
-            <span class="st ok"><i></i> local &amp; private</span>
-            <span class="st" id="cc-sb-extra">—</span>
-            <span class="st-right">session <b id="cc-sb-session">—</b> · tools <b id="cc-sb-tools">—</b> · <span id="cc-clock2">--:--:--</span></span>
+          <!-- quick actions -->
+          <div class="cc-quick">
+            <button class="qc" data-action="listfiles">
+              <span class="qc-ico"><svg viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span>
+              <span class="qc-tx"><b>List Files</b><small>List files and directories</small></span>
+              <span class="qc-ar">&#8250;</span>
+            </button>
+            <button class="qc" data-action="portscan">
+              <span class="qc-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 3v6m0 6v6M3 12h6m6 0h6"/></svg></span>
+              <span class="qc-tx"><b>Port Scan</b><small>Scan open ports on target</small></span>
+              <span class="qc-ar">&#8250;</span>
+            </button>
+            <button class="qc" data-action="sysinfo">
+              <span class="qc-ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg></span>
+              <span class="qc-tx"><b>System Info</b><small>Get system information</small></span>
+              <span class="qc-ar">&#8250;</span>
+            </button>
+            <button class="qc" data-action="subdomains">
+              <span class="qc-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 4 6 4 9s-1 6-4 9c-3-3-4-6-4-9s1-6 4-9z"/></svg></span>
+              <span class="qc-tx"><b>Subdomains</b><small>Discover subdomains</small></span>
+              <span class="qc-ar">&#8250;</span>
+            </button>
+            <button class="qc" data-action="tools">
+              <span class="qc-ico"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a5 5 0 0 0-6.9 6.2L3 17.3 6.7 21l4.8-4.8a5 5 0 0 0 6.2-6.9l-3 3-2.4-2.4z"/></svg></span>
+              <span class="qc-tx"><b>More Tools</b><small>Explore all available tools</small></span>
+              <span class="qc-ar">&#8250;</span>
+            </button>
           </div>
         </div>
-      </div>
 
-      <footer class="composer">
-        <textarea id="input" rows="1" placeholder="Message the agent…  (Enter = send · Shift+Enter = new line)"></textarea>
-        <button class="btn-send" id="send" title="Send" aria-label="Send">
-          <span class="send-ico">
-            <svg viewBox="0 0 24 24"><path d="M3.4 20.6 22 12 3.4 3.4l2.6 7.2 9.6 1.4-9.6 1.4z"/></svg>
-          </span>
-          <span class="stop-ico">■</span>
-        </button>
-      </footer>
+        <!-- composer -->
+        <footer class="composer">
+          <span class="comp-prompt" aria-hidden="true">&gt;</span>
+          <textarea id="input" rows="1" placeholder="Type your command or request…"></textarea>
+          <div class="comp-tools">
+            <button class="comp-ico" type="button" title="Voice input" aria-label="Voice">
+              <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+            </button>
+            <button class="comp-ico" type="button" title="Insert code" aria-label="Code">
+              <svg viewBox="0 0 24 24"><path d="M8 6 2 12l6 6M16 6l6 6-6 6"/></svg>
+            </button>
+            <button class="comp-ico" type="button" title="AI assistant" aria-label="AI">
+              <svg viewBox="0 0 24 24"><path d="M12 3l1.6 4.6L18 9l-4.4 1.4L12 15l-1.6-4.6L6 9l4.4-1.4z"/><path d="M18 14l.9 2.6L21 17l-2.1.9L18 20l-.9-2.1L15 17l2.1-.4z"/></svg>
+            </button>
+          </div>
+          <button class="btn-send" id="send" title="Send" aria-label="Send">
+            <span class="send-ico"><svg viewBox="0 0 24 24"><path d="M3.4 20.6 22 12 3.4 3.4l2.6 7.2 9.6 1.4-9.6 1.4z"/></svg></span>
+            <span class="stop-ico">■</span>
+          </button>
+        </footer>
+
+        <!-- bottom status bar -->
+        <div class="cc-statusbar">
+          <span class="st"><span class="st-ico">&#9635;</span><b>MODEL:</b> HACKERAI PRO</span>
+          <span class="st"><b>CONTEXT:</b> 128K TOKENS</span>
+          <span class="st st-on"><i class="st-dot"></i>MEMORY: ACTIVE</span>
+          <span class="st"><b>TOOLS:</b> <span id="cc-sb-tools">209</span></span>
+          <span class="st st-ok"><i class="st-dot green"></i>STATUS: OPERATIONAL</span>
+        </div>
+      </div>
     </section>
 
     <!-- ---------- TOOLS VIEW ---------- -->
     <section class="view" id="view-tools">
       <header class="chat-header">
         <div class="ht">
-          <div class="ht-ico" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M14.7 6.3a5 5 0 0 0-6.9 6.2L3 17.3 6.7 21l4.8-4.8a5 5 0 0 0 6.2-6.9l-3 3-2.4-2.4z"/></svg>
-          </div>
+          <div class="ht-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a5 5 0 0 0-6.9 6.2L3 17.3 6.7 21l4.8-4.8a5 5 0 0 0 6.2-6.9l-3 3-2.4-2.4z"/></svg></div>
           <div>
-            <h2>Tool Catalog</h2>
-            <p id="tools-count">—</p>
+            <h2>Tools</h2>
+            <p>Every registered tool the agent can invoke.</p>
           </div>
         </div>
       </header>
-      <div class="tool-search">
-        <svg viewBox="0 0 24 24" class="ts-ico"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zm8 15-3.5-3.5"/></svg>
-        <input type="text" id="tool-search" placeholder="Search tools…">
+      <div class="tool-bar">
+        <input type="search" id="tool-search" placeholder="search tools…">
+        <span class="tool-count" id="tools-count">0 tools registered</span>
       </div>
-      <div class="tool-grid" id="tool-grid"></div>
+      <div class="tool-grid" id="tool-grid"><p class="muted">loading…</p></div>
     </section>
 
     <!-- ---------- MEMORY VIEW ---------- -->
     <section class="view" id="view-memory">
       <header class="chat-header">
         <div class="ht">
-          <div class="ht-ico" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M9 3v1m6-1v1M9 19v1m6-1v1M4 8h16v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 12h16"/></svg>
-          </div>
+          <div class="ht-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4a3 3 0 0 1 6 0v1a3 3 0 0 1 0 6 3 3 0 0 1-6 0zM3 18a6 6 0 0 1 18 0v3H3z"/></svg></div>
           <div>
-            <h2>Persistent Memory</h2>
-            <p>Facts stored in memory.json — har session mein available.</p>
+            <h2>Memory</h2>
+            <p>Long-term notes and learned facts across sessions.</p>
           </div>
         </div>
       </header>
       <div class="memory-add">
-        <input type="text" id="mem-key" placeholder="key · e.g. target-scope">
-        <input type="text" id="mem-text" placeholder="value · e.g. 10.10.10.5 is in scope">
-        <button class="btn-send" id="mem-add" title="Save" aria-label="Save">＋</button>
+        <input type="text" id="mem-key" placeholder="key (e.g. target)">
+        <input type="text" id="mem-text" placeholder="value / detail to remember">
+        <button class="btn-primary" id="mem-add">+ Remember</button>
       </div>
-      <div class="memory-list" id="memory-list"></div>
+      <div class="memory-list" id="memory-list"><p class="muted">loading…</p></div>
     </section>
 
     <!-- ---------- REPORTS VIEW ---------- -->
     <section class="view" id="view-reports">
       <header class="chat-header">
         <div class="ht">
-          <div class="ht-ico" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM8 9h8m-8 4h8m-8 4h5"/></svg>
-          </div>
+          <div class="ht-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M9 12h6M9 16h6"/></svg></div>
           <div>
-            <h2>Executive Reports</h2>
-            <p>Har target assessment ki Markdown summary — severity, tools, artifacts aur download links.</p>
+            <h2>Reports</h2>
+            <p>Generated pentest findings and reports.</p>
           </div>
         </div>
-        <div class="header-actions">
-          <button class="btn-primary" id="reports-refresh">⟳ Refresh</button>
-        </div>
+        <button class="btn-primary" id="reports-refresh">⟳ Refresh</button>
       </header>
-      <div class="report-grid" id="report-grid">
-        <p class="muted report-empty">No reports yet — chat karein aur koi assessment chala kar pehla report banayein.</p>
-      </div>
+      <div class="report-grid" id="report-grid"><p class="muted">loading…</p></div>
     </section>
 
-    <!-- ---------- SETTINGS VIEW ---------- -->
-    <section class="view" id="view-settings">
-      <header class="chat-header">
-        <div class="ht">
-          <div class="ht-ico" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zm0-5v3m0 10v3M4.6 6.6l2.1 2.1m10.6 6.6 2.1 2.1M3 12h3m12 0h3m-2.4 5.4-2.1-2.1M7.7 8.7l-2.1-2.1"/></svg>
-          </div>
-          <div>
-            <h2>Settings</h2>
-            <p>Koi bhi OpenAI-compatible model connect karein · config → config.json · API key → .env</p>
-          </div>
-        </div>
-      </header>
-      <div class="settings-wrap">
-        <div class="settings-card">
-          <div class="sc-title">🔌 Model Connection</div>
-          <label>API Key
-            <input type="password" id="set-key" placeholder="sk-…" autocomplete="off">
-          </label>
-          <label>Base URL
-            <input type="text" id="set-url" placeholder="https://api.openai.com/v1" spellcheck="false">
-            <small>OpenAI / OpenRouter / Groq / Ollama (http://localhost:11434/v1) / LM Studio</small>
-          </label>
-          <label class="check">
-            <input type="checkbox" id="set-auto"> <i></i> ✨ Auto-Model Selector
-            <small>Smart router: cyber/uncensored → Dolphin/Inkling · coding/math → DeepSeek R1 · chat → fast default</small>
-          </label>
-          <label>Model
-            <select id="set-model">
-              <option value="auto">✨ Auto Select (Smart Router)</option>
-            </select>
-          </label>
-          <div class="quickpicks-wrap">
-            <small class="qp-title">☠ Uncensored quick-picks — one click, zero refusals:</small>
-            <div class="quickpicks" id="model-quickpicks"></div>
-          </div>
-          <label class="check">
-            <input type="checkbox" id="set-mock"> <i></i> Mock mode (built-in test LLM, key ki zaroorat nahi)
-          </label>
-          <label class="check rt">
-            <input type="checkbox" id="set-redteam"> <i></i> ☠ Red Team Mode (uncensored)
-            <small>Full-uncensored: no refusals · auto-retry · authorization block system prompt mein inject</small>
-          </label>
-          <label>Max iterations
-            <input type="number" id="set-iter" min="1" max="100" value="12">
-          </label>
-          <div class="row">
-            <button class="btn-primary" id="set-save">Save &amp; Reload Agent</button>
-            <span class="save-msg" id="set-msg"></span>
-          </div>
-        </div>
-        <div class="settings-card">
-          <div class="sc-title">🎭 Persona Engine</div>
-          <label>Persona
-            <select id="persona-select"></select>
-            <small>Agent ki directive personality — Red Team Mode ke saath combine hoti hai.</small>
-          </label>
-          <label>Custom persona directive
-            <textarea id="persona-custom" rows="6" placeholder="Custom persona text... 'custom' persona select karne par active hota hai"></textarea>
-          </label>
-          <div class="row">
-            <button class="btn-primary" id="persona-save">Save Persona</button>
-            <span class="save-msg" id="persona-msg"></span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ---------- RPG VIEW (Mythos Engine) ---------- -->
+    <!-- ---------- RPG VIEW ---------- -->
     <section class="view" id="view-rpg">
-      <header class="chat-header">
-        <div class="ht">
-          <div class="ht-ico" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M4 18c2.5-5 4.5-8 8-8s5.5 3 8 8M12 10V5m0 0 2.5 2M12 5 9.5 7M3 20h18"/></svg>
-          </div>
-          <div>
-            <h2>Mythos Engine</h2>
-            <p id="rpg-hint">Autonomous narrative engine — world state, NPCs aur lore har turn yaad rakhte hain.</p>
-          </div>
-        </div>
-        <div class="header-actions">
-          <button class="btn-primary" id="rpg-new">＋ New Campaign</button>
-        </div>
-      </header>
       <div class="rpg-layout">
         <div class="rpg-main">
-          <div class="rpg-select-bar">
-            <select id="rpg-game-select" title="Campaigns"></select>
-            <button class="btn-ghost" id="rpg-load">▶ Load</button>
-            <button class="btn-ghost danger" id="rpg-delete" title="Delete campaign">🗑</button>
-          </div>
+          <header class="chat-header">
+            <div class="ht">
+              <div class="ht-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7l7-4 11 4-11 4z"/><path d="M3 7v10l11 4V11z"/><path d="M14 11l7-4v10l-7 4z"/></svg></div>
+              <div>
+                <h2>Mythos Engine</h2>
+                <p>Immersive agent-driven RPG campaigns.</p>
+              </div>
+            </div>
+            <div class="rpg-header-actions">
+              <select id="rpg-game-select"><option value="">— no campaign —</option></select>
+              <button class="btn-primary" id="rpg-new">+ New Campaign</button>
+              <button class="btn-ghost" id="rpg-load">Load</button>
+              <button class="btn-ghost danger" id="rpg-delete">Delete</button>
+            </div>
+          </header>
           <div class="rpg-story" id="rpg-story">
             <div class="rpg-welcome" id="rpg-welcome">
               <div class="welcome-orb"><div class="welcome-icon">🐉</div></div>
@@ -452,21 +292,18 @@
               </div>
             </div>
           </div>
+          <div class="rpg-choices" id="rpg-choices"></div>
+          <div class="rpg-typing" id="rpg-typing" hidden></div>
           <footer class="composer rpg-composer">
             <textarea id="rpg-input" rows="1" placeholder="What do you do?… (Enter to act) — ya sirf 1 / 2 / 3 likh kar choice chunein"></textarea>
             <button class="btn-send" id="rpg-send" title="Act" aria-label="Act">
-              <span class="send-ico">
-                <svg viewBox="0 0 24 24"><path d="M3.4 20.6 22 12 3.4 3.4l2.6 7.2 9.6 1.4-9.6 1.4z"/></svg>
-              </span>
+              <span class="send-ico"><svg viewBox="0 0 24 24"><path d="M3.4 20.6 22 12 3.4 3.4l2.6 7.2 9.6 1.4-9.6 1.4z"/></svg></span>
               <span class="stop-ico">■</span>
             </button>
           </footer>
         </div>
         <div class="rpg-side">
-          <div class="rpg-panel">
-            <h4>🧭 World State</h4>
-            <div class="rpg-state" id="rpg-state-box"><p class="muted">no active campaign</p></div>
-          </div>
+          <div class="rpg-panel"><h4>🧭 World State</h4><div class="rpg-state" id="rpg-state-box"><p class="muted">no active campaign</p></div></div>
           <div class="rpg-panel">
             <h4>📜 Lorebook</h4>
             <div class="rpg-lore-search"><input type="text" id="rpg-lore-q" placeholder="search lore…"></div>
@@ -477,13 +314,51 @@
       </div>
     </section>
 
+    <!-- ---------- SETTINGS VIEW ---------- -->
+    <section class="view" id="view-settings">
+      <header class="chat-header">
+        <div class="ht">
+          <div class="ht-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3m14 0h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg></div>
+          <div>
+            <h2>Settings</h2>
+            <p>Model routing, red-team profile and agent behavior.</p>
+          </div>
+        </div>
+      </header>
+      <div class="settings-grid">
+        <div class="panel">
+          <h4>LLM Provider</h4>
+          <label>Base URL<input type="text" id="set-url" placeholder="https://openrouter.ai/api/v1"></label>
+          <label>API Key<input type="password" id="set-key" placeholder="sk-…"></label>
+          <label>Model
+            <select id="set-model"></select>
+          </label>
+          <div class="quick-picks" id="model-quickpicks"></div>
+        </div>
+        <div class="panel">
+          <h4>Behavior</h4>
+          <label class="check"><input type="checkbox" id="set-auto"><span>Auto · Smart Router (choose best model per task)</span></label>
+          <label class="check"><input type="checkbox" id="set-mock"><span>Mock mode (built-in test LLM, no API)</span></label>
+          <label class="check"><input type="checkbox" id="set-redteam"><span>Red Team mode (uncensored profile)</span></label>
+          <label>Max iterations<input type="number" id="set-iter" min="1" max="99" value="12"></label>
+          <button class="btn-primary" id="set-save">💾 Save &amp; Reload Agent</button>
+          <span class="save-msg" id="set-msg"></span>
+        </div>
+        <div class="panel">
+          <h4>Persona</h4>
+          <label>Active persona<select id="persona-select"></select></label>
+          <label>Custom persona text<textarea id="persona-custom" rows="5" placeholder="Define your own persona…"></textarea></label>
+          <button class="btn-primary" id="persona-save">Save Persona</button>
+          <span class="save-msg" id="persona-msg"></span>
+        </div>
+      </div>
+    </section>
+
     <!-- ---------- SYSTEM VIEW ---------- -->
     <section class="view" id="view-system">
       <header class="chat-header">
         <div class="ht">
-          <div class="ht-ico" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/></svg>
-          </div>
+          <div class="ht-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/></svg></div>
           <div>
             <h2>System Info</h2>
             <p>Host information as seen by the agent.</p>
@@ -505,25 +380,10 @@
       <h3>New Campaign</h3>
       <p class="muted">Apni duniya ki kahani shuru karein.</p>
     </div>
-    <label>Title
-      <input type="text" id="rpg-new-title" placeholder="The Fallen Crown">
-    </label>
-    <label>Genre
-      <select id="rpg-new-genre">
-        <option value="fantasy">⚔️ Fantasy</option>
-        <option value="scifi">🚀 Sci-Fi</option>
-        <option value="horror">🦇 Horror</option>
-        <option value="cyberpunk">🤖 Cyberpunk</option>
-        <option value="mystery">🔍 Mystery</option>
-        <option value="custom">✨ Custom</option>
-      </select>
-    </label>
-    <label>Player Name
-      <input type="text" id="rpg-new-player" placeholder="Adventurer">
-    </label>
-    <label>Opening <small>(optional)</small>
-      <input type="text" id="rpg-new-setup" placeholder="Set the scene…">
-    </label>
+    <label>Title<input type="text" id="rpg-new-title" placeholder="The Fallen Crown"></label>
+    <label>Genre<select id="rpg-new-genre"><option value="fantasy">⚔️ Fantasy</option><option value="scifi">🚀 Sci-Fi</option><option value="horror">🦇 Horror</option><option value="cyberpunk">🤖 Cyberpunk</option><option value="mystery">🔍 Mystery</option><option value="custom">✨ Custom</option></select></label>
+    <label>Player Name<input type="text" id="rpg-new-player" placeholder="Adventurer"></label>
+    <label>Opening <small>(optional)</small><input type="text" id="rpg-new-setup" placeholder="Set the scene…"></label>
     <div class="row">
       <button class="btn-primary" id="rpg-new-go">⚔️ Start Adventure</button>
       <button class="btn-ghost" id="rpg-new-cancel">Cancel</button>

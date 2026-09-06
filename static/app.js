@@ -1127,13 +1127,13 @@ async function refreshStatus() {
       dot.className = "dot live";
       $("#status-mode").textContent = "auto · smart router";
       $("#status-model").textContent = s.base_url || "";
-      $("#pill-mode").textContent = "◐ AUTO · smart router";
+      $("#pill-mode").textContent = "AUTO • SMART ROUTER";
     } else {
       $("#status-mode").textContent = s.mode === "live" ? "live · " + s.model : "mock mode";
       $("#status-model").textContent = s.mode === "live" ? s.base_url : "built-in test LLM";
-      $("#pill-mode").textContent = (s.mode === "live" ? "● LIVE · " : "◐ MOCK · ") + s.model;
+      $("#pill-mode").textContent = (s.mode === "live" ? "LIVE • " : "MOCK • ") + s.model;
     }
-    $("#pill-mode").className = "pill " + (s.mode === "mock" ? "mock" : "live");
+    $("#pill-mode").className = "pill " + (s.mode === "auto" ? "smart" : (s.mode === "mock" ? "mock" : "live"));
     $("#badge-tools").textContent = s.tools;
     updateRedTeamPill(s.red_team_mode, s.persona);
   } catch { /* ignore */ }
@@ -1160,10 +1160,10 @@ function updateRedTeamPill(on, persona) {
   const pill = $("#pill-redteam");
   if (!pill) return;
   if (redTeamOn) {
-    pill.textContent = "🩸 RED TEAM · " + String(persona || "unfiltered").toUpperCase();
+    pill.textContent = "RED TEAM • " + String(persona || "promix").toUpperCase();
     pill.className = "pill redteam-on";
   } else {
-    pill.textContent = "🩸 RED TEAM OFF";
+    pill.textContent = "RED TEAM OFF";
     pill.className = "pill redteam-off";
   }
 }
@@ -1686,6 +1686,11 @@ function renderBoard(board) {
     stopBoardTick();
     cur.textContent = ip.length ? "▶ " + (ip[0].title || ip[0].id) : "idle";
   }
+  const fill = document.getElementById("b-progress-fill");
+  const pct = document.getElementById("b-progress-pct");
+  const prog = (live && typeof live.progress === "number") ? Math.max(0, Math.min(100, live.progress)) : 0;
+  if (fill) fill.style.width = prog + "%";
+  if (pct) pct.textContent = live ? Math.round(prog) + "%" : "";
   const list = document.getElementById("board-list");
   if (list) {
     const tasks = (board.tasks || []).slice(-5).reverse();
@@ -2024,4 +2029,33 @@ async function refreshBoard() {
   jitterTraffic();
   ccFill();
   setInterval(ccFill, 10000);
+})();
+
+
+/* ---------------- Command Center quick actions + CTA ---------------- */
+(() => {
+  const $id = (id) => document.getElementById(id);
+  const Q_MSG = {
+    listfiles: "List the files and directories in the current working directory.",
+    portscan: "Run a fast port scan on the target host and report open services.",
+    sysinfo: "Show detailed system information (OS, user, shell, python, uptime).",
+    subdomains: "Discover subdomains for the target domain.",
+  };
+  const cta = $id("cc-cta");
+  if (cta) cta.addEventListener("click", () => {
+    const stage = document.querySelector(".cc-stage");
+    if (stage) stage.scrollTop = 0;
+    if (inputBox) inputBox.focus();
+  });
+  document.querySelectorAll(".qc[data-action]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const act = b.dataset.action;
+      if (act === "tools") { switchView("tools"); return; }
+      if (inputBox) {
+        inputBox.value = Q_MSG[act] || "";
+        inputBox.focus();
+        autosize();
+      }
+    });
+  });
 })();
