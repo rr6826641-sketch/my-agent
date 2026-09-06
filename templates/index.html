@@ -91,7 +91,7 @@
           </div>
           <div>
             <h2>Command Center</h2>
-            <p id="chat-hint">Ask anything — scans (nmap / nuclei / curl…) ke outputs chat mein downloadable artifacts ke roop mein save hote hain.</p>
+            <p id="chat-hint">Ask anything — scan outputs (nmap / nuclei / curl…) are saved in chat as downloadable artifacts.</p>
           </div>
         </div>
         <div class="header-actions">
@@ -281,7 +281,7 @@
             <div class="rpg-welcome" id="rpg-welcome">
               <div class="welcome-orb"><div class="welcome-icon">🐉</div></div>
               <h3>Mythos Engine <span>ready</span></h3>
-              <p>Nayi campaign banayein ya purani load karein. Game Master har event, NPC aur world-state ka hisaab rakhta hai — choices ke saath immersive storyteller turns.</p>
+              <p>Create a new campaign or load a saved one. The Game Master tracks every event, NPC and world-state — immersive storyteller turns shaped by your choices.</p>
               <div class="rpg-genre-pick">
                 <button class="chip" data-genre="fantasy"><b>⚔️</b><span>Fantasy</span></button>
                 <button class="chip" data-genre="scifi"><b>🚀</b><span>Sci-Fi</span></button>
@@ -295,7 +295,7 @@
           <div class="rpg-choices" id="rpg-choices"></div>
           <div class="rpg-typing" id="rpg-typing" hidden></div>
           <footer class="composer rpg-composer">
-            <textarea id="rpg-input" rows="1" placeholder="What do you do?… (Enter to act) — ya sirf 1 / 2 / 3 likh kar choice chunein"></textarea>
+            <textarea id="rpg-input" rows="1" placeholder="What do you do?… (Enter to act, or type 1 / 2 / 3 to pick a choice)"></textarea>
             <button class="btn-send" id="rpg-send" title="Act" aria-label="Act">
               <span class="send-ico"><svg viewBox="0 0 24 24"><path d="M3.4 20.6 22 12 3.4 3.4l2.6 7.2 9.6 1.4-9.6 1.4z"/></svg></span>
               <span class="stop-ico">■</span>
@@ -378,7 +378,7 @@
     <div class="modal-head">
       <div class="welcome-orb sm"><div class="welcome-icon">🐉</div></div>
       <h3>New Campaign</h3>
-      <p class="muted">Apni duniya ki kahani shuru karein.</p>
+      <p class="muted">Begin the story of your world.</p>
     </div>
     <label>Title<input type="text" id="rpg-new-title" placeholder="The Fallen Crown"></label>
     <label>Genre<select id="rpg-new-genre"><option value="fantasy">⚔️ Fantasy</option><option value="scifi">🚀 Sci-Fi</option><option value="horror">🦇 Horror</option><option value="cyberpunk">🤖 Cyberpunk</option><option value="mystery">🔍 Mystery</option><option value="custom">✨ Custom</option></select></label>

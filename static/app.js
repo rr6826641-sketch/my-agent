@@ -433,7 +433,7 @@ async function loadReports() {
     if (badge) badge.textContent = reports.length;
     renderReports(reports);
   } catch {
-    grid.innerHTML = `<p class="muted report-empty">⚠️ Reports load nahi hue — server check karein.</p>`;
+    grid.innerHTML = `<p class="muted report-empty">⚠️ Reports failed to load — check the server.</p>`;
   }
 }
 
@@ -441,7 +441,7 @@ function renderReports(reports) {
   const grid = $("#report-grid");
   if (!grid) return;
   if (!reports.length) {
-    grid.innerHTML = `<p class="muted report-empty">No reports yet — chat karein aur koi assessment chala kar pehla report banayein.</p>`;
+    grid.innerHTML = `<p class="muted report-empty">No reports yet — run an assessment in chat to generate your first report.</p>`;
     return;
   }
   grid.innerHTML = reports.map(reportCardHTML).join("");
@@ -1288,7 +1288,7 @@ function rpgRenderChoices(choices) {
   box.id = "rpg-choices";
   rpgChoices = choices || [];
   if (!rpgChoices.length) {
-    box.innerHTML = `<div class="rpg-freeplay">✍️ kuch bhi type karein — yaada action is allowed.</div>`;
+    box.innerHTML = `<div class="rpg-freeplay">✍️ type anything — every action is allowed.</div>`;
     $("#rpg-story").appendChild(box);
     return;
   }
@@ -1380,7 +1380,7 @@ function rpgHandleEvent(e) {
 async function rpgPlay(input) {
   if (rpgBusy) return;
   if (!rpgCurrent || !rpgCurrent.game_id) {
-    rpgAddSystem("⚠️ pehle ek campaign load karein.");
+    rpgAddSystem("⚠️ load a campaign first.");
     return;
   }
   const message = (input || "").trim();
@@ -1398,7 +1398,7 @@ async function rpgPlay(input) {
     });
     if (res.status === 409) {
       const d = await res.json().catch(() => ({}));
-      rpgAddSystem("⏳ ek turn pehle se chal raha hai" + (d.error ? " — " + d.error : ""));
+      rpgAddSystem("⏳ a campaign turn is already running" + (d.error ? " — " + d.error : ""));
       rpgBusy = false;
       rpgSetStreaming(false);
       return;
@@ -1490,7 +1490,7 @@ async function rpgLoadGame(id) {
     if (!story.querySelector(".rpg-msg, .rpg-note, .rpg-choices")) {
       const head = document.createElement("div");
       head.className = "rpg-msg gm";
-      head.innerHTML = `<div class="rpg-avatar">🎭</div><div class="rpg-bubble"><b>${escapeHtml(d.title || "Adventure")}</b><br>${escapeHtml(d.player.name)} — ${escapeHtml(d.genre || "")}. Tumhari kahani yahin se shuru hoti hai.</div>`;
+      head.innerHTML = `<div class="rpg-avatar">🎭</div><div class="rpg-bubble"><b>${escapeHtml(d.title || "Adventure")}</b><br>${escapeHtml(d.player.name)} — ${escapeHtml(d.genre || "")}. Your story begins here.</div>`;
       story.appendChild(head);
     }
     rpgRenderState(d);
@@ -1530,21 +1530,21 @@ async function rpgStartGame() {
     rpgLoadLore();
     rpgPlay(setup || "");
   } catch (err) {
-    rpgAddSystem("⚠️ campaign banane mein error: " + (err && err.message || "unknown"));
+    rpgAddSystem("⚠️ campaign creation error: " + (err && err.message || "unknown"));
   }
 }
 
 async function rpgDeleteGame() {
   const id = $("#rpg-game-select").value;
   if (!id) return;
-  if (!confirm("Is campaign ko delete karein? (permanent)")) return;
+  if (!confirm("Delete this campaign? (permanent)")) return;
   await fetch("/api/rpg/games/" + encodeURIComponent(id), { method: "DELETE" }).catch(() => {});
   rpgCurrent = null;
   const story = $("#rpg-story");
   story.innerHTML = "";
   const w = document.createElement("div");
   w.className = "rpg-welcome";
-  w.innerHTML = `<div class="welcome-icon">🐉</div><h3>Mythos Engine ready</h3><p>Nayi campaign banayein ya purani load karein.</p>`;
+  w.innerHTML = `<div class="welcome-icon">🐉</div><h3>Mythos Engine ready</h3><p>Create a new campaign or load a saved one.</p>`;
   story.appendChild(w);
   $("#rpg-state-box").innerHTML = `<p class="muted">no active campaign</p>`;
   rpgRefreshGames();
@@ -1558,7 +1558,7 @@ async function rpgLoadLore() {
   try {
     const rows = await fetchJSON("/api/rpg/lore?limit=50");
     if (!rows.length) {
-      list.innerHTML = `<p class="muted">lorebook khali hai</p>`;
+      list.innerHTML = `<p class="muted">lorebook is empty</p>`;
       return;
     }
     list.innerHTML = "";
