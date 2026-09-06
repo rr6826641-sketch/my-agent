@@ -131,7 +131,6 @@ MODEL_CATALOG = [
      "desc": "Free on Experiential Cloud - fast, tools + response format"},
 ]
 
-MODEL_LABELS
 MODEL_LABELS = {m["id"]: m["label"] for m in MODEL_CATALOG}
 
 # keyword groups used by the auto-router (case-insensitive substring match)
