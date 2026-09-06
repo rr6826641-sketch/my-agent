@@ -111,8 +111,27 @@ MODEL_CATALOG = [
     {"id": DEFAULT_FAST_MODEL,
      "label": "Nemotron 120B (Fast Default)", "tag": "fast",
      "desc": "Fast default model for everyday chat"},
+    # Free tier on the Experiential gateway (api.experientiallabs.ai/v1).
+    # Bare ids resolve only when Settings base_url points at that gateway
+    # (switch provider + paste the Experiential virtual key there).
+    {"id": "gpt-6-astra",
+     "label": "GPT-6 Astra (Free - Experiential)", "tag": "free", "uncensored": True,
+     "desc": "Free flagship on Experiential Cloud - reasoning + tools + structured output"},
+    {"id": "claude-fable-5.1",
+     "label": "Claude Fable 5.1 (Free - Experiential)", "tag": "free", "uncensored": True,
+     "desc": "Free on Experiential Cloud - uncensored-line storytelling + security RP"},
+    {"id": "deepseek-v4-flash",
+     "label": "DeepSeek V4 Flash (Free - Experiential)", "tag": "free", "uncensored": True,
+     "desc": "Free fast reasoning on Experiential Cloud - 1M context, tools"},
+    {"id": "qwen3.8-27b",
+     "label": "Qwen3.8 27B (Free - Experiential)", "tag": "free", "uncensored": True,
+     "desc": "Free 1M-context model on Experiential Cloud - tools + reasoning"},
+    {"id": "gpt-5.6-luna",
+     "label": "GPT-5.6 Luna (Free - Experiential)", "tag": "free", "uncensored": True,
+     "desc": "Free on Experiential Cloud - fast, tools + response format"},
 ]
 
+MODEL_LABELS
 MODEL_LABELS = {m["id"]: m["label"] for m in MODEL_CATALOG}
 
 # keyword groups used by the auto-router (case-insensitive substring match)
