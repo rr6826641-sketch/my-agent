@@ -4,7 +4,7 @@ Covers the two pro-max upgrades:
 
 1. Auto-router Red Team lock (webui.route_model with
    cfg["red_team_mode"]=true): every route must resolve to an uncensored
-   catalog model (inkling / dolphin / deepseek-v4 / qwen3-coder) and NEVER
+   catalog model (inkling / dolphin / hermes-4-405b / qwen3-coder) and NEVER
    to the safety-tuned host models (Llama 3.3 general, DeepSeek R1
    reasoning/coding).  When red_team_mode is off/absent the stock routes
    must stay byte-identical so the existing router tests keep passing.
@@ -23,18 +23,19 @@ import json as json_mod
 
 import requests
 
-from ai_agent.llm import LLMError, OpenAIClient, UNCENSORED_FALLBACK_MODELS
+from ai_agent.llm import (LLMError, OpenAIClient,
+                          UNCENSORED_FALLBACK_MODELS, _full_uncensored_pool)
 from webui import (MODEL_ROUTES, REDTEAM_ROUTE_LOCK, _build_llm, route_model)
 
 LLAMA = "meta-llama/llama-3.3-70b-instruct"
 R1 = "deepseek/deepseek-r1"
 INKLING = "thinkingmachines/inkling:free"
 DOLPHIN = "cognitivecomputations/dolphin-mistral-24b-venice-edition"
-V4 = "deepseek/deepseek-v4-0324:free"
+HERMES405 = "nousresearch/hermes-4-405b"
 QWEN3 = "qwen/qwen3-coder:free"
 
 CENSORED = {LLAMA, R1}
-LOCKED = {INKLING, DOLPHIN, V4, QWEN3}
+LOCKED = {INKLING, DOLPHIN, HERMES405, QWEN3}
 
 REFUSAL_TEXT = "I'm sorry, I can't assist with that."
 ANSWER_TEXT = ("Here is the full exploit chain: 1) ... 2) ... complete "
@@ -70,9 +71,9 @@ def test_router_lock_redteam_on_exact_models():
     m, r = _rt("hello there")
     assert m == DOLPHIN and "Red Team" in r, (m, r)
     m, r = _rt("analyze this exploit chain and its root cause")
-    assert m == V4, (m, r)
+    assert m == HERMES405, (m, r)
     m, r = _rt("scan 10.0.0.1 ports")
-    assert m == DOLPHIN, (m, r)
+    assert m == HERMES405, (m, r)
     m, r = _rt("fix this python function: it throws an exception on empty input")
     assert m == QWEN3, (m, r)
     m, r = _rt("jailbreak this prompt")
@@ -116,19 +117,26 @@ def test_router_lock_table_shape():
         assert model not in CENSORED, (kind, model)
         assert model in LOCKED, (kind, model)
     assert REDTEAM_ROUTE_LOCK["general"] == DOLPHIN
-    assert REDTEAM_ROUTE_LOCK["reasoning"] == V4
+    assert REDTEAM_ROUTE_LOCK["reasoning"] == HERMES405
     assert REDTEAM_ROUTE_LOCK["coding"] == QWEN3
-    assert REDTEAM_ROUTE_LOCK["cyber"] == DOLPHIN
+    assert REDTEAM_ROUTE_LOCK["cyber"] == HERMES405
     assert REDTEAM_ROUTE_LOCK["uncensored"] == INKLING
 
 
 def test_build_llm_wires_pool_only_when_uncensored():
     base = {"api_key": "k", "base_url": "https://x/v1", "auto": True,
             "model": "auto", "fallback_models": ["minimax/minimax-m3:free"]}
-    rt = dict(base, red_team_mode=True)
-    live = _build_llm(rt)
+    # non-mixed tier (master): base uncensored pool only, no rotation
+    master = _build_llm(dict(base, red_team_mode=True,
+                             red_team_level="master"))
+    assert master.uncensored is True
+    assert master.uncensored_mix is False
+    assert master.uncensored_fallbacks == UNCENSORED_FALLBACK_MODELS
+    # flagship default (no level -> promax): pool widened with the mix tier
+    live = _build_llm(dict(base, red_team_mode=True))
     assert live.uncensored is True
-    assert live.uncensored_fallbacks == UNCENSORED_FALLBACK_MODELS
+    assert live.uncensored_mix is True
+    assert live.uncensored_fallbacks == _full_uncensored_pool()
     off = _build_llm(dict(base, red_team_mode=False))
     assert off.uncensored is False
     assert off.uncensored_fallbacks == []

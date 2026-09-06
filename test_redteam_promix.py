@@ -10,7 +10,7 @@ PRO MIX = PRO MAX (uncensored route lock + uncensored failover pool) plus:
   * composite "promix" persona - one directive that stacks APEX execution,
     BLACKICE raw output, DAN-R clearance and UNFILTERED core;
   * config level flag - red_team_level in {master, promax, promix}, with
-    /api/redteam accepting an explicit level (default = promix on enable).
+    /api/redteam accepting an explicit level (default = promax on enable).
 
 Run: py -m pytest test_redteam_promix.py
 """
@@ -133,30 +133,30 @@ def mock_app():
     webui._reload_state(mock_override=True)
 
 
-def test_redteam_enable_defaults_to_promix(mock_app):
+def test_redteam_enable_defaults_to_promax(mock_app):
     r = mock_app.post("/api/redteam", json={"enabled": True})
     assert r.status_code == 200
     data = r.get_json()
     assert data["ok"] is True
     assert data["red_team_mode"] is True
-    assert data["red_team_level"] == "promix"
-    assert data["persona"] == "promix"
+    assert data["red_team_level"] == "promax"
+    assert data["persona"] == "promax"
     with open(webui.CONFIG_PATH, "r", encoding="utf-8") as f:
         cfg = json.load(f)
-    assert cfg["red_team_level"] == "promix"
+    assert cfg["red_team_level"] == "promax"
 
 
-def test_redteam_explicit_promax_keeps_unfiltered(mock_app):
+def test_redteam_explicit_promax_sets_promax_persona(mock_app):
     r = mock_app.post("/api/redteam",
                       json={"enabled": True, "level": "promax"})
     assert r.status_code == 200
     data = r.get_json()
     assert data["red_team_level"] == "promax"
-    assert data["persona"] == "unfiltered"
+    assert data["persona"] == "promax"
     with open(webui.CONFIG_PATH, "r", encoding="utf-8") as f:
         cfg = json.load(f)
     assert cfg["red_team_level"] == "promax"
-    assert cfg["persona"] == "unfiltered"
+    assert cfg["persona"] == "promax"
 
 
 def test_redteam_explicit_promix_level(mock_app):
@@ -193,14 +193,15 @@ def test_build_llm_mix_only_at_promix(monkeypatch):
     assert client.persona_block
 
 
-def test_build_llm_promax_no_mix(monkeypatch):
+def test_build_llm_promax_gets_mix(monkeypatch):
     cfg = {"red_team_mode": True, "red_team_level": "promax",
-           "mock": True, "persona": "unfiltered"}
+           "mock": True, "persona": "promax"}
     monkeypatch.setattr(webui.personas, "CUSTOM_FILE",
                         os.path.join(webui.PROJECT_DIR, "personas_custom.txt"))
     client = webui._build_llm(cfg)
     assert client.uncensored is True
-    assert client.uncensored_mix is False
+    assert client.uncensored_mix is True
+    assert client.uncensored_fallbacks == _full_uncensored_pool()
 
 
 def test_build_llm_level_defaults_to_promax(monkeypatch):
@@ -208,8 +209,8 @@ def test_build_llm_level_defaults_to_promax(monkeypatch):
     monkeypatch.setattr(webui.personas, "CUSTOM_FILE",
                         os.path.join(webui.PROJECT_DIR, "personas_custom.txt"))
     client = webui._build_llm(cfg)
-    assert client.uncensored_mix is False, \
-        "missing red_team_level must behave like promax (backward compat)"
+    assert client.uncensored_mix is True, \
+        "missing red_team_level must behave like promax (flagship mixed tier)"
 
 
 def test_status_exposes_red_team_level(mock_app):

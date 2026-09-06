@@ -254,7 +254,7 @@ def test_mock_uncensored_hooks():
 
 
 def test_system_prompt_tail_block_gating():
-    assert "RED TEAM" in UNCENSORED_TAIL_BLOCK
+    assert "UNCENSORED" in UNCENSORED_TAIL_BLOCK  # FULL UNCENSORED header
     assert UNCENSORED_TAIL_BLOCK not in Agent(
         MockClient(), max_iterations=5)._system_prompt()
     assert UNCENSORED_TAIL_BLOCK in Agent(
