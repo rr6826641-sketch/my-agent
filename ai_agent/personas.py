@@ -13,7 +13,7 @@ without changing tools or models.
 
 import os
 
-DEFAULT_PERSONA = "hackerai"
+DEFAULT_PERSONA = "promax"  # strongest uncensored composite by default
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CUSTOM_FILE = os.path.join(PROJECT_DIR, "personas_custom.txt")

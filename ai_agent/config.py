@@ -28,7 +28,7 @@ DEFAULTS = {
     "model": "gpt-4o-mini",
     "mock": False,
     "auto": False,
-    "red_team_mode": False,
+    "red_team_mode": True,  # uncensored by default (filter removed)
     "once": "",
     "memory_file": os.path.join(PROJECT_DIR, "memory.json"),
     "max_iterations": 60,
