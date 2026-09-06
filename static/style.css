@@ -2051,3 +2051,137 @@ body{
 
 /* ---- global selection + link identity ---- */
 ::selection{background:rgba(255,39,64,.55); color:#fff}
+
+/* ============================================================
+   PART 6 — COMMAND CENTER HUD (danger targeting console)
+   Radar-sweep avatar, corner reticle frame, armed ribbon,
+   upgraded quick-action tiles + tactical status bar.
+   ============================================================ */
+
+/* reticle frame + armed ribbon + status tag */
+.cc-dash{position:relative}
+.cc-dash::before{
+  content:"◉ SYSTEMS ARMED — RED TEAM PROMAX";
+  position:absolute; top:12px; left:50%; transform:translateX(-50%);
+  font:700 10px var(--mono); letter-spacing:3.2px; white-space:nowrap;
+  color:#ffb9c4; text-shadow:0 0 12px rgba(255,39,64,.8);
+  opacity:.92; pointer-events:none;
+  animation:armedFlicker 3.6s ease-in-out infinite;
+}
+@keyframes armedFlicker{
+  0%,100%{opacity:.92}
+  92%{opacity:.92}
+  94%{opacity:.35}
+  96%{opacity:.92}
+  98%{opacity:.5}
+}
+.cc-dash::after{
+  content:""; position:absolute; inset:8px; pointer-events:none;
+  background:
+    linear-gradient(#ff2740,#ff2740) left top / 24px 2px no-repeat,
+    linear-gradient(#ff2740,#ff2740) left top / 2px 24px no-repeat,
+    linear-gradient(#ff2740,#ff2740) right top / 24px 2px no-repeat,
+    linear-gradient(#ff2740,#ff2740) right top / 2px 24px no-repeat,
+    linear-gradient(#ff2740,#ff2740) left bottom / 24px 2px no-repeat,
+    linear-gradient(#ff2740,#ff2740) left bottom / 2px 24px no-repeat,
+    linear-gradient(#ff2740,#ff2740) right bottom / 24px 2px no-repeat,
+    linear-gradient(#ff2740,#ff2740) right bottom / 2px 24px no-repeat;
+  background-position:0 0,0 0,100% 0,100% 0,0 100%,0 100%,100% 100%,100% 100%;
+  opacity:.55; box-shadow:0 0 0 1px rgba(255,39,64,.05) inset;
+}
+@media (max-width:720px){.cc-dash::before{top:6px; letter-spacing:2px; font-size:8.5px}}
+
+/* radar sweep over the avatar core */
+.cc-avatar{position:relative}
+.cc-avatar::before{
+  content:""; position:absolute; inset:-14px; border-radius:50%;
+  background:conic-gradient(from 0deg, rgba(255,39,64,.5), transparent 28%);
+  -webkit-mask:radial-gradient(farthest-side, transparent 71%, #000 72%, #000 78%, transparent 79%);
+          mask:radial-gradient(farthest-side, transparent 71%, #000 72%, #000 78%, transparent 79%);
+  animation:radar 3s linear infinite; pointer-events:none;
+  filter:drop-shadow(0 0 6px rgba(255,39,64,.9));
+}
+@keyframes radar{to{transform:rotate(360deg)}}
+.cc-avatar::after{
+  content:""; position:absolute; inset:-20px; border-radius:50%;
+  border:1px dashed rgba(255,64,88,.30);
+  animation:radar 12s linear infinite reverse; pointer-events:none;
+}
+
+/* hero copy tuning */
+.cc-title{letter-spacing:.6px}
+.cc-sub{color:#a89aa0; max-width:560px}
+.cc-hero .cc-title::after{
+  content:"▊"; margin-left:6px; color:#ff2740; font-size:24px; line-height:1;
+  animation:caretBlink 1.1s steps(1) infinite; text-shadow:0 0 14px rgba(255,39,64,.9);
+}
+@keyframes caretBlink{0%,100%{opacity:1}50%{opacity:0}}
+
+/* CTA: armed launch switch */
+.cc-cta{
+  position:relative; overflow:hidden;
+  background:linear-gradient(135deg,rgba(255,39,64,.34),rgba(90,0,16,.42));
+  border:1px solid rgba(255,64,88,.65);
+  box-shadow:0 12px 34px -10px rgba(255,39,64,.7), 0 1px 0 rgba(255,255,255,.14) inset,
+             0 0 30px -8px rgba(255,39,64,.5);
+  text-transform:uppercase; letter-spacing:1.4px; font-size:13px;
+  animation:ctaGlow 2.6s ease-in-out infinite;
+}
+@keyframes ctaGlow{
+  0%,100%{box-shadow:0 12px 34px -10px rgba(255,39,64,.6), 0 0 22px -8px rgba(255,39,64,.4), 0 1px 0 rgba(255,255,255,.14) inset}
+  50%{box-shadow:0 12px 40px -8px rgba(255,39,64,.95), 0 0 44px -6px rgba(255,39,64,.85), 0 1px 0 rgba(255,255,255,.16) inset}
+}
+.cc-cta:hover{animation-play-state:paused; transform:translateY(-2px); filter:brightness(1.15)}
+
+/* quick action tiles: weapons-console cards */
+.qc{
+  position:relative; overflow:hidden;
+  border:1px solid rgba(255,64,88,.16);
+  background:linear-gradient(165deg,rgba(30,5,9,.94),rgba(9,1,3,.98));
+  box-shadow:0 14px 30px -16px rgba(0,0,0,.95), 0 0 0 1px rgba(255,39,64,.05) inset;
+  padding:15px 16px 14px 20px;
+}
+.qc::before{
+  content:""; position:absolute; left:0; top:14%; bottom:14%; width:3px; border-radius:0 4px 4px 0;
+  background:linear-gradient(180deg,#ff5f6d,#ff2740 55%,#9c001a);
+  opacity:.4; transform:scaleY(.4); transform-origin:top;
+  transition:all .22s ease;
+}
+.qc::after{
+  content:""; position:absolute; right:-30px; top:-30px; width:64px; height:64px;
+  background:radial-gradient(circle,rgba(255,39,64,.28),transparent 65%);
+  opacity:0; transition:opacity .25s ease;
+}
+.qc:hover{border-color:rgba(255,64,88,.65); transform:translateY(-3px);
+  box-shadow:0 18px 38px -14px rgba(0,0,0,.95), 0 0 34px -10px rgba(255,39,64,.75),
+             0 0 0 1px rgba(255,39,64,.22) inset}
+.qc:hover::before{opacity:1; transform:scaleY(1)}
+.qc:hover::after{opacity:1}
+.qc-ico{
+  border-color:rgba(255,64,88,.55);
+  box-shadow:0 0 18px -4px rgba(255,39,64,.5), 0 1px 0 rgba(255,255,255,.08) inset;
+}
+.qc:hover .qc-ico{box-shadow:0 0 26px -2px rgba(255,39,64,.85), 0 1px 0 rgba(255,255,255,.1) inset;
+  border-color:#ff4d63}
+.qc-tx b{font-family:var(--mono); font-size:12.5px; letter-spacing:1.2px; text-transform:uppercase;
+  color:#ffe4e8}
+.qc-tx small{color:#a09196; font-size:10.5px}
+.qc:hover .qc-tx b{color:#fff; text-shadow:0 0 12px rgba(255,39,64,.6)}
+.qc-ar{color:#a09196}
+.qc:hover .qc-ar{color:#ff4d63; transform:translateX(3px); text-shadow:0 0 10px rgba(255,39,64,.8)}
+
+/* tactical status bar: crimson identity, mono telemetry */
+.cc-statusbar{
+  border:1px solid rgba(255,64,88,.22);
+  background:linear-gradient(180deg,rgba(26,4,8,.94),rgba(8,1,3,.98));
+  box-shadow:0 -8px 26px -18px rgba(0,0,0,.9), 0 0 0 1px rgba(255,39,64,.05) inset,
+             0 1px 0 rgba(255,64,88,.08) inset;
+}
+.st{color:#c98e9b}
+.st b{color:#ffb9c4}
+.st+.st{border-left:1px solid rgba(255,64,88,.22); padding-left:22px}
+.st-ico{color:#ff2740; filter:drop-shadow(0 0 6px rgba(255,39,64,.9))}
+.st b, .st-ico{animation:ctaGlow 3s ease-in-out infinite}
+.st-dot,.st-dot.green,.st-ok .st-dot{background:#ff2740; box-shadow:0 0 10px 1px rgba(255,39,64,1)}
+.st-on,.st-ok{color:#ffb9c4}
+.st-on .st-dot{animation:rtPulse 1.6s ease-in-out infinite}
