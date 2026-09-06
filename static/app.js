@@ -15,6 +15,134 @@ let activeController = null; // AbortController of the in-flight /api/chat strea
 let activeRunId = null;      // run_id echoed by the server in the X-Run-Id header
 let stopRequested = false;   // true while a user-initiated Stop is unwinding
 
+/* ============================================================
+   Interaction Bar Controller  (Phase 2)
+   Single source of truth for the three composer dropdowns
+   (Access / Scope / Mode) plus the main text input.
+
+   - State (access/scope/mode + typed draft) is hydrated from
+     localStorage, so a page reload keeps the operator's choices.
+   - Every selection change persists immediately, flashes the
+     changed dropdown tile and rewrites the composer placeholder
+     to match the active Mode (Auto / Step-By-Step / Research).
+   - sendMessage() reads the current config through .get()
+     instead of poking the DOM, so Access + Scope + Mode (Auto by
+     default) always reach /api/chat in one consistent payload.
+   ============================================================ */
+const InteractionBarController = (() => {
+  const LS_KEY = "hackerai.interactionbar.v1";
+  const DEFAULTS = { access: "full", scope: "local", mode: "auto" };
+  const GROUPS = ["access", "scope", "mode"];
+  const MODE_HINTS = {
+    auto:     "Awaiting input — type a command or request…",
+    step:     "Step-By-Step — the agent will pause and ask before each tool call",
+    research: "Research-Only — the agent searches and reads, no commands run",
+  };
+  const state = { ...DEFAULTS };
+
+  const el = (id) => document.getElementById(id);
+
+  // only accept values the current <select> actually offers
+  function validValue(group, value) {
+    const select = el("ibar-" + group);
+    return select && value && Array.from(select.options).some((o) => o.value === value);
+  }
+
+  function save() {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch { /* storage blocked */ }
+  }
+
+  function load() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(LS_KEY) || "null");
+      if (raw && typeof raw === "object") {
+        GROUPS.forEach((g) => { if (validValue(g, raw[g])) state[g] = raw[g]; });
+        if (typeof raw.draft === "string") state.draft = raw.draft;
+      }
+    } catch { /* corrupt / blocked storage -> keep defaults */ }
+  }
+
+  // push state into the DOM: select values, bar dataset, placeholder
+  function reflect() {
+    const bar = el("interaction-bar");
+    if (bar) {
+      bar.dataset.access = state.access;
+      bar.dataset.scope = state.scope;
+      bar.dataset.mode = state.mode;
+    }
+    GROUPS.forEach((g) => {
+      const select = el("ibar-" + g);
+      if (select && select.value !== state[g]) select.value = state[g];
+    });
+    const input = el("input");
+    if (input) {
+      input.placeholder = MODE_HINTS[state.mode] || MODE_HINTS.auto;
+      if (typeof state.draft === "string" && input.value !== state.draft) {
+        input.value = state.draft;
+        input.dispatchEvent(new Event("input", { bubbles: true })); // re-autosize
+      }
+    }
+  }
+
+  // short red pulse on the tile that just changed
+  function flash(group) {
+    const select = el("ibar-" + group);
+    const tile = select && select.closest(".ibar-group");
+    if (!tile) return;
+    tile.classList.remove("ibar-flash");
+    void tile.offsetWidth; // restart the animation
+    tile.classList.add("ibar-flash");
+    setTimeout(() => tile.classList.remove("ibar-flash"), 750);
+  }
+
+  function bind() {
+    GROUPS.forEach((g) => {
+      const select = el("ibar-" + g);
+      if (!select) return;
+      select.addEventListener("change", () => {
+        if (validValue(g, select.value)) state[g] = select.value;
+        save();
+        reflect();
+        flash(g);
+      });
+    });
+    const input = el("input");
+    if (input) {
+      input.addEventListener("input", () => {
+        state.draft = input.value;
+        save();
+      });
+    }
+  }
+
+  load();
+  reflect();
+  bind();
+
+  return {
+    // config the backend should run with ({access,scope,mode})
+    get() { return { access: state.access, scope: state.scope, mode: state.mode }; },
+    // programmatic override (validated per group); returns new config
+    set(partial) {
+      Object.keys(partial || {}).forEach((g) => {
+        if (GROUPS.includes(g) && validValue(g, partial[g])) state[g] = partial[g];
+      });
+      save();
+      reflect();
+      return this.get();
+    },
+    // called by sendMessage() once a message is consumed: the stored
+    // textarea draft is dropped so a reload never re-sends old input
+    messageSent() {
+      if (state.draft) { state.draft = ""; save(); }
+      const input = el("input");
+      if (input) input.placeholder = MODE_HINTS[state.mode] || MODE_HINTS.auto;
+    },
+    // introspection hook for tests / console debugging
+    _state() { return { ...state }; },
+  };
+})();
+
 /* ---------------- utf-8 fetch helpers ----------------
    Decode every API response explicitly as UTF-8 (TextDecoder) instead of
    trusting the Content-Type charset. This stops '•' '—' '→' emoji/markdown
@@ -631,6 +759,7 @@ function sendMessage(text) {
   const message = text.trim();
   inputBox.value = "";
   autosize();
+  InteractionBarController.messageSent();
   addUserMsg(message);
   let typing = addTyping();
   busy = true;
@@ -839,11 +968,9 @@ function sendMessage(text) {
   (async () => {
     let res;
     try {
-      const ctl = {
-        access: ($("#ibar-access") || {}).value || "full",
-        scope: ($("#ibar-scope") || {}).value || "local",
-        mode: ($("#ibar-mode") || {}).value || "auto"
-      };
+      // single source of truth: Access / Scope / Mode state is owned by
+      // the InteractionBarController (Mode defaults to Auto)
+      const ctl = InteractionBarController.get();
       res = await fetch("/api/chat?message=" + encodeURIComponent(message) +
                         "&access=" + encodeURIComponent(ctl.access) +
                         "&scope=" + encodeURIComponent(ctl.scope) +
