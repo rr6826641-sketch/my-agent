@@ -658,6 +658,11 @@ def api_chat():
     # mistaken for a dead client and falsely abort the run
     q = queue.Queue()
     agent = _state["agent"]
+    # Backend enforcement (real access control): push the interaction-bar
+    # selection onto the agent; the tool gate enforces it per tool call.
+    agent.set_run_control(access=request.args.get("access", "full"),
+                          scope=request.args.get("scope", "local"),
+                          mode=request.args.get("mode", "auto"))
     cfg = _current_cfg()
     routed_model, route_reason = route_model(message, cfg)
 

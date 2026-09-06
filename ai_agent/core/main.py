@@ -208,6 +208,7 @@ def _has_path_dependency(cur, prev):
         return False
     cur_paths = _find_path_tokens(cur["args"])
     return bool(prev_paths & cur_paths)
+from ..tools.access_control import gate_tool, normalize_mode
 from ..tools.verify import (
     REJECTED as V_REJECTED,
     UNVERIFIED as V_UNVERIFIED,
@@ -2980,8 +2981,9 @@ class Agent:
                         yield {"type": "mission_checkpoint", "note": note}
                     raise RunCancelled("run cancelled by user")
                 # Confirm every call up front (sequential UI prompts).
-                confirmed = [self._check_tool_confirm(call)
-                             for call in batch]
+                policies = [self._tool_allowed(call) for call in batch]
+                confirmed = [self._check_tool_confirm(call) and ok
+                             for (ok, _r), call in zip(policies, batch)]
                 names = []
                 for call in batch:
                     name, args = self._call_name_args(call)
@@ -2993,6 +2995,9 @@ class Agent:
                 # _PARALLEL_MAX_WORKERS); single calls bypass the pool.
                 if len(batch) > 1:
                     def _run_one(idx):
+                        ok, reason = policies[idx]
+                        if not ok:
+                            return reason
                         if not confirmed[idx]:
                             return "[cancelled by user]"
                         return _resolve_patched("execute_tool", execute_tool)(
@@ -3003,11 +3008,14 @@ class Agent:
                                             _PARALLEL_MAX_WORKERS)) as pool:
                         results = list(pool.map(_run_one, range(len(batch))))
                 else:
-                    if confirmed[0]:
+                    ok, reason = policies[0]
+                    if ok and confirmed[0]:
                         results = [_resolve_patched("execute_tool",
                                                     execute_tool)(
                             self._tools_by_name, batch[0],
                             cancel_event=stop_event)]
+                    elif not ok:
+                        results = [reason]
                     else:
                         results = ["[cancelled by user]"]
                 # Collect (name, args, call, result) per batch; execution
@@ -3107,6 +3115,37 @@ class Agent:
         except Exception:
             return True
         return ans in ("y", "yes", "run")
+
+    def set_run_control(self, access=None, scope=None, mode=None):
+        """Per-run controls (called by webui before a run).
+        access: full | labonly | readonly (enforced backend-side)
+        scope:  local | docker | remote   (informational for now)
+        mode:   auto | step | research    (step HITL is Phase 2)
+        """
+        self.run_access = access or "full"
+        self.run_scope = scope or "local"
+        self.run_mode = mode or "auto"
+        return self
+
+    def _access_code(self):
+        """Effective access mode for this run."""
+        return normalize_mode(getattr(self, "run_access", None))
+
+    def _tool_allowed(self, call):
+        """Access-Control gate for one tool call.
+        Returns (allowed, reason). When not allowed the tool is NEVER
+        executed and `reason` is returned to the model as the result.
+        """
+        try:
+            name = call["function"]["name"]
+            raw = call["function"].get("arguments") or "{}"
+            try:
+                args = (json.loads(raw) if isinstance(raw, str) else dict(raw or {}))
+            except Exception:
+                args = {}
+        except Exception:
+            return True, None
+        return gate_tool(self._access_code(), name, args)
 
     # ------------------------------------------------------------ memory mgmt
 
