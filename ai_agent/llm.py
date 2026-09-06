@@ -108,8 +108,10 @@ UNCENSORED_FALLBACK_MODELS = [
 # pool with the mythos-lineage, dolphin heavyweights, Hermes 4 (neutral
 # alignment) and the de-aligned Euryale line, so a PRO MIX session rotates
 # across a true mixture of uncensored models instead of reusing the same
-# three. All ids resolve against api_models.json (the live OpenRouter
-# catalog snapshot) - hermes-4-405b is the flagship reasoning tier.
+# three. All ids resolve against api_models.json, a local cache refreshed
+# from the live OpenRouter /models endpoint (gitignored; refresh by
+# re-downloading https://openrouter.ai/api/v1/models). hermes-4-405b is
+# the flagship reasoning tier.
 MIXED_UNCENSORED_MODELS = [
     "cognitivecomputations/dolphin-mistral-24b-venice-edition",
     "gryphe/mythomax-l2-13b",
