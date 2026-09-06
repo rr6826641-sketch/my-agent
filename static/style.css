@@ -2391,3 +2391,14 @@ body{
   .ibar-selects{grid-template-columns:1fr}
   .ibar-group:nth-child(3){grid-column:auto}
 }
+
+/* Step-By-Step HITL approval card */
+.step-card{border-left:3px solid #f0a020!important}
+.step-card .step-ico{margin-right:4px}
+.step-card .step-status{font-size:12px;color:#f0a020;margin:4px 0}
+.step-btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.step-btn{border:1px solid #555;background:#1c1f26;color:#eee;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:12px}
+.step-btn.ok:hover{background:#1d5c2e}
+.step-btn.no:hover{background:#7a2222}
+.step-btn.all:hover{background:#274a6b}
+.step-btn:disabled{opacity:.45;cursor:default}

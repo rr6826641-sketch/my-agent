@@ -812,6 +812,22 @@ def api_chat():
                              "X-Run-Id": run_id})
 
 
+@app.route("/api/chat/step", methods=["POST"])
+def api_chat_step():
+    """Step-By-Step HITL: operator answers a pending tool approval.
+    POST {"key": <approval key>, "decision": approve|reject|allow_all|reject_all}
+    """
+    payload = request.get_json(silent=True) or {}
+    key = payload.get("key") or request.args.get("key") or ""
+    decision = (payload.get("decision") or request.args.get("decision") or "").lower()
+    agent = _state.get("agent")
+    if (not agent or not key
+            or decision not in ("approve", "reject", "allow_all", "reject_all")):
+        return jsonify({"ok": False, "error": "bad request"}), 400
+    applied = agent.submit_step_decision(key, decision)
+    return jsonify({"ok": applied})
+
+
 @app.route("/api/chat/cancel", methods=["POST"])
 def api_chat_cancel():
     """Cancel active run(s). With a run_id it stops that specific run;

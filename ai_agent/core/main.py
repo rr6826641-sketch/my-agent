@@ -2088,6 +2088,11 @@ class Agent:
         self._kb_target = None
         self._auto_note_seen = set()
         self.messages = []
+        # Step-By-Step HITL approval registry (Phase 2)
+        self._step_lock = threading.Lock()
+        self._step_approvals = {}
+        self.run_step_allow_all = False
+        self.run_step_reject_all = False
         self._workspace_index = WorkspaceIndex()
         # Input Intent Reformulator & Scope Mapper Engine (optional): when
         # set, every raw user prompt is reframed into a structured
@@ -2981,7 +2986,46 @@ class Agent:
                         yield {"type": "mission_checkpoint", "note": note}
                     raise RunCancelled("run cancelled by user")
                 # Confirm every call up front (sequential UI prompts).
-                policies = [self._tool_allowed(call) for call in batch]
+                policies = []
+                for _call in batch:
+                    ok, reason = self._tool_allowed(_call)
+                    if ok and self.run_step_reject_all:
+                        ok, reason = False, (
+                            "[STEP-MODE] rejected by operator "
+                            "(reject-all for this run)")
+                    elif ok and self._step_enabled():
+                        # Human-in-the-loop: pause the stream and ask.
+                        try:
+                            _nm = _call["function"]["name"]
+                            _raw = _call["function"].get("arguments") or "{}"
+                            try:
+                                _ad = (json.loads(_raw) if isinstance(_raw, str)
+                                       else dict(_raw or {}))
+                            except Exception:
+                                _ad = {}
+                        except Exception:
+                            _nm, _ad = "tool", {}
+                        _key = self._new_step_key()
+                        self._step_register(_key)
+                        yield {"type": "step_approval", "key": _key,
+                               "tool": _nm, "arguments": _ad,
+                               "parallel": len(batch) > 1}
+                        _dec = self._step_wait(_key, stop_event)
+                        if _dec in ("approve", "allow_all"):
+                            if _dec == "allow_all":
+                                self.run_step_allow_all = True
+                        elif _dec in ("reject", "reject_all"):
+                            if _dec == "reject_all":
+                                self.run_step_reject_all = True
+                            ok, reason = False, (
+                                "[STEP-MODE] tool rejected by operator in "
+                                "Step-By-Step mode")
+                        else:
+                            # timeout / cancel / unknown -> fail closed
+                            ok, reason = False, (
+                                "[STEP-MODE] no operator decision "
+                                "(timeout/cancel) - tool skipped")
+                    policies.append((ok, reason))
                 confirmed = [self._check_tool_confirm(call) and ok
                              for (ok, _r), call in zip(policies, batch)]
                 names = []
@@ -3125,6 +3169,9 @@ class Agent:
         self.run_access = access or "full"
         self.run_scope = scope or "local"
         self.run_mode = mode or "auto"
+        # per-run HITL flags reset
+        self.run_step_allow_all = False
+        self.run_step_reject_all = False
         return self
 
     def _access_code(self):
@@ -3146,6 +3193,63 @@ class Agent:
         except Exception:
             return True, None
         return gate_tool(self._access_code(), name, args)
+
+    def _step_enabled(self):
+        """True when this run is in Step-By-Step mode and not allow-all."""
+        return (getattr(self, "run_mode", "auto") == "step"
+                and not self.run_step_allow_all)
+
+    def _new_step_key(self):
+        import uuid as _uuid
+        return _uuid.uuid4().hex
+
+    def _step_register(self, key):
+        with self._step_lock:
+            self._step_approvals[key] = {
+                "decision": None,
+                "event": threading.Event(),
+            }
+
+    def submit_step_decision(self, key, decision):
+        """Operator answer for one pending Step-By-Step approval.
+        decision: approve | reject | allow_all | reject_all
+        allow_all / reject_all are per-run switches and are honoured
+        even when the given key already expired; approve / reject only
+        apply to a still-pending key. Returns True when the decision
+        was accepted (a key existed or the decision was a run switch)."""
+        if decision == "allow_all":
+            self.run_step_allow_all = True
+        elif decision == "reject_all":
+            self.run_step_reject_all = True
+        else:
+            with self._step_lock:
+                rec = self._step_approvals.get(key)
+                if not rec:
+                    return False
+                rec["decision"] = decision
+                rec["event"].set()
+        return True
+
+    def _step_wait(self, key, stop_event=None, timeout=600.0):
+        """Block until the operator answers (or timeout/cancel). Returns
+        the decision string, or None on timeout/cancel (fail closed)."""
+        deadline = time.time() + timeout
+        while True:
+            if stop_event is not None and stop_event.is_set():
+                with self._step_lock:
+                    self._step_approvals.pop(key, None)
+                return None
+            with self._step_lock:
+                rec = self._step_approvals.get(key)
+                if rec and rec["decision"] is not None:
+                    dec = rec["decision"]
+                    self._step_approvals.pop(key, None)
+                    return dec
+            if time.time() >= deadline:
+                with self._step_lock:
+                    self._step_approvals.pop(key, None)
+                return None
+            time.sleep(0.4)
 
     # ------------------------------------------------------------ memory mgmt
 

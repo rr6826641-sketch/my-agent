@@ -377,6 +377,46 @@ function addToolCard(name, args, parallel) {
 }
 
 /* ---------------- structured artifact badges ---------------- */
+function addStepApproval(key, tool, argsText) {
+  const div = document.createElement("div");
+  div.className = "toolcard step-card";
+  const h = document.createElement("div");
+  h.className = "toolname";
+  h.innerHTML = `<span class="step-ico">🛂</span> Step-By-Step Approval · <b>${escapeHtml(tool)}</b>`;
+  const r = document.createElement("div");
+  r.className = "result";
+  r.textContent = typeof argsText === "string" ? argsText : JSON.stringify(argsText || "");
+  const st = document.createElement("div");
+  st.className = "step-status";
+  st.textContent = "waiting for operator…";
+  const b = document.createElement("div");
+  b.className = "step-btns";
+  const mk = (label, decision, cls) => {
+    const btn = document.createElement("button");
+    btn.className = "step-btn " + cls;
+    btn.textContent = label;
+    btn.onclick = () => {
+      b.querySelectorAll("button").forEach(x => x.disabled = true);
+      st.textContent = decision.indexOf("allow") === 0 ? "⏩ run continues (all allowed)"
+                   : decision.indexOf("reject") === 0 ? "⛔ rejected — run continues (all rejected)"
+                   : decision === "approve" ? "✅ approved — running" : "⛔ rejected";
+      fetch("/api/chat/step", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, decision })
+      }).catch(() => { st.textContent = "⚠️ submit failed"; });
+    };
+    return btn;
+  };
+  b.append(mk("✅ Approve", "approve", "ok"),
+           mk("⛔ Reject", "reject", "no"),
+           mk("⏩ Run All", "allow_all", "all"),
+           mk("🚫 Reject All", "reject_all", "no"));
+  div.append(h, r, st, b);
+  chatLog.appendChild(div);
+  scrollDown();
+}
+
 function artifactBadgeHTML(a) {
   const id = (a && (a.id || a.filename)) || "";
   if (!id) return "";
@@ -717,6 +757,10 @@ function sendMessage(text) {
       typing.remove();
       preview = null; // next assistant text gets a fresh bubble
       addToolCard(e.name, typeof e.arguments === "string" ? e.arguments : JSON.stringify(e.arguments || ""), e.parallel);
+    } else if (e.type === "step_approval") {
+      // Step-By-Step mode: stream is paused until the operator answers
+      typing.remove();
+      addStepApproval(e.key, e.tool, e.arguments);
     } else if (e.type === "tool_result") {
       const cards = chatLog.querySelectorAll(".toolcard");
       const card = cards[cards.length - 1];
