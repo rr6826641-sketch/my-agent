@@ -621,6 +621,16 @@ def api_chat():
     message = (request.args.get("message") or "").strip()
     if not message:
         return jsonify({"error": "empty message"}), 400
+    # Unified Interaction Bar controls -> per-run agent directives
+    acc = {"full": "Full Access", "readonly": "Read-Only", "labonly": "Lab-Only"}.get(
+        request.args.get("access", "full"), "Full Access")
+    scope = {"local": "Local", "docker": "Docker", "remote": "Remote"}.get(
+        request.args.get("scope", "local"), "Local")
+    mode = {"auto": "Auto-Pilot", "step": "Step-By-Step Interactive", "research": "Research-Only"}.get(
+        request.args.get("mode", "auto"), "Auto-Pilot")
+    directive = ("[CONTROL] access=%s | execution-scope=%s | agent-mode=%s "
+                 "- follow these constraints for this run.\n" % (acc, scope, mode))
+
 
     # attach to (or create) the current persistent session
     with _chat_lock:
@@ -683,7 +693,7 @@ def api_chat():
             yield {"type": "route", "model": routed_model,
                    "label": MODEL_LABELS.get(routed_model, routed_model),
                    "reason": route_reason}
-        yield from agent.run_stream(message, stop_event=stop_event,
+        yield from agent.run_stream(directive + message, stop_event=stop_event,
                                     model=routed_model)
 
     run_iter = run_gen()

@@ -795,7 +795,15 @@ function sendMessage(text) {
   (async () => {
     let res;
     try {
-      res = await fetch("/api/chat?message=" + encodeURIComponent(message),
+      const ctl = {
+        access: ($("#ibar-access") || {}).value || "full",
+        scope: ($("#ibar-scope") || {}).value || "local",
+        mode: ($("#ibar-mode") || {}).value || "auto"
+      };
+      res = await fetch("/api/chat?message=" + encodeURIComponent(message) +
+                        "&access=" + encodeURIComponent(ctl.access) +
+                        "&scope=" + encodeURIComponent(ctl.scope) +
+                        "&mode=" + encodeURIComponent(ctl.mode),
                         { signal: controller.signal });
       if (!res.ok) throw new Error("HTTP " + res.status);
       if (!res.body) throw new Error("stream unavailable");
