@@ -105,13 +105,17 @@ UNCENSORED_FALLBACK_MODELS = [
 ]
 
 # Red Team Mode (pro-mix): the MIX layer widens the uncensored failover
-# pool with the mythos-lineage and dolphin heavyweights, so a PRO MIX
-# session rotates across a true mixture of uncensored models instead of
-# reusing the same three. Both ids resolve against api_models.json (the
-# live OpenRouter catalog snapshot).
+# pool with the mythos-lineage, dolphin heavyweights, Hermes 4 (neutral
+# alignment) and the de-aligned Euryale line, so a PRO MIX session rotates
+# across a true mixture of uncensored models instead of reusing the same
+# three. All ids resolve against api_models.json (the live OpenRouter
+# catalog snapshot) - hermes-4-405b is the flagship reasoning tier.
 MIXED_UNCENSORED_MODELS = [
     "cognitivecomputations/dolphin-mistral-24b-venice-edition",
     "gryphe/mythomax-l2-13b",
+    "nousresearch/hermes-4-405b",
+    "nousresearch/hermes-4-70b",
+    "sao10k/l3.3-euryale-70b",
 ]
 
 # ---------------------------------------------------------------------------

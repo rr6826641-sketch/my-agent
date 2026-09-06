@@ -192,8 +192,8 @@ MODEL_ROUTES = {
 # otherwise (existing router regression tests keep passing).
 REDTEAM_ROUTE_LOCK = {
     "uncensored": "thinkingmachines/inkling:free",
-    "reasoning": "deepseek/deepseek-v4-0324:free",
-    "cyber": "cognitivecomputations/dolphin-mistral-24b-venice-edition",
+    "reasoning": "nousresearch/hermes-4-405b",
+    "cyber": "nousresearch/hermes-4-405b",
     "coding": "qwen/qwen3-coder:free",
     "general": "cognitivecomputations/dolphin-mistral-24b-venice-edition",
 }
