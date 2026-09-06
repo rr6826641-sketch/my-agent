@@ -101,7 +101,7 @@ HIGH_REASONING_FALLBACKS = [
 UNCENSORED_FALLBACK_MODELS = [
     "thinkingmachines/inkling:free",
     "nousresearch/hermes-3-llama-3.1-70b",
-    "qwen/qwen3-coder:free",
+    "qwen/qwen3-coder",
 ]
 
 # Red Team Mode (pro-mix): the MIX layer widens the uncensored failover

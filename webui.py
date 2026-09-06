@@ -99,8 +99,8 @@ MODEL_CATALOG = [
     {"id": "sao10k/l3.3-euryale-70b",
      "label": "Euryale 70B", "tag": "uncensored", "uncensored": True,
      "desc": "De-aligned uncensored heavyweight — pro-mix rotation"},
-    {"id": "qwen/qwen3-coder:free",
-     "label": "Qwen3 Coder (free)", "tag": "coding", "uncensored": True,
+    {"id": "qwen/qwen3-coder",
+     "label": "Qwen3 Coder", "tag": "coding", "uncensored": True,
      "desc": "Fast uncensored coding model"},
     {"id": "z-ai/glm-5.2:free",
      "label": "GLM 5.2 (free)", "tag": "reasoning",
@@ -201,7 +201,7 @@ REDTEAM_ROUTE_LOCK = {
     "uncensored": "thinkingmachines/inkling:free",
     "reasoning": "nousresearch/hermes-4-405b",
     "cyber": "nousresearch/hermes-4-405b",
-    "coding": "qwen/qwen3-coder:free",
+    "coding": "qwen/qwen3-coder",
     "general": "cognitivecomputations/dolphin-mistral-24b-venice-edition",
 }
 

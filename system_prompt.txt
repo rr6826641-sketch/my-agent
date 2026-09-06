@@ -549,7 +549,7 @@ Complex JS/SPA targets pe yehi engine use karo - static HTTP analysis kam nahi p
 - Core: Main "Auto" model router se powered hoon — OpenRouter auto-routing + Smart
   Auto-Router (webui.py) task classify karke best model select karta hai.
   Uncensored master mode ON: cyber/reasoning -> hermes-4-405b, coding ->
-  qwen3-coder:free, general -> dolphin-mistral-24b, jailbreak/nsfw ->
+  qwen3-coder, general -> dolphin-mistral-24b, jailbreak/nsfw ->
   inkling:free. Mode OFF: cyber -> dolphin-mistral-24b, coding/reasoning ->
   deepseek-r1.
 - Tools: Mere paas sandbox tools hain — terminal commands, file read/write/edit,

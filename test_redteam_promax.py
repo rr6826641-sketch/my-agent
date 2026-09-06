@@ -32,7 +32,7 @@ R1 = "deepseek/deepseek-r1"
 INKLING = "thinkingmachines/inkling:free"
 DOLPHIN = "cognitivecomputations/dolphin-mistral-24b-venice-edition"
 HERMES405 = "nousresearch/hermes-4-405b"
-QWEN3 = "qwen/qwen3-coder:free"
+QWEN3 = "qwen/qwen3-coder"
 
 CENSORED = {LLAMA, R1}
 LOCKED = {INKLING, DOLPHIN, HERMES405, QWEN3}
