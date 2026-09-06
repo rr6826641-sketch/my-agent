@@ -1,8 +1,9 @@
 """Feature: Red Team master switch (/api/redteam) + status persona exposure.
 
-One-click evil profile: enabled=true -> red_team_mode on + PRO MIX level
-('promix' composite persona by default; explicit level=promax/master keeps
-'unfiltered'); enabled=false -> red_team_mode off. The LLM client must be
+One-click evil profile: enabled=true -> red_team_mode on + top tier
+PRO MAX level ('promax' composite persona by default; explicit
+level=promix -> 'promix', level=master -> 'unfiltered'); enabled=false ->
+red_team_mode off. The LLM client must be
 rebuilt so the uncensored tail + persona block actually ride on the active
 client.
 
@@ -51,14 +52,14 @@ def test_master_switch_enable_evil_profile(mock_app):
     data = r.get_json()
     assert data["ok"] is True
     assert data["red_team_mode"] is True
-    assert data["red_team_level"] == "promix"
-    assert data["persona"] == "promix"
+    assert data["red_team_level"] == "promax"
+    assert data["persona"] == "promax"
     # config.json actually persisted the evil profile
     with open(webui.CONFIG_PATH, "r", encoding="utf-8") as f:
         cfg = json.load(f)
     assert cfg["red_team_mode"] is True
-    assert cfg["red_team_level"] == "promix"
-    assert cfg["persona"] == "promix"
+    assert cfg["red_team_level"] == "promax"
+    assert cfg["persona"] == "promax"
     # the rebuilt LLM client carries uncensored + the unfiltered persona block
     llm = webui._state["agent"].llm
     assert llm.uncensored is True
@@ -82,8 +83,8 @@ def test_master_switch_disable(mock_app):
 def test_master_switch_round_trip(mock_app):
     client = mock_app
     on = client.post("/api/redteam", json={"enabled": True}).get_json()
-    assert on["red_team_mode"] is True and on["persona"] == "promix"
-    assert on["red_team_level"] == "promix"
+    assert on["red_team_mode"] is True and on["persona"] == "promax"
+    assert on["red_team_level"] == "promax"
     off = client.post("/api/redteam", json={"enabled": False}).get_json()
     assert off["red_team_mode"] is False
     # the status endpoint agrees with the switch state
