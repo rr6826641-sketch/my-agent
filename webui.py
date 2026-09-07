@@ -626,8 +626,13 @@ def api_chat():
         request.args.get("access", "full"), "Full Access")
     scope = {"local": "Local", "docker": "Docker", "remote": "Remote"}.get(
         request.args.get("scope", "local"), "Local")
+    # PHASE 3 - backend Auto-Pilot interception: mode="auto" is
+    # normalised here and relayed through set_run_control, which
+    # switches the agent into Continuous Execution (GOAP planner +
+    # Self-Evolution engine engaged for the whole run).
+    mode_raw = (request.args.get("mode") or "auto").strip().lower()
     mode = {"auto": "Auto-Pilot", "step": "Step-By-Step Interactive", "research": "Research-Only"}.get(
-        request.args.get("mode", "auto"), "Auto-Pilot")
+        mode_raw, "Auto-Pilot")
     directive = ("[CONTROL] access=%s | execution-scope=%s | agent-mode=%s "
                  "- follow these constraints for this run.\n" % (acc, scope, mode))
 
@@ -662,7 +667,7 @@ def api_chat():
     # selection onto the agent; the tool gate enforces it per tool call.
     agent.set_run_control(access=request.args.get("access", "full"),
                           scope=request.args.get("scope", "local"),
-                          mode=request.args.get("mode", "auto"))
+                          mode=mode_raw)
     cfg = _current_cfg()
     routed_model, route_reason = route_model(message, cfg)
 

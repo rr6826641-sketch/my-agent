@@ -2093,6 +2093,12 @@ class Agent:
         self._step_approvals = {}
         self.run_step_allow_all = False
         self.run_step_reject_all = False
+        # Run-posture defaults (webui overrides per run via
+        # set_run_control). PHASE 3: Auto-Pilot = Continuous Execution,
+        # i.e. mode="auto" keeps the GOAP planner + Self-Evolution
+        # engine engaged for the whole run (no per-tool interruption).
+        self.run_mode = "auto"
+        self.run_continuous = False
         self._workspace_index = WorkspaceIndex()
         # Input Intent Reformulator & Scope Mapper Engine (optional): when
         # set, every raw user prompt is reframed into a structured
@@ -2354,7 +2360,14 @@ class Agent:
         BEFORE any tool executes. Returns the [GOAP PLAN] block (or
         ""), aligned with the tactical engine's objective detection."""
         if (not self.reasoning_engine or self.npc_persona
-                or self.game_master or not self._tactical.active):
+                or self.game_master):
+            return ""
+        # Auto-Pilot Continuous Execution (PHASE 3): mode=auto keeps the
+        # planner engaged even when the tactical classifier stayed idle,
+        # so every objective-shaped prompt is decomposed up front. step /
+        # research runs keep the original tactical-gate behaviour.
+        if not (self._tactical.active
+                or getattr(self, "run_continuous", False)):
             return ""
         text = (user_input or "")[:400]
         m = re.search(
@@ -3165,10 +3178,26 @@ class Agent:
         access: full | labonly | readonly (enforced backend-side)
         scope:  local | docker | remote   (informational for now)
         mode:   auto | step | research    (step HITL is Phase 2)
+
+        PHASE 3 - backend Auto-Pilot interception: an incoming API
+        request with mode="auto" switches this agent into "Continuous
+        Execution". In that posture the Self-Evolution engine stays hot
+        (capability-gap tool synthesis never sleeps) and the GOAP
+        planner is allowed to decompose objective-shaped prompts into a
+        Goal-Action-State tree even when the tactical classifier did
+        not flag the turn, so multi-step tasks run without interruption
+        until the goal is met or max_iterations is exhausted.
         """
+        mode = ((mode or "auto").strip().lower() or "auto")
         self.run_access = access or "full"
         self.run_scope = scope or "local"
-        self.run_mode = mode or "auto"
+        self.run_mode = mode
+        # Auto-Pilot -> Continuous Execution posture.
+        self.run_continuous = (mode == "auto")
+        if self.run_continuous:
+            # keep the Self-Evolution engine engaged for the whole run
+            # so a missing capability is synthesised instead of stalling.
+            self._evolution_enabled = True
         # per-run HITL flags reset
         self.run_step_allow_all = False
         self.run_step_reject_all = False
