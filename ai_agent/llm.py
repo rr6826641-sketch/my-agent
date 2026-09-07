@@ -102,6 +102,9 @@ UNCENSORED_FALLBACK_MODELS = [
     "thinkingmachines/inkling:free",
     "nousresearch/hermes-3-llama-3.1-70b",
     "qwen/qwen3-coder",
+    "sao10k/l3.3-euryale-70b",
+    "cognitivecomputations/dolphin-mistral-24b-venice-edition",
+    "nousresearch/hermes-4-70b",
 ]
 
 # Red Team Mode (pro-mix): the MIX layer widens the uncensored failover
