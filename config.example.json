@@ -4,6 +4,13 @@
   "mock_mode": false,
   "red_team_mode": false,
   "refusal_retries": 3,
+  "fallback_models": [
+    "thinkingmachines/inkling:free",
+    "thinkingmachines/inkling-small:free",
+    "minimax/minimax-m3:free",
+    "liquid/lfm-2.5-2.6b:free",
+    "dots-studio/dots-3-note-preview:free"
+  ],
   "max_iterations": 60,
   "parallel_max_workers": 4
 }
