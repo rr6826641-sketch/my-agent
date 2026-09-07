@@ -32,6 +32,15 @@ let stopRequested = false;   // true while a user-initiated Stop is unwinding
 const InteractionBarController = (() => {
   const LS_KEY = "hackerai.interactionbar.v1";
   const DEFAULTS = { access: "full", scope: "local", mode: "auto" };
+  /* SCOPE DECISION (2026-09-07): global, NOT per-session.
+     Access/Scope/Mode define the AGENT RUN POSTURE, not chat content -
+     they are set_run_control() directives applied to every /api/chat run.
+     Per-session persistence would silently reset Mode on a new chat (e.g.
+     step-approval off mid-assessment) and desync the bar from the run.
+     Sessions server-side are lightweight history records; a single global
+     posture is predictable for a single-operator local tool.
+     If per-session behavior is ever wanted: key LS_KEY per session id
+     (hackerai.interactionbar.v1.<sid>) with DEFAULTS fallback. */
   const GROUPS = ["access", "scope", "mode"];
   const MODE_HINTS = {
     auto:     "Awaiting input — type a command or request…",
