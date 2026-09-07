@@ -112,8 +112,11 @@ MODEL_CATALOG = [
      "label": "Nemotron 120B (Fast Default)", "tag": "fast",
      "desc": "Fast default model for everyday chat"},
     # Free tier on the Experiential gateway (api.experientiallabs.ai/v1).
-    # Bare ids resolve only when Settings base_url points at that gateway
-    # (switch provider + paste the Experiential virtual key there).
+    # Promo models (Astra/Luna/etc) rotate daily via the promotions API; the
+    # bare ids below also include third-party free-tier routes (OpenRouter,
+    # Z.ai, Google, NVIDIA, Cohere, MiniMax, Poolside, Liquid...) served
+    # through that gateway. All resolve only when Settings base_url points at
+    # api.experientiallabs.ai/v1 (switch provider + paste the key there).
     {"id": "gpt-6-astra",
      "label": "GPT-6 Astra (Free - Experiential)", "tag": "free", "uncensored": True,
      "desc": "Free flagship on Experiential Cloud - reasoning + tools + structured output"},
@@ -129,6 +132,45 @@ MODEL_CATALOG = [
     {"id": "gpt-5.6-luna",
      "label": "GPT-5.6 Luna (Free - Experiential)", "tag": "free", "uncensored": True,
      "desc": "Free on Experiential Cloud - fast, tools + response format"},
+    {"id": "gemma-4-26b-a4b-it-free",
+     "label": "Gemma 4 26B A4B IT (Free - Experiential)", "tag": "free",
+     "desc": "Google Gemma 4 26B A4B IT - 262K ctx, text/image/video in (OpenRouter free route)"},
+    {"id": "glm-4.6v-flash",
+     "label": "GLM 4.6V Flash (Free - Experiential)", "tag": "free",
+     "desc": "Z.ai GLM 4.6V Flash - 65K ctx vision model (Z.ai free route)"},
+    {"id": "laguna-s-2.1-free",
+     "label": "Laguna S 2.1 (Free - Experiential)", "tag": "free",
+     "desc": "Poolside Laguna S 2.1 - 262K ctx agentic coding model (free route)"},
+    {"id": "laguna-xs-2.1-free",
+     "label": "Laguna XS 2.1 (Free - Experiential)", "tag": "free",
+     "desc": "Poolside Laguna XS 2.1 - 262K ctx fast agentic coding model (free route)"},
+    {"id": "lfm-2.5-2.6b-free",
+     "label": "Liquid LFM 2.5 2.6B (Free - Experiential)", "tag": "free",
+     "desc": "Liquid LFM 2.5 2.6B - 65K ctx small fast model (free route)"},
+    {"id": "ling-3.0-flash-fin-free",
+     "label": "Ling 3.0 Flash Fin (Free - Experiential)", "tag": "free",
+     "desc": "Ling 3.0 Flash Fin - 262K ctx fast model (free route)"},
+    {"id": "minimax-m2.7-free",
+     "label": "MiniMax M2.7 (Free - Experiential)", "tag": "free",
+     "desc": "MiniMax M2.7 - 196K ctx agentic workflows (OpenRouter free route)"},
+    {"id": "minimax-m3-free",
+     "label": "MiniMax M3 (Free - Experiential)", "tag": "free",
+     "desc": "MiniMax M3 - 1M ctx, text/image/video in (free route)"},
+    {"id": "nemotron-3-nano-omni-30b-a3b-reasoning-free",
+     "label": "Nemotron 3 Nano Omni 30B A3B (Free - Experiential)", "tag": "free",
+     "desc": "NVIDIA Nemotron 3 Nano Omni 30B A3B Reasoning - 256K ctx, omni in (free route)"},
+    {"id": "nemotron-3-ultra-550b-a55b-free",
+     "label": "Nemotron 3 Ultra 550B A55B (Free - Experiential)", "tag": "free",
+     "desc": "NVIDIA Nemotron 3 Ultra 550B A55B - 1M ctx flagship (free route)"},
+    {"id": "nemotron-3.5-content-safety-free",
+     "label": "Nemotron 3.5 Content Safety (Free - Experiential)", "tag": "free",
+     "desc": "NVIDIA Nemotron 3.5 Content Safety guard/classifier - 128K (free route)"},
+    {"id": "north-mini-code-free",
+     "label": "North Mini Code (Free - Experiential)", "tag": "free",
+     "desc": "Cohere North Mini Code - 256K ctx code model (free route)"},
+    {"id": "openrouter-free",
+     "label": "Free Models Router (Free - Experiential)", "tag": "free",
+     "desc": "OpenRouter free-models meta-router - 200K ctx, routes across free tiers"},
 ]
 
 MODEL_LABELS = {m["id"]: m["label"] for m in MODEL_CATALOG}
