@@ -698,8 +698,15 @@ def api_chat():
             yield {"type": "route", "model": routed_model,
                    "label": MODEL_LABELS.get(routed_model, routed_model),
                    "reason": route_reason}
-        yield from agent.run_stream(directive + message, stop_event=stop_event,
-                                    model=routed_model)
+        # Mock mode: skip the CONTROL directive - MockClient matches keyword
+        # tool-call triggers on the raw message, so --mock runs exercise the
+        # full tool pipeline (incl. Step-By-Step approvals) with no live model.
+        if cfg.get("mock"):
+            yield from agent.run_stream(message, stop_event=stop_event,
+                                        model=routed_model)
+        else:
+            yield from agent.run_stream(directive + message, stop_event=stop_event,
+                                        model=routed_model)
 
     run_iter = run_gen()
 
