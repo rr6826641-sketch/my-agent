@@ -42,8 +42,13 @@ def test_mix_pool_contains_mythos_and_dolphin():
 def test_full_pool_is_base_plus_mix_deduped():
     pool = _full_uncensored_pool()
     assert pool[0] == UNCENSORED_FALLBACK_MODELS[0]
-    assert len(pool) == len(UNCENSORED_FALLBACK_MODELS) + \
-        len(MIXED_UNCENSORED_MODELS)
+    # Full pool = union of base + mix, deduped (base and mix now legitimately
+    # overlap on Euryale/Dolphin/Hermes-4 so plain addition no longer holds).
+    union = list(UNCENSORED_FALLBACK_MODELS)
+    for m in MIXED_UNCENSORED_MODELS:
+        if m not in union:
+            union.append(m)
+    assert pool == union, "pool must equal base + mix union"
     assert len(set(pool)) == len(pool), "pool must not contain duplicates"
 
 
