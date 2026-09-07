@@ -51,10 +51,17 @@ const InteractionBarController = (() => {
 
   const el = (id) => document.getElementById(id);
 
-  // only accept values the current <select> actually offers
+  // accepted values come from the control: <select> options or
+  // segmented-toggle buttons ([data-value]) - Mode is a seg toggle,
+  // Access/Scope stay dropdowns.
+  function allowedValues(group) {
+    const c = el("ibar-" + group);
+    if (!c) return [];
+    if (c.tagName === "SELECT") return Array.from(c.options).map((o) => o.value);
+    return Array.from(c.querySelectorAll("[data-value]")).map((b) => b.dataset.value);
+  }
   function validValue(group, value) {
-    const select = el("ibar-" + group);
-    return select && value && Array.from(select.options).some((o) => o.value === value);
+    return !!value && allowedValues(group).includes(value);
   }
 
   function save() {
@@ -80,8 +87,17 @@ const InteractionBarController = (() => {
       bar.dataset.mode = state.mode;
     }
     GROUPS.forEach((g) => {
-      const select = el("ibar-" + g);
-      if (select && select.value !== state[g]) select.value = state[g];
+      const c = el("ibar-" + g);
+      if (!c) return;
+      if (c.tagName === "SELECT") {
+        if (c.value !== state[g]) c.value = state[g];
+      } else {
+        c.querySelectorAll("[data-value]").forEach((b) => {
+          const on = b.dataset.value === state[g];
+          b.classList.toggle("active", on);
+          b.setAttribute("aria-pressed", on ? "true" : "false");
+        });
+      }
     });
     const input = el("input");
     if (input) {
@@ -95,8 +111,8 @@ const InteractionBarController = (() => {
 
   // short red pulse on the tile that just changed
   function flash(group) {
-    const select = el("ibar-" + group);
-    const tile = select && select.closest(".ibar-group");
+    const ctl = el("ibar-" + group);
+    const tile = ctl && ctl.closest(".ibar-group");
     if (!tile) return;
     tile.classList.remove("ibar-flash");
     void tile.offsetWidth; // restart the animation
@@ -106,14 +122,22 @@ const InteractionBarController = (() => {
 
   function bind() {
     GROUPS.forEach((g) => {
-      const select = el("ibar-" + g);
-      if (!select) return;
-      select.addEventListener("change", () => {
-        if (validValue(g, select.value)) state[g] = select.value;
+      const c = el("ibar-" + g);
+      if (!c) return;
+      const commit = (v) => {
+        if (validValue(g, v)) state[g] = v;
         save();
         reflect();
         flash(g);
-      });
+      };
+      if (c.tagName === "SELECT") {
+        c.addEventListener("change", () => commit(c.value));
+      } else {
+        c.addEventListener("click", (ev) => {
+          const btn = ev.target.closest("[data-value]");
+          if (btn) commit(btn.dataset.value);
+        });
+      }
     });
     const input = el("input");
     if (input) {

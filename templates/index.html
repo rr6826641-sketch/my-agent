@@ -204,11 +204,11 @@
                 <span class="ibar-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg></span>
                 <div class="ibar-field">
                   <label for="ibar-mode">Agent Mode</label>
-                  <select id="ibar-mode" class="ibar-select" title="Driving style">
-                    <option value="auto" selected>Auto &middot; Auto-Pilot</option>
-                    <option value="step">Step-By-Step &middot; Interactive</option>
-                    <option value="research">Research-Only</option>
-                  </select>
+                  <div class="seg" id="ibar-mode" role="group" aria-label="Agent Mode" title="Driving style">
+                    <button type="button" class="seg-btn seg-auto active" data-value="auto" aria-pressed="true"><i class="led" aria-hidden="true"></i><span>Auto&middot;Auto-Pilot</span></button>
+                    <button type="button" class="seg-btn" data-value="step" aria-pressed="false">Step</button>
+                    <button type="button" class="seg-btn" data-value="research" aria-pressed="false">Research</button>
+                  </div>
                 </div>
               </div>
             </div>
