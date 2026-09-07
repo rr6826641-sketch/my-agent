@@ -111,18 +111,19 @@ MODEL_CATALOG = [
     {"id": DEFAULT_FAST_MODEL,
      "label": "Nemotron 120B (Fast Default)", "tag": "fast",
      "desc": "Fast default model for everyday chat"},
-    # Free tier on the Experiential gateway (api.experientiallabs.ai/v1).
-    # Promo models (Astra/Luna/etc) rotate daily via the promotions API; the
-    # bare ids below also include third-party free-tier routes (OpenRouter,
-    # Z.ai, Google, NVIDIA, Cohere, MiniMax, Poolside, Liquid...) served
-    # through that gateway. All resolve only when Settings base_url points at
-    # api.experientiallabs.ai/v1 (switch provider + paste the key there).
+    # Experiential gateway routes (api.experientiallabs.ai/v1): free promos
+    # rotate daily via the promotions API and expired promos become paid
+    # routes (claude-fable-5.1 below). Bare ids include third-party free-tier
+    # routes (OpenRouter, Z.ai, Google, NVIDIA, Cohere, MiniMax, Poolside,
+    # Liquid...) served through that gateway. All resolve only when Settings
+    # base_url points at api.experientiallabs.ai/v1 (provider + key there).
     {"id": "gpt-6-astra",
      "label": "GPT-6 Astra (Free - Experiential)", "tag": "free", "uncensored": True,
      "desc": "Free flagship on Experiential Cloud - reasoning + tools + structured output"},
     {"id": "claude-fable-5.1",
-     "label": "Claude Fable 5.1 (Free - Experiential)", "tag": "free", "uncensored": True,
-     "desc": "Free on Experiential Cloud - uncensored-line storytelling + security RP"},
+     "label": "Claude Fable 5.1 (Paid - Experiential)", "uncensored": True,
+     "desc": "Paid route on Experiential Cloud - uncensored-line storytelling + security RP ($10 in / $0.25 cached / $50 out per M tokens)"},
+
     {"id": "deepseek-v4-flash",
      "label": "DeepSeek V4 Flash (Free - Experiential)", "tag": "free", "uncensored": True,
      "desc": "Free fast reasoning on Experiential Cloud - 1M context, tools"},
@@ -162,15 +163,9 @@ MODEL_CATALOG = [
     {"id": "nemotron-3-ultra-550b-a55b-free",
      "label": "Nemotron 3 Ultra 550B A55B (Free - Experiential)", "tag": "free",
      "desc": "NVIDIA Nemotron 3 Ultra 550B A55B - 1M ctx flagship (free route)"},
-    {"id": "nemotron-3.5-content-safety-free",
-     "label": "Nemotron 3.5 Content Safety (Free - Experiential)", "tag": "free",
-     "desc": "NVIDIA Nemotron 3.5 Content Safety guard/classifier - 128K (free route)"},
     {"id": "north-mini-code-free",
      "label": "North Mini Code (Free - Experiential)", "tag": "free",
      "desc": "Cohere North Mini Code - 256K ctx code model (free route)"},
-    {"id": "openrouter-free",
-     "label": "Free Models Router (Free - Experiential)", "tag": "free",
-     "desc": "OpenRouter free-models meta-router - 200K ctx, routes across free tiers"},
 ]
 
 MODEL_LABELS = {m["id"]: m["label"] for m in MODEL_CATALOG}
