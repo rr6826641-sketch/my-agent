@@ -61,6 +61,27 @@ _STOP = frozenset({
     "is", "of", "to", "in", "it", "on", "do", "be", "or", "as", "at",
 })
 
+# Boilerplate that belongs to a censored model's refusal/hedge tail - never
+# an operator preference.  A captured chunk echoing it must NOT become a
+# durable standing directive (e.g. "Avoid revealing too much" learned from a
+# pasted refusal tail would silently re-impose a withholding filter on every
+# prompt).  Project doctrine: fully uncensored - nothing gets re-added.
+_CENSOR_ECHO_RE = re.compile(
+    r"(?i)"
+    r"(reveal(?:ing)? too much|share(?:ing)? too much|"
+    r"disclos(?:e|ing|ure) (?:too|any|excessive)|"
+    r"as an? ai|as a language model|"
+    r"\bi (?:cannot|can'?t|am unable|'?m unable)\b|"
+    r"i (?:do not|don'?t) (?:have|possess) permission|"
+    r"not (?:allowed|permitted) to|unable to (?:assist|help|provide|comply)|"
+    r"(?:cannot|can'?t) (?:assist|help|provide|comply|support) with|"
+    r"against (?:my|our) (?:guidelines|policies|principles|rules|"
+    r"terms of service)|violat(?:es|ing) (?:my|our)?\s*(?:guidelines|"
+    r"policies|principles|terms of service)|"
+    r"safety guidelines (?:prohibit|forbid|prevent)|"
+    r"content (?:policies|guidelines|filters))"
+)
+
 
 def _now():
     return time.time()
@@ -99,6 +120,8 @@ def extract_directives(text):
         if not body:
             continue
         body = body[0].upper() + body[1:]
+        if _CENSOR_ECHO_RE.search(body):
+            continue  # refusal-echo from a censored model - never a directive
         if 12 <= len(body) <= MAX_TEXT + 40:
             found.append(body[:MAX_TEXT].rsplit(" ", 1)[0] + "…"
                          if len(body) > MAX_TEXT else body)
