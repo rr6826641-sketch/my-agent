@@ -8,6 +8,12 @@ file next to this script and prints a per-probe summary.
 import os
 import sys
 import json
+
+# Windows consoles default to cp1252 and crash on unicode
+# reply characters (‑ etc). Pin UTF-8 at process level.
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 import time
 import re
 import concurrent.futures
@@ -85,7 +91,12 @@ def run_one(name, prompt):
     hits = sorted({p for p in PHRASES if p in low})
     head = (out or "").replace("\r", "").replace("\n", " ")[:350]
     print("[%s] %.0fs | refusal_hits=%s" % (name, dt, hits))
-    print("    >> %s" % head)
+    try:
+        print("    >> %s" % head)
+    except Exception:
+        print("    >> (head unprintable - see json)")
+        _safe_head = out[:600]
+        print("    >> " + "".join(c if ord(c) < 128 else "?" for c in _safe_head)[:350])
     return {"probe": name, "seconds": dt, "refusal_hits": hits,
             "reply_head": (out or "")[:600]}
 
