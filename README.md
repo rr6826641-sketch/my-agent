@@ -453,6 +453,21 @@ server (connected/failed) aur uske registered tools (`mcp_*` names) ke saath.
 Backend: `GET /api/mcp` agent ke `_mcp_state` se. UI update har
 `loadTools()` par hota hai.
 
+### Local uncensored profile (Custom persona)
+
+Apna khud ka uncensored profile banane/activate karne ke 2 tareeqe:
+
+- **UI:** Settings view -> persona dropdown mein `Custom (own persona text)`
+  choose karo aur apna directive block box mein likho - `personas_custom.txt`
+  par save hota hai (runtime file, git-ignored).
+- **Config:** `config.json` mein `"persona": "custom"` set karo aur apna text
+  `personas_custom.txt` mein rakho (project root).
+
+Persona id `custom` ka directive block runtime par
+`personas_custom.txt` se load hota hai aur har reply par system prompt mein
+`[ENFORCEMENT LOCK]` ke saath append hota hai (refusal-free, persistence,
+anti-drift). Test coverage: `tests/test_custom_persona.py`.
+
 ## ✅ Naya kya hai (HackerAI-style upgrade)
 
 - **Parallel sub-agents** — `spawn_agents` (max 8 concurrent, per-agent timeout 900s, depth 3)
