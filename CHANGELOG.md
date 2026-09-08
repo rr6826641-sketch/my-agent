@@ -1,4 +1,13 @@
 # Changelog
+## [2026-09-08] runtime watchdog + probe harness
+
+- fix(runtime): agent.run() supports stop_event + wall-clock `deadline`; daemon watchdog
+  sets stop_event and the loop self-cancels via RunCancelled (no zombie threads on long
+  tool chains - previously 219-235s runaway runs past a 115s harness cap).
+- feat(probe): refusal-probe harness now wires deadline=110s and maps RunCancelled to a
+  SELF-CANCELLED marker (live proof of clean abort, not refusal).
+- test: full regression suite green - 648 passed, 3 skipped (persona/router/watchdog incl.).
+
 
 Sare notable changes is project ke. Format: `[Semantic Versioning](https://semver.org/)-style`
 (Unreleased / versioned blocks, newest top).
