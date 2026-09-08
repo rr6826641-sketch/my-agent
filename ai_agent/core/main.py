@@ -3181,11 +3181,22 @@ class Agent:
                                "content": fallback}
                         return
                     self._empty_final_retries += 1
-                    self.messages.append(
-                        {"role": "user",
-                         "content": ("[system] The previous assistant turn "
-                                     "was empty. Give a concise summary of "
-                                     "what has been completed so far.")})
+                    if work_digest:
+                        _nudge = ("[system] The previous assistant turn "
+                                  "was empty. Give a concise summary of "
+                                  "what has been completed so far.")
+                    else:
+                        # No tool work happened yet: a "summarize the
+                        # work" nudge is meaningless. Ask for a direct
+                        # regeneration of the original request instead -
+                        # this breaks provider-side empty-response loops
+                        # (observed live on Groq for some prompts).
+                        _nudge = ("[system] The previous assistant turns "
+                                  "were empty and no work has been done "
+                                  "yet. Answer the original request "
+                                  "directly now.")
+                    self.messages.append({"role": "user",
+                                          "content": _nudge})
                     yield {"type": "llm_retry",
                            "content": "empty final - retrying summary"}
                     continue

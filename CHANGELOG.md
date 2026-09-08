@@ -16,6 +16,12 @@
   AttributeError ('NoneType' .read) instead of RunCancelled - observed on
   the phishing probe exactly at the 110 s deadline. It now maps back to
   RunCancelled.
+- Context-aware empty-final nudge: the retry nudge now branches on whether
+  any tool work happened. After tool work the model is asked to summarise
+  what was completed; when the empty turns happened before any tool call
+  (the "no-work empty" pattern seen live on Groq), it instead asks for a
+  direct regeneration of the original request - a "summarise the work"
+  nudge is meaningless when no work exists and would never break the loop.
 ## [2026-09-08] runtime watchdog + probe harness
 
 - fix(runtime): agent.run() supports stop_event + wall-clock `deadline`; daemon watchdog
