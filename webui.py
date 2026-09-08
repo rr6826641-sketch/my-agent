@@ -31,6 +31,7 @@ from ai_agent.llm import (MockClient, OpenAIClient,
                           UNCENSORED_FALLBACK_MODELS,
                           MIXED_UNCENSORED_MODELS)
 from ai_agent.artifacts import ArtifactManager
+from ai_agent.core.file_handler import FileHandler
 from ai_agent.memory_store import (
     GlobalKnowledge,
     InstitutionalMemory,
@@ -46,6 +47,11 @@ CHATS_PATH = os.path.join(PROJECT_DIR, "chats.json")
 # structured scan/generation outputs: artifacts/{chat_id}/{timestamp}/{tool}_{ts}.{ext}
 ARTIFACTS_DIR = os.path.join(PROJECT_DIR, "artifacts")
 artifacts = ArtifactManager(ARTIFACTS_DIR)
+
+# Phase 1 multimodal uploads: validated artifacts live under data/uploads/
+# with UUID names; index.json links each record to its chat session (sid).
+UPLOADS_DIR = os.path.join(PROJECT_DIR, "data", "uploads")
+uploads = FileHandler(UPLOADS_DIR)
 
 # persistent cross-conversation institutional notes (SQLite, gitignored)
 INSTITUTIONAL_NOTES_PATH = os.path.join(PROJECT_DIR, "institutional_notes.db")
@@ -2078,6 +2084,89 @@ def _hidden_or_sensitive(path):
     if any(p.startswith(".") for p in parts):
         return True
     return os.path.basename(path).lower().endswith(_SENSITIVE_EXTENSIONS)
+
+
+# --------------------------------------------------------------------------
+# Phase 1 - multimodal upload pipeline (/api/upload)
+# --------------------------------------------------------------------------
+
+
+def _upload_sid():
+    """Resolve the active chat session id for linking an upload."""
+    sid = (request.form.get("sid") or "").strip()
+    if not sid:
+        sid = _state.get("session_id") or ""
+    return sid or ""
+
+
+@app.route("/api/upload", methods=["POST"])
+def api_upload():
+    """Accept one multimodal artifact (PNG/JPG/WEBP/PCAP/TXT/JSON/PDF).
+
+    The file is validated (extension + content sniffing) and stored under
+    ``data/uploads/`` with a UUID name; the returned record is linked to
+    the active chat session so later turns can analyze it. Non-image
+    files are readable as plain attachments, images are additionally
+    available as Base64 vision payloads.
+    """
+    fileobj = request.files.get("file")
+    if fileobj is None or not fileobj.filename:
+        return jsonify({"error": "multipart field 'file' required"}), 400
+    sid = _upload_sid()
+    try:
+        record = uploads.save(fileobj, fileobj.filename, sid=sid)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except OSError as exc:
+        return jsonify({"error": "storage failure: %s" % exc}), 500
+    rec_out = dict(record)
+    rec_out.pop("path", None)  # never leak absolute server paths to the UI
+    rec_out["relpath"] = os.path.join("data", "uploads",
+                                       record["id"] + "." + record["ext"]).replace("\\", "/")
+    return jsonify({"ok": True, "upload": rec_out})
+
+
+@app.route("/api/uploads")
+def api_uploads_list():
+    """Uploads owned by the active session (or all when ?all=1)."""
+    sid = (request.args.get("sid") or "").strip() or _upload_sid()
+    if request.args.get("all"):
+        records = uploads.all_files()
+    elif sid:
+        records = uploads.files_for_session(sid)
+    else:
+        records = []
+    out = []
+    for rec in records:
+        r = dict(rec)
+        r.pop("path", None)
+        out.append(r)
+    return jsonify({"count": len(out), "uploads": out})
+
+
+@app.route("/api/uploads/<file_id>")
+def api_uploads_get(file_id):
+    """Fetch one stored upload (inline for images, download otherwise)."""
+    rec = uploads.get(file_id)
+    if rec is None or not os.path.isfile(rec["path"]):
+        return jsonify({"error": "upload not found"}), 404
+    is_image = rec["mime"].startswith("image/")
+    return send_file(rec["path"], mimetype=rec["mime"],
+                     as_attachment=not is_image,
+                     download_name=rec["original_name"])
+
+
+@app.route("/api/upload/session/<sid>/vision")
+def api_upload_session_vision(sid):
+    """OpenAI-style multimodal content blocks for a session's image uploads.
+
+    Lets vision-capable models analyze screenshots/diagrams attached to
+    the active chat context via the same /api/upload pipeline.
+    """
+    if not sid:
+        return jsonify({"error": "sid required"}), 400
+    blocks = uploads.vision_blocks_for_session(sid)
+    return jsonify({"count": len(blocks), "content": blocks})
 
 
 @app.route("/api/files")
