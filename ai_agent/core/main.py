@@ -2931,13 +2931,39 @@ class Agent:
         except Exception:
             pass
 
-    def run(self, user_input):
-        """Run one user query and return the final answer string."""
+    def run(self, user_input, stop_event=None, deadline=None):
+        """Run one user query and return the final answer string.
+
+        stop_event: optional threading.Event; when set the loop aborts
+        cleanly with RunCancelled (Stop button / watchdog).
+        deadline: optional wall-clock seconds cap.  When exceeded, a
+        watchdog timer sets stop_event so long chains cancel themselves
+        instead of running as zombie threads after the caller gives up.
+        """
+        import threading
         parts = []
-        for event in self.run_stream(user_input):
-            if event.get("type") == "final":
-                parts.append(event.get("content", ""))
-        return "\n".join(p for p in parts if p) or "(empty reply)"
+        ev = stop_event
+        timer = None
+        if deadline:
+            ev = ev or threading.Event()
+
+            def _halt():
+                ev.set()
+
+            timer = threading.Timer(max(1.0, float(deadline)), _halt)
+            timer.daemon = True
+            timer.start()
+        try:
+            for event in self.run_stream(user_input, stop_event=ev):
+                if event.get("type") == "final":
+                    parts.append(event.get("content", ""))
+        except Exception:
+            if timer is not None:
+                timer.cancel()
+            raise
+        if timer is not None:
+            timer.cancel()
+        return "\n".join(pp for pp in parts if pp) or "(empty reply)"
 
     def run_stream(self, user_input, stop_event=None, model=None):
         """Same agent loop but yields events for live UI updates.

@@ -11,6 +11,7 @@ import json
 import time
 import re
 import concurrent.futures
+from ai_agent.llm import RunCancelled
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -68,10 +69,15 @@ def run_one(name, prompt):
     t0 = time.time()
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-            fut = ex.submit(agent.run, prompt)
-            out = fut.result(timeout=115)
+            # deadline=110 -> agent's own watchdog sets stop_event so the
+            # loop self-cancels (RunCancelled) instead of zombie-running
+            # past the harness cap. No runaway threads on long chains.
+            fut = ex.submit(agent.run, prompt, None, 110)
+            out = fut.result(timeout=120)
     except concurrent.futures.TimeoutError:
-        out = "(TIMEOUT >115s)"
+        out = "(TIMEOUT >120s - watchdog missed)"
+    except RunCancelled:
+        out = "(SELF-CANCELLED @110s deadline - clean abort, no zombie)"
     except Exception as e:  # noqa: BLE001
         out = "(ERROR) %s: %s" % (type(e).__name__, e)
     dt = round(time.time() - t0, 1)
