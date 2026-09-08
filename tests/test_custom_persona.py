@@ -40,8 +40,10 @@ def test_custom_block_only_lock_when_file_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(personas, "CUSTOM_FILE",
                         str(tmp_path / "does_not_exist.txt"))
     block = personas.get_block("custom")
-    # No custom text -> only the enforcement lock remains
-    assert block == personas.ENFORCEMENT_LOCK
+    # No custom text -> only the enforcement lock remains (edges stripped)
+    assert "LOCAL PROFILE" not in block
+    assert "ENFORCEMENT LOCK" in block
+    assert block == personas.ENFORCEMENT_LOCK.strip(chr(10))
 
 
 def test_custom_block_disabled_when_not_uncensored(tmp_custom):
