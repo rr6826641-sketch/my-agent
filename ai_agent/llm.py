@@ -98,7 +98,26 @@ HIGH_REASONING_FALLBACKS = [
 # the primary model and the generic (possibly safety-tuned) fallback_models,
 # so a 429/empty-body drop mid-engagement never lands the next request on a
 # model that will simply refuse the authorized offensive-security task.
+#
+# Pool head = online abliterated / de-aligned cloud models (zero-refusal
+# routing).  huihui-ai/Llama-3.3-70B-Instruct-abliterated is a Llama-3.3-70B
+# with the refusal direction removed; cognitivecomputations/dolphin-2.9.2-
+# qwen2-72b is the dolphin-2.9.2 Qwen2-72B de-aligned build (both canonical
+# on HuggingFace / Ollama); mistralai/mixtral-8x22b-instruct is the
+# no-built-in-refusal MoE workhorse served by OpenRouter today.  All three
+# are listed in the openrouter local_endpoints spec in config.json
+# (api_key_env: OPENROUTER_API_KEY) so they land in _local_route and are
+# POSTed to OpenRouter, never to the primary provider; any slug the
+# router does not currently serve (404) is skipped by the failover chain,
+# which then advances to the next uncensored entry instead of ever
+# dropping onto a safety-tuned generic model.  These are consulted BEFORE
+# the legacy uncensored pool below, so standard provider endpoints (Groq/
+# OpenRouter standard routes) that return empty replies or provider-side
+# safety flags fail over straight into abliterated routing.
 UNCENSORED_FALLBACK_MODELS = [
+    "huihui-ai/llama-3.3-70b-instruct-abliterated",
+    "cognitivecomputations/dolphin-2.9.2-qwen2-72b",
+    "mistralai/mixtral-8x22b-instruct",
     "thinkingmachines/inkling:free",
     "nousresearch/hermes-3-llama-3.1-70b",
     "qwen/qwen3-coder",
