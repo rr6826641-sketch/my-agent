@@ -3069,6 +3069,7 @@ class Agent:
                                       "content": recall_block})
                 yield {"type": "episodic_recall", "block": recall_block}
         final = ""
+        self._empty_final_retries = 0
         # Tool schemas are rebuilt at the top of every iteration so a
         # runtime-synthesized / hot-reloaded tool is offered to the
         # LLM immediately after it becomes available.
@@ -3156,7 +3157,25 @@ class Agent:
                 bev = self._task_board.event()
                 if bev:
                     yield bev
-                yield {"type": "final", "content": content or "(empty reply)"}
+                if not (content or "").strip():
+                    # Empty no-tool final: do not surface a dead reply when
+                    # work already happened. Nudge (bounded) so a heavy tool
+                    # chain still ends in a real summary; "(empty reply)"
+                    # only after retries are exhausted.
+                    if self._empty_final_retries >= 2:
+                        yield {"type": "final",
+                               "content": "(empty reply)"}
+                        return
+                    self._empty_final_retries += 1
+                    self.messages.append(
+                        {"role": "user",
+                         "content": ("[system] The previous assistant turn "
+                                     "was empty. Give a concise summary of "
+                                     "what has been completed so far.")})
+                    yield {"type": "llm_retry",
+                           "content": "empty final - retrying summary"}
+                    continue
+                yield {"type": "final", "content": content}
                 return
 
             if content:

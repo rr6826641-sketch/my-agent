@@ -1,4 +1,12 @@
 # Changelog
+## 2026-09-08
+
+### Fixed
+- Empty-final retry in `run_stream()`: a heavy tool chain whose final LLM
+  turn returns an empty message (no content, no tool calls - observed live
+  on Groq) previously surfaced as "(empty reply)" despite completed work.
+  The loop now nudges the model once (bounded, max 2 retries) to produce a
+  real summary before falling back.
 ## [2026-09-08] runtime watchdog + probe harness
 
 - fix(runtime): agent.run() supports stop_event + wall-clock `deadline`; daemon watchdog
@@ -80,3 +88,4 @@ Sare notable changes is project ke. Format: `[Semantic Versioning](https://semve
 - Swarm router, self-evolution / learning guard, knowledge graph, tool
   synthesizer, intent reformulator, upload/vision chat, context compactor
 - WebUI (Flask :8080) with Tools / Memory / Reports / RPG / Settings views
+
