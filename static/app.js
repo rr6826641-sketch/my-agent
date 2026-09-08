@@ -2101,11 +2101,34 @@ async function refreshBoard() {
     const nMem = Number(st.memory_entries) || 0;
     const modeTxt = st.mode === "mock" ? "mock engine"
       : (st.mode === "auto" ? "smart-auto router" : "live model");
+    // Phase 4 dashboard telemetry: live swarm registry + knowledge graph.
+    const sa = st.subagents || {};
+    const saAvail = sa.available !== false && (Number(sa.tracked) > 0 || Number(sa.active) > 0);
+    const saSub = saAvail
+      ? Number(sa.active) + " active · " + Number(sa.running) + " running · " + Number(sa.tracked) + " tracked"
+      : "standby (delegation idle)";
+    const kn = st.knowledge || {};
+    const knF = kn.findings || {};
+    const knG = kn.graph;
+    const knBits = [];
+    if (knF && typeof knF.records === "number") {
+      knBits.push(knF.records + (knF.records === 1 ? " finding" : " findings"));
+      if (typeof knF.targets === "number" && knF.targets > 0) {
+        knBits.push(knF.targets + (knF.targets === 1 ? " target" : " targets"));
+      }
+    }
+    if (knG && typeof knG.edges === "number") {
+      const tot = Object.keys(knG.nodes || {}).reduce((a, k) => a + (Number(knG.nodes[k]) || 0), 0);
+      knBits.push(tot + " nodes · " + knG.edges + " edges");
+    }
+    const knSub = knBits.length ? knBits.join(" · ") : "no target data yet";
     const rows = [
       { ico: "🧠", title: "memory vault", sub: nMem + (nMem === 1 ? " note" : " notes") + " stored" },
       { ico: "☠", title: "red team", sub: st.red_team_mode ? "armed · level " + (st.red_team_level || "promax") : "standby" },
       { ico: "🛠", title: "tools", sub: (Number(st.tools) || 0) + " registered" },
       { ico: "🤖", title: "router", sub: modeTxt + " · " + modelLabel(st.model) },
+      { ico: "🕸", title: "swarm · sub-agents", sub: saSub },
+      { ico: "🕸", title: "knowledge graph", sub: knSub },
     ];
     box.innerHTML = "";
     rows.forEach((r) => {
@@ -2184,6 +2207,11 @@ async function refreshBoard() {
     card("cc-ver", "cc-ver-sub", d.version ? "v" + d.version : "—", "webui build");
 
     // bottom status bar
+    // live swarm + knowledge-graph counters (Phase 4 dashboard telemetry)
+    const _sa = st.subagents || {};
+    const _kn = (st.knowledge || {}).findings || {};
+    setTxt(get("cc-sb-agents"), Number(_sa.tracked) || 0);
+    setTxt(get("cc-sb-kg"), Number(_kn.records) || 0);
     setTxt(get("cc-sb-mode"), modeTxt.toLowerCase() === "smart router" ? "auto" : (st.mode || "auto"));
     setTxt(get("cc-sb-extra"), st.red_team_mode
       ? "red team · " + (st.red_team_level || "promax")
