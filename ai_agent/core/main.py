@@ -2162,6 +2162,7 @@ class Agent:
         self._tools_by_name = register_live_catalog(
             {t.name: t for t in self._tool_list})
         self._verification_results = []
+        self._wire_mcp_servers()
         # Built-In Task Board & State Tracking Engine: every user
         # request (root task) and tool call (step task) is tracked
         # silently in the background across todo -> in_progress ->
@@ -2540,6 +2541,84 @@ class Agent:
                 "description": out.get("description", ""),
                 "schema": json.loads(schema),
                 "note": note}
+
+    # ------------------------------------------------------------------
+    # MCP server auto-wiring (config-driven)
+    # ------------------------------------------------------------------
+    def _load_mcp_servers(self):
+        """Return MCP server specs from config.json `mcp_servers` or the
+        MCP_SERVERS env var (JSON list). Each spec may carry: name,
+        command, args, env, cwd, prefix, confirm."""
+        specs = []
+        try:
+            cfg_path = os.path.join(self._project_root(), "config.json")
+            if os.path.isfile(cfg_path):
+                with open(cfg_path, "r", encoding="utf-8") as fh:
+                    cfg = json.load(fh)
+                for item in cfg.get("mcp_servers") or []:
+                    if isinstance(item, dict) and item.get("command"):
+                        specs.append(item)
+        except Exception as exc:
+            logger.warning("[MCP] could not read config.json mcp_servers: %s", exc)
+        raw_env = os.environ.get("MCP_SERVERS", "").strip()
+        if raw_env:
+            try:
+                env_specs = json.loads(raw_env)
+                for item in env_specs if isinstance(env_specs, list) else []:
+                    if isinstance(item, dict) and item.get("command"):
+                        specs.append(item)
+            except Exception as exc:
+                logger.warning("[MCP] invalid MCP_SERVERS env JSON: %s", exc)
+        return specs
+
+    def _wire_mcp_servers(self):
+        """Connect every configured MCP server and expose its tools live.
+
+        Each tool lands in self._tool_list (so its schema is advertised
+        to the LLM) and in self._tools_by_name (the dispatch map used by
+        execute_tool). A system note is appended to self.messages so the
+        model knows which servers are online.
+        """
+        specs = self._load_mcp_servers()
+        if not specs:
+            return
+        try:
+            from .mcp_client import McpClient
+        except Exception as exc:
+            logger.warning("[MCP] McpClient unavailable: %s", exc)
+            return
+        for spec in specs:
+            label = spec.get("name") or spec.get("command")
+            client = None
+            try:
+                client = McpClient(
+                    command=spec.get("command"),
+                    args=spec.get("args"),
+                    env=spec.get("env"),
+                    cwd=spec.get("cwd"),
+                )
+                client.connect()
+                tools = client.as_tool_objects(
+                    prefix=spec.get("prefix", "mcp_"),
+                    confirm=bool(spec.get("confirm", False)))
+                added = 0
+                for tool in tools:
+                    if tool.name in self._tools_by_name:
+                        continue
+                    if any(t.name == tool.name for t in self._tool_list):
+                        continue
+                    self._tools_by_name[tool.name] = tool
+                    self._tool_list.append(tool)
+                    added += 1
+                note = ("[MCP] Connected server %r: %d new tool(s) registered"
+                        % (label, added))
+                logger.info(note)
+                self.messages.append({"role": "system", "content": note})
+            except Exception as exc:
+                logger.warning("[MCP] failed to wire server %r: %s", label, exc)
+            finally:
+                if client is not None and client.connected:
+                    client.close()
 
     def _project_root(self):
         return os.path.dirname(os.path.dirname(os.path.dirname(

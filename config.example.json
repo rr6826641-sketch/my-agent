@@ -12,5 +12,6 @@
     "dots-studio/dots-3-note-preview:free"
   ],
   "max_iterations": 60,
-  "parallel_max_workers": 4
+  "parallel_max_workers": 4,
+  "mcp_servers": []
 }
