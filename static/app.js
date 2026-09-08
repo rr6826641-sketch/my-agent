@@ -1179,9 +1179,36 @@ function attachChipEl(rec) {
   rm.title = "Remove from tray";
   rm.setAttribute("aria-label", "Remove file");
   rm.textContent = "\u2715";
-  rm.addEventListener("click", () => {
-    chip.remove();
-    if (!attachTray.childElementCount) attachTray.hidden = true;
+  rm.addEventListener("click", async () => {
+    if (rm.disabled || chip.classList.contains("att-uploading")) return;
+    const realId = rec && rec.id;
+    // pending / placeholder chip (upload still running or failed): tray-only
+    if (!realId) {
+      chip.remove();
+      if (!attachTray.childElementCount) attachTray.hidden = true;
+      return;
+    }
+    // real server record: remove end-to-end so the file can never be
+    // re-injected into the next turn via _attach_session_files()
+    rm.disabled = true;
+    chip.classList.add("att-rm-busy");
+    try {
+      let q = "/api/uploads/" + encodeURIComponent(realId);
+      if (currentSessionId) q += "?sid=" + encodeURIComponent(currentSessionId);
+      const res = await fetch(q, { method: "DELETE" });
+      if (!res.ok) {
+        throw new Error(res.status === 403 ? "owned by another session"
+                                           : ("remove failed (HTTP " + res.status + ")"));
+      }
+      chip.remove();
+      if (!attachTray.childElementCount) attachTray.hidden = true;
+    } catch (err) {
+      rm.disabled = false;
+      chip.classList.remove("att-rm-busy");
+      chip.classList.add("att-err");
+      const sub = chip.querySelector(".att-sub");
+      if (sub) sub.textContent = "✖ " + ((err && err.message) || "remove failed");
+    }
   });
   chip.appendChild(prev);
   chip.appendChild(meta);

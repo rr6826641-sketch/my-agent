@@ -2516,6 +2516,9 @@ body{
   box-shadow:0 0 44px -8px rgba(255,64,88,.95);
 }
 .composer-ibar.drag-files #attach-drop-hint{display:block}
+/* Phase 3 - attachment removal in-flight state */
+.attach-chip .att-rm:disabled{opacity:.45; cursor:default}
+.attach-chip.att-rm-busy{opacity:.6; pointer-events:none}
 
 /* Phase 3 - outgoing message previews for attached images */
 .msg.user .msg-imgs{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; justify-content:flex-end}

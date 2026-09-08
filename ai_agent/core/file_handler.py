@@ -303,6 +303,30 @@ class FileHandler:
             pass
         return True
 
+    def delete_session(self, sid: str) -> int:
+        """Remove every upload owned by a chat session (records + disk).
+
+        Called when a session is deleted so ``data/uploads`` stays in
+        sync with the chat list (same contract as artifacts.delete_chat).
+        Idempotent and never raises: unknown/empty sid removes nothing.
+        Returns the number of upload records removed.
+        """
+        if not sid:
+            return 0
+        with self._lock:
+            doomed = [r for r in self._records.values()
+                      if r.get("sid") == sid]
+            for rec in doomed:
+                self._records.pop(rec["id"], None)
+            if doomed:
+                self._save_index()
+        for rec in doomed:
+            try:
+                os.remove(rec.get("path", ""))
+            except OSError:
+                pass
+        return len(doomed)
+
     def files_for_session(self, sid: str) -> list:
         if not sid:
             return []

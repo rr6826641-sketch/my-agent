@@ -127,3 +127,48 @@ def test_delete_route_refuses_other_sessions_upload(isolated_webui):
 
     # and the rightful owner can still remove it afterwards
     assert client.delete("/api/uploads/" + fid + "?sid=ses-owner").status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# 3) session deletion GC (data/uploads stays in sync with deleted chats)
+# ---------------------------------------------------------------------------
+
+
+def test_handler_delete_session_removes_only_that_session(tmp_path):
+    handler = FileHandler(str(tmp_path / "uploads"))
+    a = handler.save(io.BytesIO(_png_bytes()), "a.png", sid="sA")
+    b = handler.save(io.BytesIO(_png_bytes()), "b.png", sid="sB")
+    c = handler.save(io.BytesIO(_png_bytes()), "c.png", sid="sA")
+
+    assert handler.delete_session("sA") == 2
+    assert handler.delete_session("sA") == 0      # idempotent
+    assert handler.get(a["id"]) is None
+    assert handler.get(c["id"]) is None
+    assert handler.get(b["id"]) is not None       # other session survives
+    assert not os.path.isfile(a["path"])
+    assert not os.path.isfile(c["path"])
+    assert os.path.isfile(b["path"])
+    assert handler.delete_session("") == 0        # empty sid is a no-op
+
+
+def test_session_delete_route_purges_uploads(isolated_webui):
+    import json as _json
+    client = isolated_webui.app.test_client()
+
+    up = _upload_png(client, sid="ses-gc")
+    assert up.status_code == 200
+    fid = up.get_json()["upload"]["id"]
+    rec = webui.uploads.get(fid)
+    assert rec is not None and os.path.isfile(rec["path"])
+
+    # seed a matching chat thread so the session DELETE route can remove it
+    with io.open(webui.CHATS_PATH, "w", encoding="utf-8") as fh:
+        _json.dump({"sessions": {"ses-gc": {"id": "ses-gc",
+                                            "title": "gc",
+                                            "messages": []}}}, fh)
+
+    assert client.delete("/api/sessions/ses-gc").status_code == 200
+
+    # upload record + disk file are gone with the chat, no orphan left
+    assert webui.uploads.get(fid) is None
+    assert not os.path.isfile(rec["path"])

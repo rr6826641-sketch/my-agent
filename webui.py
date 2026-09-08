@@ -1059,6 +1059,12 @@ def api_sessions_del(sid):
             artifacts.delete_chat(sid)
         except Exception:
             pass
+        # same contract for data/uploads: purge records + files owned by
+        # the deleted session so no orphaned upload ever lingers on disk
+        try:
+            uploads.delete_session(sid)
+        except Exception:
+            pass
         with _lock:
             if _state.get("session_id") == sid:
                 _state["session_id"] = None
