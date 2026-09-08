@@ -17,6 +17,7 @@ from ..orchestration import (
 )
 from ..planner import GOAPPlanner
 from ..reflection import ReflectionEngine
+from ..memory.vector_store import UnifiedBrain
 from ..continuity import (
     MissionCheckpointStore, looks_like_continuation,
 )
@@ -2187,6 +2188,13 @@ class Agent:
         # vector store (memory/episodic_vectors.json) for cross-session
         # recall.
         self._reflection = ReflectionEngine()
+        # Unified semantic brain (Phase 2): lazily indexes chats.json +
+        # memory corpus into the episodic vector store and re-syncs only
+        # when the corpus file changes (mtime-guarded, sha-deduplicated).
+        self._brain = None
+        self._brain_lock = threading.Lock()
+        self._brain_scan_ts = 0.0
+        self._brain_chats_mtime = None
         # F2/F3/F4 self-managed memory: durable lessons (SessionLearner),
         # runtime rules (RulesEngine) and mission checkpoints
         # (MissionCheckpointStore). Callers may inject their own instances
@@ -2533,15 +2541,56 @@ class Agent:
                 "schema": json.loads(schema),
                 "note": note}
 
+    def _project_root(self):
+        return os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))))
+
+    def _ensure_brain_indexed(self):
+        """Lazily ingest chats.json into the unified semantic index.
+
+        Runs once per process and then re-syncs only when chats.json mtime
+        changes (at most every ``_BRAIN_MIN_RESCAN`` seconds). Records are
+        sha256-deduplicated, so re-syncs add only genuinely new turns.
+        """
+        try:
+            path = os.path.join(self._project_root(), "chats.json")
+            with self._brain_lock:
+                now = time.time()
+                try:
+                    mtime = os.path.getmtime(path)
+                except OSError:
+                    mtime = None
+                if (self._brain is not None and mtime is not None
+                        and mtime == self._brain_chats_mtime):
+                    return self._brain
+                if self._brain is not None and now - self._brain_scan_ts < 30:
+                    return self._brain  # too soon to rescan a live file
+                try:
+                    self._brain = UnifiedBrain(
+                        store=self._reflection.episodic)
+                    self._brain.build(chats_path=path)
+                except Exception as exc:
+                    logger.warning("unified brain index failed: %s", exc)
+                    self._brain = self._brain or UnifiedBrain(
+                        store=self._reflection.episodic)
+                self._brain_scan_ts = now
+                self._brain_chats_mtime = mtime
+                return self._brain
+        except Exception as exc:
+            logger.warning("brain index skipped: %s", exc)
+            return self._brain
+
     def _episodic_recall_block(self, user_input):
-        """Cross-session recall: relevant past payloads / bypasses /
-        methodologies / failed-attempt lessons for the current target,
-        rendered as a system block (or '' when nothing applies)."""
+        """Cross-session semantic recall: relevant past payloads /
+        bypasses / methodologies / lessons / prior-chat knowledge for the
+        current request, rendered as a system block (or '' when nothing
+        applies). Runs before response generation over the unified brain."""
         text = (user_input or "")[:400]
         if not text:
             return ""
         try:
-            hits = self._reflection.episodic.query(text, top_k=6)
+            self._ensure_brain_indexed()
+            hits = self._reflection.episodic.recall(text, top_k=6)
             lessons = self._reflection.lessons_for(args=text, limit=4)
         except Exception as exc:
             logger.warning("episodic recall failed: %s", exc)
