@@ -523,6 +523,7 @@ class McpClient:
         self._tools_cache: List[Dict[str, Any]] = []
         self._tools_at: float = 0.0
         self._tools_ttl: float = 5.0  # seconds; refresh after expiry
+        self.live_tool_map: Optional[Dict[str, Any]] = None
 
     # ------------------------------------------------------------------
     # Connection lifecycle
@@ -682,6 +683,8 @@ class McpClient:
 
     def refresh_tools(self) -> List[Dict[str, Any]]:
         """Force a fresh ``tools/list`` round-trip from the server."""
+        if not self._connected:
+            raise McpError("refresh_tools requires connect() first")
         result = self.request("tools/list", {})
         tools = result.get("tools")
         if not isinstance(tools, list):
@@ -801,9 +804,9 @@ class McpClient:
                 raise TypeError("tool_map must be a dict of {name: Tool}")
             # register_live_catalog() drains tool_map into a _LiveToolMap
             # and back-fills every hot-loaded tool (incl. the MCP tools
-            # registered just above), so the caller's own map becomes a
-            # live catalog for the Swarm Orchestrator immediately.
-            register_live_catalog(tool_map)
+            # registered just above); the adopted live map is kept on the
+            # client so the Swarm Orchestrator can bind it as its catalog.
+            self.live_tool_map = register_live_catalog(tool_map)
         log.info("registered %d mcp tools under prefix %r: %s",
                  len(names), prefix, names)
         return names
