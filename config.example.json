@@ -22,17 +22,27 @@
       "confirm": false
     }
   ],
-  "local_first": false,
+  "local_first": true,
   "local_endpoints": [
     {
       "name": "openrouter",
       "base_url": "https://openrouter.ai/api/v1",
       "api_key_env": "OPENROUTER_API_KEY",
       "models": [
+        "huihui-ai/llama-3.3-70b-instruct-abliterated",
+        "cognitivecomputations/dolphin-2.9.2-qwen2-72b",
+        "mistralai/mixtral-8x22b-instruct",
         "nvidia/nemotron-3-super-120b-a12b:free",
         "nvidia/nemotron-3-ultra-550b-a55b:free"
       ],
       "timeout": 20.0
+    },
+    {
+      "name": "ollama",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "api_key": "",
+      "models": [],
+      "timeout": 3.0
     }
   ],
   "auto": false
