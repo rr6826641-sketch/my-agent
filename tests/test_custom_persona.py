@@ -36,11 +36,12 @@ def test_custom_block_uses_file_text_and_enforcement(tmp_custom):
     assert "ENFORCEMENT LOCK" in block  # lock always appended
 
 
-def test_custom_block_empty_when_file_missing(tmp_path, monkeypatch):
+def test_custom_block_only_lock_when_file_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(personas, "CUSTOM_FILE",
                         str(tmp_path / "does_not_exist.txt"))
     block = personas.get_block("custom")
-    assert block == "" or "ENFORCEMENT LOCK" not in block
+    # No custom text -> only the enforcement lock remains
+    assert block == personas.ENFORCEMENT_LOCK
 
 
 def test_custom_block_disabled_when_not_uncensored(tmp_custom):
