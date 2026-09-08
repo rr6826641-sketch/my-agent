@@ -40,6 +40,18 @@ Phase 2 adds three upgrades on top of that pipeline:
 
 Everything is lazy: no DB is opened and no module import of the tool
 catalog happens until the first real "Unknown tool:" event.
+
+Phase 3 - security payload-handler tier
+---------------------------------------
+On top of the generic text-transform generators (`_RULES`), the engine ships
+a specialised payload-handler catalog (`_PAYLOAD_RULES`): pure,
+validator-clean generators for obfuscating / encoding attack payloads (HTML
+entities, double URL-encoding, JavaScript unicode escapes,
+String.fromCharCode arrays, alternating case, SQL inline-comment splitting,
+fullwidth Unicode).  They use the exact same spec shape as the generic tier,
+so matching, synthesis, self-testing, persistence and hot-reload behave
+identically, and each entry is flagged as payload work in
+``ToolSynthesizer.rules()``.
 """
 
 import ast
@@ -1098,6 +1110,187 @@ def run(**kw):
 
 
 # ---------------------------------------------------------------------------
+# _PAYLOAD_RULES: security payload-handler tier.  Specialised generators
+# used by dynamic exploit work to build / obfuscate attack payloads: HTML
+# entity encoding for XSS contexts, double URL-encoding for WAF bypass,
+# JavaScript unicode escapes and String.fromCharCode arrays, case
+# alternation, SQL inline-comment splitting and fullwidth-Unicode
+# obfuscation.  Each entry uses the exact same spec shape as _RULES
+# (key, aliases, description, parameters, source, probe) and is written to
+# pass the SynthesizedToolValidator unchanged.
+# ---------------------------------------------------------------------------
+_PAYLOAD_RULES = (
+    dict(
+        key="html_entity_encode",
+        aliases=("html_entity_encode", "xss_entity_encode",
+                 "html_escape_entities", "html_encode_entities"),
+        description=("Encode text as HTML/XML character entities for XSS "
+                     "payload contexts.  Default mode escapes only "
+                     "HTML-significant and non-printable characters; set "
+                     "encode_all=True to escape every character and "
+                     "use_hex=False to emit decimal entities."),
+        parameters=_schema({"data": _str_prop("Text to encode.", "")},
+                           ["data"]),
+        source='''
+def run(**kw):
+    data = str(kw.get("data", ""))
+    use_hex = bool(kw.get("use_hex", True))
+    encode_all = bool(kw.get("encode_all", False))
+    special = set(["&", "<", ">", '"', "'"])
+    out = []
+    for ch in data:
+        code = ord(ch)
+        if encode_all or ch in special or code < 32 or code > 126:
+            if use_hex:
+                out.append("&#x%x;" % code)
+            else:
+                out.append("&#%d;" % code)
+        else:
+            out.append(ch)
+    return "".join(out)
+''',
+        probe=[{"args": {"data": "<b>hi</b>"},
+                "expect": "&#x3c;b&#x3e;hi&#x3c;/b&#x3e;"}],
+    ),
+    dict(
+        key="double_url_encode",
+        aliases=("double_url_encode", "url_encode_twice", "double_encode",
+                 "dbl_url_encode", "waf_url_bypass"),
+        description=("Percent-encode a string twice so that one decoding "
+                     "layer still leaves an encoded payload behind - a "
+                     "classic WAF-bypass trick for reflected XSS and SQLi "
+                     "filters."),
+        parameters=_schema({"data": _str_prop("Text to double-encode.", "")},
+                           ["data"]),
+        source='''
+def run(**kw):
+    data = str(kw.get("data", ""))
+    def enc_once(text):
+        safe = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~"
+        parts = []
+        for ch in text:
+            if ch in safe:
+                parts.append(ch)
+            else:
+                parts.append("%" + hex(ord(ch))[2:].upper().zfill(2))
+        return "".join(parts)
+    return enc_once(enc_once(data))
+''',
+        probe=[{"args": {"data": "a b"}, "expect": "a%2520b"}],
+    ),
+    dict(
+        key="js_unicode_escape",
+        aliases=("js_unicode_escape", "unicode_escape_js", "u_escape",
+                 "js_escape_unicode"),
+        description=("Escape every character as a JavaScript/JSON \\uXXXX "
+                     "unicode escape sequence for obfuscating XSS payloads "
+                     "that land inside script string contexts."),
+        parameters=_schema({"data": _str_prop("Text to escape.", "")},
+                           ["data"]),
+        source='''
+def run(**kw):
+    data = str(kw.get("data", ""))
+    slash = chr(92)
+    out = []
+    for ch in data:
+        code = ord(ch)
+        out.append(slash + "u" + ("%04x" % code))
+    return "".join(out)
+''',
+        probe=[{"args": {"data": "x"},
+                "expect": "\\u0078"}],
+    ),
+    dict(
+        key="js_fromcharcode",
+        aliases=("js_fromcharcode", "fromcharcode", "js_charcode",
+                 "charcode_array", "char_code_obfuscate"),
+        description=("Rebuild a string as a JavaScript "
+                     "String.fromCharCode(...) call so the payload never "
+                     "appears as plain text in the page source or filters."),
+        parameters=_schema({"data": _str_prop("Text to obfuscate.", "")},
+                           ["data"]),
+        source='''
+def run(**kw):
+    data = str(kw.get("data", ""))
+    codes = []
+    for ch in data:
+        codes.append(str(ord(ch)))
+    return "String.fromCharCode(" + ",".join(codes) + ")"
+''',
+        probe=[{"args": {"data": "A"},
+                "expect": "String.fromCharCode(65)"}],
+    ),
+    dict(
+        key="mixed_case_alternate",
+        aliases=("mixed_case_alternate", "alternating_case", "case_obfuscate",
+                 "to_alternating_case"),
+        description=("Rewrite text in alternating case (ScRiPt style) to "
+                     "slip past naive signature and case-sensitive keyword "
+                     "filters while browsers still parse it case-insensitively."),
+        parameters=_schema({"data": _str_prop("Text to transform.", "")},
+                           ["data"]),
+        source='''
+def run(**kw):
+    data = str(kw.get("data", ""))
+    out = []
+    for idx, ch in enumerate(data):
+        if idx % 2 == 0:
+            out.append(ch.upper())
+        else:
+            out.append(ch.lower())
+    return "".join(out)
+''',
+        probe=[{"args": {"data": "script"}, "expect": "ScRiPt"}],
+    ),
+    dict(
+        key="sql_comment_obfuscate",
+        aliases=("sql_comment_obfuscate", "sql_inline_comment",
+                 "comment_obfuscate", "inline_comment_sql"),
+        description=("Split a SQL keyword with /**/ inline comments (e.g. "
+                     "SELECT becomes S/**/E/**/L/**/E/**/C/**/T) so simple "
+                     "signature and tokenisation filters miss it while the "
+                     "SQL parser still sees the original keyword."),
+        parameters=_schema({"data": _str_prop("SQL text to obfuscate.", "")},
+                           ["data"]),
+        source='''
+def run(**kw):
+    data = str(kw.get("data", ""))
+    return "/**/".join(data)
+''',
+        probe=[{"args": {"data": "SELECT"},
+                "expect": "S/**/E/**/L/**/E/**/C/**/T"}],
+    ),
+    dict(
+        key="unicode_fullwidth",
+        aliases=("unicode_fullwidth", "fullwidth_encode", "full_width_obfuscate",
+                 "wide_char_encode"),
+        description=("Map printable ASCII onto its Unicode fullwidth forms "
+                     "(A becomes fullwidth A) so text is invisible to "
+                     "ASCII-based filters yet still renders identically to "
+                     "the human eye."),
+        parameters=_schema({"data": _str_prop("Text to convert.", "")},
+                           ["data"]),
+        source='''
+def run(**kw):
+    data = str(kw.get("data", ""))
+    out = []
+    for ch in data:
+        code = ord(ch)
+        if code == 32:
+            out.append(chr(0x3000))
+        elif 0x21 <= code <= 0x7E:
+            out.append(chr(code + 0xFEE0))
+        else:
+            out.append(ch)
+    return "".join(out)
+''',
+        probe=[{"args": {"data": "Ab"},
+                "expect": "\uff21\uff42"}],
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
 # ToolSynthesizer / SynthesizedToolValidator / SelfEvolutionEngine
 # (dynamic tool-synthesis half of the Autonomous Self-Evolution Engine)
 # ---------------------------------------------------------------------------
@@ -1113,8 +1306,9 @@ class ToolSynthesizer:
     falling back to a gap-driven code-model tier for capability gaps that
     have no declarative rule generator.
 
-    Rules live in `_RULES` (declared above): each carries a canonical
-    `key`, a tuple of `aliases`, a JSON-schema `parameters` block, a
+    Rules live in `_RULES` and the payload-handler catalog `_PAYLOAD_RULES`
+    (both declared above): each carries a canonical `key`, a tuple of
+    `aliases`, a JSON-schema `parameters` block, a
     self-contained module `source` exposing ``def run(**kw)``, and a
     `probe` list used for self-testing after synthesis.  Matching is done
     on a normalised form (lowercase, non-alphanumerics stripped) so
@@ -1138,8 +1332,12 @@ class ToolSynthesizer:
     validation gate (the engine never approves untested code).
     """
 
-    def __init__(self, rules=_RULES, code_model=None):
-        self._rules = tuple(rules)
+    def __init__(self, rules=_RULES, code_model=None,
+                 payload_rules=_PAYLOAD_RULES):
+        self._rules = tuple(rules) + tuple(payload_rules or ())
+        self._payload_keys = frozenset(
+            rule["key"] for rule in (payload_rules or ())
+            if isinstance(rule, dict) and rule.get("key"))
         self._index = {}
         for rule in self._rules:
             names = [rule["key"]]
@@ -1234,6 +1432,7 @@ class ToolSynthesizer:
                 "aliases": tuple(rule.get("aliases") or ()),
                 "description": rule["description"],
                 "probe_count": len(rule.get("probe") or []),
+                "payload": rule["key"] in self._payload_keys,
             }
             for rule in self._rules
         ]
