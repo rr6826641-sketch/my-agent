@@ -23,7 +23,7 @@ from ..continuity import (
 from ..learning import SessionLearner
 from ..rules_engine import RulesEngine
 from ..compaction import (
-    CompactionStore, estimate_chars, extractive_digest)
+    CompactionStore, Compactor, estimate_chars, extractive_digest)
 from ..tools import (
     create_tools, execute_tool, register_live_catalog,
 )
@@ -2855,6 +2855,7 @@ class Agent:
                    "block": reform.scope_block,
                    "metadata": reform.scope.to_dict()
                    if reform.scope is not None else None}
+        self._maybe_compact()
         self._maybe_trim()
         yield {"type": "start", "content": user_input}
         # F3: if a paused mission checkpoint exists and this message asks
@@ -3148,7 +3149,8 @@ class Agent:
                 sev = self._evolution_watch(result=result)
                 if sev:
                     yield sev
-            self._maybe_trim()
+            self._maybe_compact()
+        self._maybe_trim()
 
         # F2/F3: distill lessons and auto-checkpoint so a truncated run can
         # be resumed with 'continue' instead of restarting from scratch.
@@ -3298,6 +3300,30 @@ class Agent:
             time.sleep(0.4)
 
     # ------------------------------------------------------------ memory mgmt
+
+    def _maybe_compact(self):
+        """Token-window auto-compaction (Phase 1 runtime hook).
+
+        When the live history crosses the 70% watermark, older turns are
+        distilled into a key-finding digest that is injected at the prompt
+        head and persisted per-target.  Failures never break the loop.
+        """
+        try:
+            if self._compaction is None:
+                self._compaction = Compactor(
+                    max_tokens=max(1000, int(self.max_context_chars / 4)),
+                    threshold=0.70,
+                    store=self.compaction_store,
+                    target=getattr(self, "target", None) or self.name,
+                )
+            if self._compaction.should_compact(self.messages):
+                out = self._compaction.compact(self.messages)
+                if out.get("compacted"):
+                    self.messages = out["messages"]
+                    if out.get("system_note"):
+                        self._session_digest_shown = True
+        except Exception:
+            pass  # compaction must never break the agent loop
 
     def _maybe_trim(self):
         if len(self.messages) <= self.max_messages:

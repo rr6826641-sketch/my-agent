@@ -154,3 +154,41 @@ def test_store_ring_cap_and_reload(tmp):
 
     reloaded = CompactionStore(base_dir=tmp)          # survives restart
     assert reloaded.consult("target-a") == "digest-7"
+
+
+# --------------------------------------------------------------------------
+# 4. Agent-loop integration (runtime hook)
+# --------------------------------------------------------------------------
+def _mk_agent(tmp, tokens=4000):
+    from ai_agent.core import Agent
+    from ai_agent.llm import MockClient
+    store = CompactionStore(base_dir=tmp)
+    agent = Agent(
+        llm=MockClient(),
+        name="test-agent",
+        max_context_chars=tokens * 4,      # ~token window for the compactor
+        compaction_store=store,
+        learner=None,
+    )
+    return agent, store
+
+
+def test_agent_loop_compacts_at_watermark(tmp):
+    agent, store = _mk_agent(tmp)
+    agent.messages = make_msgs(200, fill=120)   # ~ (120+10)tok*200 = 26k tok
+    agent._maybe_compact()
+    assert agent.messages[0]["role"] == "system"        # digest at prompt head
+    assert "[AUTO-COMPACTED" in agent.messages[0]["content"]
+    assert len(agent.messages) < 200                    # raw history pruned
+    assert store.count("test-agent") >= 1               # digest persisted
+    # loop-safe: repeated calls never raise, window stays bounded
+    agent._maybe_compact()
+    agent._maybe_compact()
+
+
+def test_agent_loop_skips_below_watermark(tmp):
+    agent, _ = _mk_agent(tmp)
+    agent.messages = make_msgs(3, fill=120)   # tiny history, no compaction
+    agent._maybe_compact()
+    assert len(agent.messages) == 4           # untouched (3 turns + tool msg)
+    assert agent.messages[0]["role"] != "system"
