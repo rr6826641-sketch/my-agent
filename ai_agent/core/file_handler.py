@@ -155,7 +155,11 @@ def multimodal_content(text: str, image_paths):
         else:
             path = item
             mime = sniff_mime(os.path.basename(path), _read_head(path))
-        if mime in VISION_MIMES:
+        if not os.path.isfile(path):
+            # the artifact vanished between upload and payload build - never
+            # crash a chat over a stale attachment, surface it as a note
+            notes.append(os.path.basename(path))
+        elif mime in VISION_MIMES:
             blocks.append(image_content_block(path, mime))
         else:
             notes.append(os.path.basename(path))

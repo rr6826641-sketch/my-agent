@@ -771,6 +771,7 @@ def api_chat():
         session["updated"] = time.time()
         _write_chats_unlocked(data)
 
+    _attach_session_vision(sid)
     run_id = uuid.uuid4().hex
     stop_event = threading.Event()
     with _run_lock:
@@ -2089,6 +2090,23 @@ def _hidden_or_sensitive(path):
 # --------------------------------------------------------------------------
 # Phase 1 - multimodal upload pipeline (/api/upload)
 # --------------------------------------------------------------------------
+
+
+
+
+def _attach_session_vision(sid):
+    """Phase 1b: attach a session's image uploads to the live LLM client so
+    the first vision-capable model call can analyze screenshots/diagrams."""
+    if not sid:
+        return
+    agent = _state.get("agent")
+    llm = getattr(agent, "llm", None)
+    if llm is None or not hasattr(llm, "set_vision_attachments"):
+        return
+    att = [(r["path"], r["mime"]) for r in uploads.files_for_session(sid)
+           if r.get("mime") in ("image/png", "image/jpeg", "image/webp")
+           and r.get("path") and os.path.isfile(r["path"])]
+    llm.set_vision_attachments(att)
 
 
 def _upload_sid():
