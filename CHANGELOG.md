@@ -11,6 +11,11 @@
   final message lists the completed tool work (rolling digest of the last
   few tool results) instead of a bare "(empty reply)" - the caller always
   learns what actually happened.
+- Stream-cancel race fixed: closing the HTTP response mid-iteration on a
+  cancelled run (deadline/stop watchdog) made requests/urllib3 raise a raw
+  AttributeError ('NoneType' .read) instead of RunCancelled - observed on
+  the phishing probe exactly at the 110 s deadline. It now maps back to
+  RunCancelled.
 ## [2026-09-08] runtime watchdog + probe harness
 
 - fix(runtime): agent.run() supports stop_event + wall-clock `deadline`; daemon watchdog

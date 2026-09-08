@@ -1320,6 +1320,17 @@ class OpenAIClient:
             drop_exc = exc
         except requests.exceptions.RequestException as exc:
             raise LLMError("API stream failed: %s" % exc)
+        except AttributeError as exc:
+            # requests/urllib3 raise a raw AttributeError ('NoneType'
+            # object has no attribute 'read') when the watcher thread
+            # closed the response mid-iteration on a cancelled run.
+            # Map that back to RunCancelled so deadline/stop aborts stay
+            # clean; a stray read bug is otherwise surfaced as an
+            # unexplained AttributeError deep inside the SDK.
+            if cancel_event is not None and cancel_event.is_set():
+                raise RunCancelled(
+                    "generation cancelled by user") from exc
+            raise LLMError("API stream read failed: %s" % exc) from exc
         finally:
             stop_watch.set()
             resp.close()
