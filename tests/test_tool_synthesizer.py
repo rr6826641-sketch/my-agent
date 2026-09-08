@@ -5,14 +5,24 @@ auto-patch feedback loop -> hot reload" lifecycle using a stub code
 model that ships broken code first and a stub validator that replays
 sandbox verdicts, so no subprocess is spawned and the real store at
 memory/synthesized_tools.db is never touched.
+
+The payload-handler tier (_PAYLOAD_RULES) is covered end-to-end with the
+REAL SynthesizedToolValidator (in-process probes, sandbox=None) so the
+catalog itself is regression-tested: every rule source must compile, its
+probes must pass, and the full engine pipeline must synthesize and
+hot-reload each payload key.
 """
 
 import copy
 
+import pytest
+
 from ai_agent.core.self_evolution import (
     CapabilityGap,
     SelfEvolutionEngine,
+    SynthesizedToolValidator,
     ToolSynthesizer,
+    _PAYLOAD_RULES,
 )
 
 GAP_MISSING_TOOL = "missing_tool"
@@ -148,3 +158,75 @@ def test_no_rule_no_code_model_is_no_match(tmp_path):
     assert out["status"] == "synthesized"
     assert engine.stats["patched"] == 0
     engine.close()
+
+
+# ---------------------------------------------------------------------------
+# Payload-handler tier (_PAYLOAD_RULES)
+# ---------------------------------------------------------------------------
+
+PAYLOAD_KEYS = tuple(rule["key"] for rule in _PAYLOAD_RULES
+                     if isinstance(rule, dict) and rule.get("key"))
+
+
+@pytest.mark.parametrize("key", PAYLOAD_KEYS)
+def test_payload_rule_compiles_and_passes_probes_with_real_validator(key):
+    """Every payload rule must survive the REAL validator: source compiles
+    under the AST allowlist and its micro unit tests (probes) pass against
+    the built func.  Guards against tokenizer/quoting bugs silently eating
+    backslashes inside rule source (the html_entity_encode regression)."""
+    spec = ToolSynthesizer().synthesize(name=key)
+    assert spec is not None, "rule %r not synthesizable" % key
+    assert spec.get("source")
+    verdict = SynthesizedToolValidator().validate(spec, run_probes=True)
+    assert verdict["ok"] is True, (
+        "%s: errors=%r probe_failures=%r"
+        % (key, verdict["errors"], verdict["probe_failures"]))
+    func = verdict["func"]
+    for probe in spec["probe"]:
+        args = dict(probe.get("args") or {})
+        assert func(**args) == probe["expect"]
+
+
+@pytest.mark.parametrize("key", PAYLOAD_KEYS)
+def test_payload_rule_registers_through_engine(key, tmp_path):
+    """Full missing-tool lifecycle for each payload key with the real
+    validator: detector -> rule synthesis -> validation -> hot reload ->
+    persistence.  No code model is required (declarative rule tier)."""
+    registered = []
+    engine = SelfEvolutionEngine(
+        store_path=str(tmp_path / ("%s.db" % key)),
+        hot_reload=lambda spec: (registered.append(spec["name"])
+                                 or spec["name"]),
+        detector=_detector_for(key),
+        synthesizer=ToolSynthesizer(),
+        validator=SynthesizedToolValidator(),
+        max_patches=2,
+    )
+    try:
+        out = engine.observe(result="Unknown tool: %s" % key)
+        assert out is not None
+        assert out["status"] == "synthesized", \
+            "%s: status=%s detail=%s" % (key, out["status"], out["detail"])
+        assert out["registered"] is True
+        assert out["name"] == key
+        assert engine.stats["patched"] == 0
+        assert engine.stats["rejected"] == 0
+        assert registered == [key]
+    finally:
+        engine.close()
+
+
+def test_payload_rules_flagged_in_catalog():
+    """rules() must expose the payload tier: exactly the _PAYLOAD_RULES
+    entries flagged payload=True and no rule left without a flag."""
+    synth = ToolSynthesizer()
+    catalog = synth.rules()
+    payload = [r for r in catalog if r.get("payload")]
+    assert len(payload) == len(PAYLOAD_KEYS) == len(_PAYLOAD_RULES)
+    assert {r["key"] for r in payload} == set(PAYLOAD_KEYS)
+    # every catalog entry carries an explicit boolean payload marker
+    assert all("payload" in r for r in catalog)
+    assert any(not r["payload"] for r in catalog), \
+        "generic tier must remain non-payload"
+    # probe self-tests are shipped with every payload generator
+    assert all(r.get("probe_count", 0) >= 1 for r in payload)
