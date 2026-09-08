@@ -674,6 +674,10 @@ class OpenAIClient:
         # Phase 1b: per-run image attachments [(path, mime), ...] embedded on
         # the first vision-capable model call, then cleared automatically.
         self.vision_attachments = []
+        # Phase 1b (item 2): one-shot per-run text context for non-image
+        # uploads (TXT/JSON snippets, PDF/PCAP notes) appended to the next
+        # chat call alongside the vision blocks.
+        self.text_context = []
         # reachable local model, so _request_target() can route a chain
         # entry back to the endpoint that actually hosts it.
         self._local_route = {}
@@ -890,6 +894,35 @@ class OpenAIClient:
             self.vision_attachments = []  # one-shot per turn
         return out
 
+    def attach_text_context(self, blocks):
+        """Register per-run non-image file context lines (str or list).
+
+        Appended to the LAST user message of the next chat call, then
+        cleared automatically - same one-shot semantics as images."""
+        if isinstance(blocks, str):
+            blocks = [blocks]
+        elif not isinstance(blocks, (list, tuple)):
+            blocks = [blocks]  # single scalar note
+        self.text_context = [str(b) for b in (blocks or [])
+                             if str(b).strip()]
+
+    def _messages_with_context(self, messages):
+        """Append pending file-context text to the last user message."""
+        if not self.text_context or not messages:
+            return messages
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "user":
+                out = list(messages)
+                msg = dict(messages[i])
+                joined = "\n".join(self.text_context)
+                _append_user_content(
+                    msg, "\n\n[ATTACHED FILES - analyze for context]\n"
+                         + joined + "\n")
+                out[i] = msg
+                self.text_context = []
+                return out
+        return messages  # no user turn yet: keep context pending
+
     def chat(self, messages, tools=None, temperature=0.2):
         intent_class = _intent_class_of(messages)
         models = self._chain_for_call()
@@ -1003,6 +1036,7 @@ class OpenAIClient:
         if self.uncensored:
             messages = _prep_messages(messages, True)
             temperature = max(temperature, 0.6)
+        messages = self._messages_with_context(messages)
         messages = self._messages_with_vision(model, messages)
         payload = {
             "model": model,
@@ -1164,6 +1198,7 @@ class OpenAIClient:
         if self.uncensored:
             messages = _prep_messages(messages, True)
             temperature = max(temperature, 0.6)
+        messages = self._messages_with_context(messages)
         messages = self._messages_with_vision(model, messages)
         payload = {
             "model": model,

@@ -771,7 +771,7 @@ def api_chat():
         session["updated"] = time.time()
         _write_chats_unlocked(data)
 
-    _attach_session_vision(sid)
+    _attach_session_files(sid)
     run_id = uuid.uuid4().hex
     stop_event = threading.Event()
     with _run_lock:
@@ -2094,19 +2094,47 @@ def _hidden_or_sensitive(path):
 
 
 
-def _attach_session_vision(sid):
-    """Phase 1b: attach a session's image uploads to the live LLM client so
-    the first vision-capable model call can analyze screenshots/diagrams."""
+def _describe_nonimage(rec):
+    """One context line for a non-image upload: inline TXT/JSON content,
+    metadata note for binary formats (PCAP/PDF)."""
+    name = rec.get("original_name") or os.path.basename(rec["path"])
+    size = rec.get("size", 0)
+    mime = rec.get("mime", "")
+    try:
+        with open(rec["path"], "r", encoding="utf-8",
+                  errors="replace") as fh:
+            head = fh.read(6000)
+    except OSError:
+        head = ""
+    if mime in ("text/plain", "application/json"):
+        kind = "TEXT" if mime == "text/plain" else "JSON"
+        return "%s FILE %s (%d bytes):\n%s" % (kind, name, size, head)
+    return "[FILE %s (%s, %d bytes) uploaded - binary format, " \
+           "not inlined]" % (name, mime, size)
+
+
+def _attach_session_files(sid):
+    """Phase 1b: attach a session's uploads to the live LLM client so the
+    first chat call can analyze them - images as vision blocks, non-image
+    files (TXT/JSON/PCAP/PDF) as inline text context."""
     if not sid:
         return
     agent = _state.get("agent")
     llm = getattr(agent, "llm", None)
-    if llm is None or not hasattr(llm, "set_vision_attachments"):
+    if llm is None:
         return
-    att = [(r["path"], r["mime"]) for r in uploads.files_for_session(sid)
-           if r.get("mime") in ("image/png", "image/jpeg", "image/webp")
-           and r.get("path") and os.path.isfile(r["path"])]
-    llm.set_vision_attachments(att)
+    recs = uploads.files_for_session(sid)
+    imgs = [(r["path"], r["mime"]) for r in recs
+            if r.get("mime") in ("image/png", "image/jpeg", "image/webp")
+            and r.get("path") and os.path.isfile(r["path"])]
+    notes = [_describe_nonimage(r) for r in recs
+             if r.get("mime") not in ("image/png", "image/jpeg",
+                                       "image/webp")
+             and r.get("path") and os.path.isfile(r["path"])]
+    if imgs and hasattr(llm, "set_vision_attachments"):
+        llm.set_vision_attachments(imgs)
+    if notes and hasattr(llm, "attach_text_context"):
+        llm.attach_text_context(notes)
 
 
 def _upload_sid():
