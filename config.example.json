@@ -23,5 +23,14 @@
       "prefix": "mcp_",
       "confirm": false
     }
+  ],
+  "local_first": false,
+  "local_endpoints": [
+    {
+      "name": "groq",
+      "base_url": "https://api.groq.com/openai/v1",
+      "api_key_env": "GROQ_API_KEY",
+      "timeout": 8.0
+    }
   ]
 }

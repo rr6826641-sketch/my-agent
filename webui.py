@@ -397,7 +397,9 @@ def _build_llm(cfg):
                                        uncensored=uncensored)
     if cfg.get("mock"):
         client = MockClient(uncensored=uncensored,
-                           uncensored_mix=mix)
+                           uncensored_mix=mix,
+                           local_endpoints=cfg.get("local_endpoints"),
+                           local_first=bool(cfg.get("local_first")))
     else:
         # Smart Auto-Model Selector: in auto mode the configured model is a
         # placeholder; the actual model is chosen per-request by the router.
@@ -419,6 +421,8 @@ def _build_llm(cfg):
             # Red Team Mode (pro-mix): widen the uncensored failover pool
             # with the mythos/dolphin mix and rotate it per request.
             uncensored_mix=mix,
+            local_endpoints=cfg.get("local_endpoints"),
+            local_first=bool(cfg.get("local_first")),
         )
     client.persona_block = persona_block
     return client

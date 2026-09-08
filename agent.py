@@ -45,7 +45,9 @@ def main():
     cfg = load_config(args)
 
     if cfg["mock"]:
-        llm = MockClient(uncensored=cfg.get("red_team_mode"))
+        llm = MockClient(uncensored=cfg.get("red_team_mode"),
+                        local_endpoints=cfg.get("local_endpoints"),
+                        local_first=bool(cfg.get("local_first")))
         print("[mock mode] using the built-in test LLM")
     else:
         llm = OpenAIClient(
@@ -59,6 +61,8 @@ def main():
             # safety-tuned generic fallback.
             uncensored_fallbacks=(UNCENSORED_FALLBACK_MODELS
                                   if cfg.get("red_team_mode") else None),
+            local_endpoints=cfg.get("local_endpoints"),
+            local_first=bool(cfg.get("local_first")),
         )
         if not cfg["api_key"] and cfg["base_url"].startswith("https://api.openai.com"):
             print("[warning] no API key set - add AGENT_API_KEY to .env "

@@ -231,7 +231,8 @@ LOCAL_ENDPOINT_DEFAULTS = {
 
 # Auto-discovery skips non-chat models local servers also list
 # (embeddings / rerankers / vision-only tags).
-_LOCAL_SKIP_SUBSTR = ("embed", "minilm", "bge-", "nomic", "rerank")
+_LOCAL_SKIP_SUBSTR = ("embed", "minilm", "bge-", "nomic", "rerank",
+                       "whisper", "tts")
 
 
 def _normalize_local_endpoints(endpoints):
@@ -268,10 +269,14 @@ def _normalize_local_endpoints(endpoints):
                 ep.get("endpoint") or ""
             if not base and key in LOCAL_ENDPOINT_DEFAULTS:
                 base = LOCAL_ENDPOINT_DEFAULTS[key]["base_url"]
+            api_key = ep.get("api_key") or ""
+            if not api_key:
+                api_key = (os.environ.get(
+                    str(ep.get("api_key_env") or ""), "") or "").strip()
             spec = {
                 "name": key,
                 "base_url": str(base).rstrip("/"),
-                "api_key": ep.get("api_key", ""),
+                "api_key": api_key,
                 "default_models": ep.get("models") or ep.get("model")
                 or [],
                 "timeout": float(ep.get("timeout") or 3.0),
@@ -298,9 +303,13 @@ def _probe_local_endpoint(spec):
     """
     url = spec.get("base_url", "").rstrip("/") + "/models"
     try:
+        headers = {"Content-Type": "application/json"}
+        ak = str(spec.get("api_key") or "").strip()
+        if ak:
+            headers["Authorization"] = "Bearer " + ak
         resp = requests.get(
             url, timeout=float(spec.get("timeout") or 3.0),
-            headers={"Content-Type": "application/json"})
+            headers=headers)
         if resp.status_code != 200:
             return []
         data = resp.json()

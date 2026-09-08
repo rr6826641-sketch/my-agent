@@ -28,6 +28,18 @@ Sare notable changes is project ke. Format: `[Semantic Versioning](https://semve
 - **Docs** — README: MCP wiring guide, WebUI status panel, custom persona
   activation (UI + config); CHANGELOG.
 
+### Added
+- **Groq API key endpoint plug-in** — `local_endpoints` specs now
+  support `api_key_env` (key resolves from .env at runtime, never stored
+  in config.json), remote /models probing sends `Authorization` when the
+  endpoint has its own key, audio/whisper ids are filtered, and
+  discovered models route to the endpoint's own base_url + key. Wired
+  through WebUI `_build_llm`, CLI `agent.py`, `config.json` and
+  `config.example.json`. Live proof: 12 Groq models discovered,
+  GROQ_LIVE_CHAT: PASS.
+- Tests: `tests/test_groq_endpoint.py` (env-key resolution, authed
+  probe, model filtering, endpoint routing, chain ordering).
+
 ### Fixed
 - Custom persona missing-file contract: when `personas_custom.txt` does not
   exist, `get_block("custom")` returns only the (edge-stripped)

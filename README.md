@@ -468,6 +468,25 @@ Persona id `custom` ka directive block runtime par
 `[ENFORCEMENT LOCK]` ke saath append hota hai (refusal-free, persistence,
 anti-drift). Test coverage: `tests/test_custom_persona.py`.
 
+### Extra provider: Groq API key (endpoint plug-in)
+
+Groq (`https://api.groq.com/openai/v1`) ek additional OpenAI-compatible
+provider ke tor par agent ke failover chain mein plug ho sakta hai - apni
+**apni API key** ke saath, same mechanism jo Ollama/LM Studio ke liye hai.
+
+1. **Key:** `.env` mein `GROQ_API_KEY=gsk_...` daalo (git-ignored).
+2. **Config:** `config.json` mein `local_endpoints` block already hai
+   (`name: groq`, `api_key_env: GROQ_API_KEY`). Key kabhi config.json mein
+   nahi hoti - runtime par env se resolve hoti hai.
+3. Agent start par Groq ke `/models` se chat models auto-discover hote
+   hain aur uncensored pool ke baad failover chain mein splice ho jate
+   hain - OpenRouter fail/refuse kare to Groq models (llama-3.3-70b,
+   gpt-oss, qwen, ...) next strike dete hain.
+
+Groq ko *primary* provider banane ke liye Settings mein
+`base_url = https://api.groq.com/openai/v1`, model = koi bhi Groq model
+rakho aur `.env` ka `AGENT_API_KEY` usi key se replace karo.
+
 ## ✅ Naya kya hai (HackerAI-style upgrade)
 
 - **Parallel sub-agents** — `spawn_agents` (max 8 concurrent, per-agent timeout 900s, depth 3)
