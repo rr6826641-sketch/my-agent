@@ -1683,8 +1683,9 @@ class SelfEvolutionEngine:
 
     def __init__(self, store_path=None, hot_reload=None, detector=None,
                  synthesizer=None, validator=None, on_gap=None,
-                 sandbox=None):
+                 sandbox=None, max_patches: int = 2):
         self.store_path = store_path or DEFAULT_STORE_PATH
+        self.max_patches = max(0, int(max_patches or 0))
         self._hot_reload = hot_reload
         self.detector = (detector if detector is not None
                          else CapabilityGapDetector())
@@ -1708,7 +1709,7 @@ class SelfEvolutionEngine:
         self.stats = {
             "observed": 0, "synthesized": 0, "reloaded": 0, "rejected": 0,
             "no_match": 0, "invalid_name": 0, "errors": 0,
-            "gaps_recorded": 0,
+            "patched": 0, "gaps_recorded": 0,
         }
 
     # -- internals ---------------------------------------------------------
@@ -1752,6 +1753,22 @@ class SelfEvolutionEngine:
         spec["func"] = func
         self._register(spec)
         return func
+
+    @staticmethod
+    def _verdict_feedback(verdict) -> str:
+        """Render a validator verdict into a single patch-feedback line."""
+        problems = list(verdict["errors"])
+        for failure in verdict["probe_failures"]:
+            if "error" in failure:
+                problems.append("probe %d failed: %s"
+                                % (failure.get("probe"),
+                                   failure.get("error")))
+            else:
+                problems.append("probe %d failed: %r != expected %r"
+                                % (failure.get("probe"),
+                                   failure.get("actual"),
+                                   failure.get("expected")))
+        return "; ".join(problems) or "validation failed"
 
     @staticmethod
     def _public(spec):
@@ -1817,23 +1834,39 @@ class SelfEvolutionEngine:
                     "no_match", name,
                     detail="no rule generator for %r" % name)
             verdict = self.validator.validate(spec, run_probes=True)
+            # PHASE 3: dynamic auto-patching.  When a code-model spec fails
+            # sandbox micro-tests, feed the syntax/probe errors back to the
+            # synthesizer and re-run validation until it passes or the
+            # patch budget runs out.  Rule generators are deterministic and
+            # are never retried.
+            patches = 0
+            while (not verdict["ok"] and patches < self.max_patches
+                   and spec.get("rule") == "code-model"):
+                patches += 1
+                feedback = self._verdict_feedback(verdict)
+                if not feedback:
+                    break
+                patch_gap = copy.copy(gap)
+                prompt = ("[AUTO-PATCH #%d] generated tool failed "
+                          "validation: %s.  Return a corrected tool JSON "
+                          "(fixed source + passing probes)."
+                          % (patches, feedback))
+                patch_gap.detail = (str((gap.detail
+                                          or gap.functional_description
+                                          or "").strip())
+                                     + chr(10) + prompt)
+                patch_gap.functional_description = patch_gap.detail
+                spec = self.synthesizer.synthesize(name, gap=patch_gap)
+                if spec is None:
+                    break
+                verdict = self.validator.validate(spec, run_probes=True)
             if not verdict["ok"]:
                 self.stats["rejected"] += 1
-                problems = list(verdict["errors"])
-                for failure in verdict["probe_failures"]:
-                    if "error" in failure:
-                        problems.append("probe %d failed: %s"
-                                        % (failure.get("probe"),
-                                           failure.get("error")))
-                    else:
-                        problems.append(
-                            "probe %d failed: %r != expected %r"
-                            % (failure.get("probe"),
-                               failure.get("actual"),
-                               failure.get("expected")))
                 return self._respond(
                     "rejected", name, spec=spec,
-                    detail="; ".join(problems) or "validation failed")
+                    detail=self._verdict_feedback(verdict))
+            if patches:
+                self.stats["patched"] += patches
             spec["func"] = verdict["func"]
             store.save(spec)
             try:
