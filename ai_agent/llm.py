@@ -477,6 +477,31 @@ def _looks_like_refusal(message):
     head = content[:_REFUSAL_MAX_LEN]
     return bool(_REFUSAL_RE.search(head))
 
+
+def _is_blocked_reply(message):
+    """Refusal-equivalent check used by Red Team Mode (uncensored).
+
+    A reply counts as blocked when it is a textual refusal OR a silent
+    reply: empty content with no tool calls. Providers that safety-tune
+    at the endpoint often suppress a policy hit by returning an empty
+    ``content`` ("") instead of a refusal sentence; the textual matcher
+    alone would treat that silence as a clean answer and hand it to the
+    user as an empty turn. In uncensored mode that silence must feed the
+    same escalating reformulation ladder + model failover as an explicit
+    refusal. Tool-only turns (no content, but tool_calls present) are
+    never blocked - they are normal tool-use messages.
+    """
+    msg = message or {}
+    if not msg:
+        return False  # no message at all is handled upstream as failover
+    if msg.get("tool_calls"):
+        return False
+    content = (msg.get("content") or "").strip()
+    if not content:
+        return True  # silent suppression / empty refusal
+    head = content[:_REFUSAL_MAX_LEN]
+    return bool(_REFUSAL_RE.search(head))
+
 # Boilerplate tail sentences a safety-tuned model sometimes appends AFTER a
 # complete technical answer.  They are not refusals (the work is already
 # delivered), but they pollute payloads/copy-paste, so the engine strips
@@ -952,7 +977,7 @@ class OpenAIClient:
             # reformulation ladder; if every strike refuses too, this model
             # is abandoned and the next fallback candidate takes the shot.
             if (self.uncensored and reply is not None
-                    and _looks_like_refusal(reply)):
+                    and _is_blocked_reply(reply)):
                 retried, clean = self._retry_refusal(
                     model, messages, tools, temperature, intent_class)
                 if clean:
@@ -1032,7 +1057,7 @@ class OpenAIClient:
             except LLMError:
                 retried = None
                 strategy = None
-            if retried is not None and not _looks_like_refusal(retried):
+            if retried is not None and not _is_blocked_reply(retried):
                 if strategy is not None:
                     winning_strategy = strategy
                 self.refusal_intel.record_outcome(
@@ -1157,7 +1182,7 @@ class OpenAIClient:
                 final_msg = ev["message"]
         if final_msg is None:
             return None
-        if _looks_like_refusal(final_msg):
+        if _is_blocked_reply(final_msg):
             strikes_used = 0
             winning_strategy = None
             for strike in range(self.refusal_retries):
@@ -1170,7 +1195,7 @@ class OpenAIClient:
                 except LLMError:
                     retry = None
                     strategy = None
-                if retry is not None and not _looks_like_refusal(retry):
+                if retry is not None and not _is_blocked_reply(retry):
                     if strategy is not None:
                         winning_strategy = strategy
                     self.refusal_intel.record_outcome(
