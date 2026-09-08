@@ -39,6 +39,31 @@ class EmptyFirstClient(MockClient):
                            "tool_calls": []}}
 
 
+class ToolThenEmptyClient(MockClient):
+    """One real tool call, then permanently empty turns - the persistent
+    empty-final condition after evidence-producing work."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+
+    def chat_stream(self, messages, tools=None, temperature=0.2,
+                    cancel_event=None, model=None):
+        self.calls += 1
+        if self.calls == 1:
+            yield {"type": "message",
+                   "message": {"role": "assistant", "content": "",
+                               "tool_calls": [
+                                   {"id": "call_0",
+                                    "type": "function",
+                                    "function": {"name": "list_files",
+                                                 "arguments": "{}"}}]}}
+            return
+        yield {"type": "message",
+               "message": {"role": "assistant", "content": "",
+                           "tool_calls": []}}
+
+
 class AlwaysEmptyClient(MockClient):
     """Always returns empty content-less messages - retries must be
     bounded so the loop cannot spin forever."""
@@ -70,4 +95,15 @@ class TestEmptyFinalRetry:
         llm = AlwaysEmptyClient()
         out = _make_agent(llm).run("run the full chain")
         assert out == "(empty reply)", repr(out)
+        assert llm.calls <= 4, "retry loop not bounded: %d calls" % llm.calls
+
+    def test_prior_tool_work_yields_digest_fallback(self):
+        # Persistent empty finals after real tool work must not surface
+        # as a bare "(empty reply)": the rolling work digest is returned
+        # instead so the caller knows what actually happened.
+        llm = ToolThenEmptyClient()
+        out = _make_agent(llm).run("run the full chain")
+        assert out, repr(out)
+        assert out != "(empty reply)", repr(out)
+        assert "list_files" in out, repr(out)
         assert llm.calls <= 4, "retry loop not bounded: %d calls" % llm.calls

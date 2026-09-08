@@ -3070,6 +3070,11 @@ class Agent:
                 yield {"type": "episodic_recall", "block": recall_block}
         final = ""
         self._empty_final_retries = 0
+        # Rolling digest of completed tool work; used when the
+        # LLM keeps returning empty final turns so a real run
+        # never ends in a bare "(empty reply)" after evidence
+        # was already produced.
+        work_digest = []
         # Tool schemas are rebuilt at the top of every iteration so a
         # runtime-synthesized / hot-reloaded tool is offered to the
         # LLM immediately after it becomes available.
@@ -3163,8 +3168,17 @@ class Agent:
                     # chain still ends in a real summary; "(empty reply)"
                     # only after retries are exhausted.
                     if self._empty_final_retries >= 2:
+                        if work_digest:
+                            fallback = ("[completed without closing "
+                                        "summary] The run finished the "
+                                        "following work but the final "
+                                        "summary turn was empty." +
+                                        chr(10) + "- " +
+                                        chr(10) + "- ".join(work_digest))
+                        else:
+                            fallback = "(empty reply)"
                         yield {"type": "final",
-                               "content": "(empty reply)"}
+                               "content": fallback}
                         return
                     self._empty_final_retries += 1
                     self.messages.append(
@@ -3288,6 +3302,10 @@ class Agent:
                 })
                 yield {"type": "tool_result", "name": name,
                        "content": result}
+                work_digest.append(
+                    "%s: %s" % (name, (result or "").strip()[:160]))
+                if len(work_digest) > 4:
+                    del work_digest[0]
                 step_id = self._task_board.add(
                     title="%s %s" % (name, _compact_args(args)),
                     parent=self._active_task,

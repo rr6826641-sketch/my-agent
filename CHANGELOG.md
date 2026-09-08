@@ -7,6 +7,10 @@
   on Groq) previously surfaced as "(empty reply)" despite completed work.
   The loop now nudges the model once (bounded, max 2 retries) to produce a
   real summary before falling back.
+- Work-digest fallback: when retries are exhausted after a tool chain, the
+  final message lists the completed tool work (rolling digest of the last
+  few tool results) instead of a bare "(empty reply)" - the caller always
+  learns what actually happened.
 ## [2026-09-08] runtime watchdog + probe harness
 
 - fix(runtime): agent.run() supports stop_event + wall-clock `deadline`; daemon watchdog
