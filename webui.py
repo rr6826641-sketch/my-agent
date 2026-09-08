@@ -995,7 +995,10 @@ def api_sessions_list():
     """Sidebar list: all saved chats, newest first."""
     with _chat_lock:
         data = _read_chats_unlocked()
-        sessions = sorted(data.get("sessions", {}).values(),
+        # empty threads exist only as upload-anchors (no messages yet) and
+        # stay invisible in the sidebar until the first message fills them
+        sessions = sorted((s for s in data.get("sessions", {}).values()
+                           if s.get("messages")),
                           key=lambda s: s.get("updated", 0), reverse=True)
         summary = [_session_summary(s) for s in sessions]
     return jsonify({"current": _state.get("session_id"), "sessions": summary})
@@ -2138,10 +2141,27 @@ def _attach_session_files(sid):
 
 
 def _upload_sid():
-    """Resolve the active chat session id for linking an upload."""
+    """Resolve the active chat session id for linking an upload.
+
+    When an upload arrives before any message has been sent, we mint and
+    persist an empty thread so the file is never orphaned: the next
+    /api/chat turn reuses this same id (see api_chat) and
+    _attach_session_files() finds the artifact in the active context.
+    """
     sid = (request.form.get("sid") or "").strip()
     if not sid:
         sid = _state.get("session_id") or ""
+    if not sid:
+        with _chat_lock:
+            data = _read_chats_unlocked()
+            sessions = data.setdefault("sessions", {})
+            sid = _state.get("session_id")
+            if not sid or sid not in sessions:
+                sid = _new_session_id()
+                sessions[sid] = _make_session("", sid)
+                _write_chats_unlocked(data)
+            with _lock:
+                _state["session_id"] = sid
     return sid or ""
 
 
@@ -2175,7 +2195,9 @@ def api_upload():
 @app.route("/api/uploads")
 def api_uploads_list():
     """Uploads owned by the active session (or all when ?all=1)."""
-    sid = (request.args.get("sid") or "").strip() or _upload_sid()
+    sid = (request.args.get("sid") or "").strip()
+    if not sid:
+        sid = _state.get("session_id") or ""
     if request.args.get("all"):
         records = uploads.all_files()
     elif sid:

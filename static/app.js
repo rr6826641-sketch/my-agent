@@ -263,6 +263,7 @@ function newChat() {
   if (busy) return;
   currentSessionId = null;
   chatLog.innerHTML = "";
+  clearAttachTray();
   updateExportPill();
   loadSessions();
 }
@@ -313,6 +314,7 @@ async function deleteSession(id) {
   if (id === currentSessionId) {
     currentSessionId = null;
     chatLog.innerHTML = "";
+    clearAttachTray();
     updateExportPill();
   }
   loadSessions();
@@ -328,6 +330,7 @@ async function openSession(id) {
     s = JSON.parse(text);
   } catch { return; }
   currentSessionId = s.id;
+  clearAttachTray();
   renderSession(s);
   updateExportPill();
   loadSessions();
@@ -1094,6 +1097,194 @@ $("#send").addEventListener("click", () => {
   if (busy) stopStream(); // streaming -> Stop button
   else sendMessage(inputBox.value);
 });
+
+/* ============================================================
+   Phase 1c - file upload UI: attach button / drag-drop / preview
+
+   Files POST to /api/upload (validated server-side, UUID stored,
+   linked to the active chat session). Images get an inline preview
+   thumbnail; other types render as a labelled chip. Uploads stay
+   bound to the session server-side and are analysed on the next
+   turn (_attach_session_files: vision blocks / inline text).
+   ============================================================ */
+const attachInput = $("#attach-input");
+const attachBtn = $("#btn-attach");
+const attachTray = $("#attach-tray");
+const composerIbar = document.querySelector(".composer-ibar");
+let attachBusy = false;
+
+const ATTACH_ALLOWED_EXT = new Set(["png", "jpg", "jpeg", "webp", "txt", "json", "pdf", "pcap"]);
+const ATTACH_IMG_EXT = new Set(["png", "jpg", "jpeg", "webp"]);
+const ATTACH_ICONS = {
+  txt: "\ud83d\udcc4", json: "\u26c1", pdf: "\ud83d\udcd5", pcap: "\ud83d\uddc4",
+  png: "\ud83d\uddbc", jpg: "\ud83d\uddbc", jpeg: "\ud83d\uddbc", webp: "\ud83d\uddbc"
+};
+const ATTACH_LABEL = {
+  png: "PNG image", jpg: "JPEG image", jpeg: "JPEG image", webp: "WEBP image",
+  txt: "Text file", json: "JSON file", pdf: "PDF document", pcap: "PCAP capture"
+};
+
+function attachExt(name) {
+  const s = String(name || "");
+  const i = s.lastIndexOf(".");
+  return i >= 0 ? s.slice(i + 1).toLowerCase() : "";
+}
+
+function clearAttachTray() {
+  if (!attachTray) return;
+  attachTray.innerHTML = "";
+  attachTray.hidden = true;
+}
+
+function trayNote(text, isErr) {
+  if (!attachTray) return;
+  clearAttachTray();
+  attachTray.hidden = false;
+  const n = document.createElement("div");
+  n.className = "attach-chip" + (isErr ? " att-err" : "");
+  n.textContent = text;
+  n.style.cssText = "flex:1 1 100%; padding:6px 10px;";
+  attachTray.appendChild(n);
+}
+
+function attachChipEl(rec) {
+  const chip = document.createElement("div");
+  chip.className = "attach-chip";
+  const ext = (rec && rec.ext) || attachExt(rec && rec.original_name);
+  const prev = document.createElement("span");
+  prev.className = "att-prev";
+  if (rec && rec.id && ATTACH_IMG_EXT.has(ext)) {
+    const img = document.createElement("img");
+    img.src = "/api/uploads/" + encodeURIComponent(rec.id);
+    img.alt = "";
+    prev.appendChild(img);
+  } else {
+    prev.textContent = (ATTACH_ICONS[ext] || "\ud83d\udcce");
+  }
+  const meta = document.createElement("span");
+  meta.className = "att-meta";
+  const nm = document.createElement("span");
+  nm.className = "att-name";
+  nm.title = (rec && rec.original_name) || "";
+  nm.textContent = (rec && rec.original_name) || "file";
+  const sub = document.createElement("span");
+  sub.className = "att-sub";
+  const sizeKB = Math.max(1, Math.round((rec && rec.size ? rec.size : 0) / 1024));
+  sub.textContent = (ATTACH_LABEL[ext] || ((rec && rec.mime) || "file").split("/").pop().toUpperCase()) + " \u00b7 " + sizeKB + " KB";
+  meta.appendChild(nm);
+  meta.appendChild(sub);
+  const rm = document.createElement("button");
+  rm.type = "button";
+  rm.className = "att-rm";
+  rm.title = "Remove from tray";
+  rm.setAttribute("aria-label", "Remove file");
+  rm.textContent = "\u2715";
+  rm.addEventListener("click", () => {
+    chip.remove();
+    if (!attachTray.childElementCount) attachTray.hidden = true;
+  });
+  chip.appendChild(prev);
+  chip.appendChild(meta);
+  chip.appendChild(rm);
+  return chip;
+}
+
+async function uploadOneFile(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  if (currentSessionId) fd.append("sid", currentSessionId);
+  const res = await fetch("/api/upload", { method: "POST", body: fd });
+  let data = {};
+  try { data = await res.json(); } catch { /* non-JSON error body */ }
+  if (!res.ok || !data.ok) {
+    throw new Error((data && data.error) ? data.error : ("upload failed (HTTP " + res.status + ")"));
+  }
+  const rec = (data && data.upload) || {};
+  // first-ever upload before any chat: server mints the active session
+  if (!currentSessionId && rec.sid) {
+    currentSessionId = rec.sid;
+    updateExportPill();
+    loadSessions();
+  }
+  return rec;
+}
+
+async function uploadFiles(fileList) {
+  if (!attachTray || attachBusy) return;
+  const files = Array.from(fileList || []).filter((f) => f && f.name);
+  if (!files.length) return;
+  const bad = files.find((f) => !ATTACH_ALLOWED_EXT.has(attachExt(f.name)));
+  if (bad) {
+    trayNote("Unsupported file: " + bad.name + " \u2014 allowed: PNG/JPG/WEBP/TXT/JSON/PDF/PCAP", true);
+    return;
+  }
+  attachBusy = true;
+  if (attachBtn) attachBtn.disabled = true;
+  attachTray.hidden = false;
+  for (const f of files) {
+    const chip = attachChipEl({ original_name: f.name, ext: attachExt(f.name) });
+    chip.classList.add("att-uploading");
+    attachTray.appendChild(chip);
+    try {
+      const rec = await uploadOneFile(f);
+      chip.remove();
+      attachTray.appendChild(attachChipEl(rec));
+    } catch (err) {
+      chip.classList.remove("att-uploading");
+      chip.classList.add("att-err");
+      const sub = chip.querySelector(".att-sub");
+      if (sub) sub.textContent = "\u2716 " + ((err && err.message) || "upload failed");
+    }
+  }
+  attachBusy = false;
+  if (attachBtn) attachBtn.disabled = false;
+  if (!attachTray.childElementCount) attachTray.hidden = true;
+}
+
+if (attachBtn) {
+  attachBtn.addEventListener("click", () => {
+    if (!attachBusy && attachInput) attachInput.click();
+  });
+}
+if (attachInput) {
+  attachInput.addEventListener("change", () => {
+    uploadFiles(attachInput.files);
+    attachInput.value = ""; // allow picking the same file again later
+  });
+}
+
+// drag & drop anywhere over the composer (only when actual files are
+// dragged, so normal text drags inside the textarea keep working)
+if (composerIbar) {
+  let dragDepth = 0;
+  const dragHasFiles = (ev) => {
+    const types = (ev.dataTransfer && ev.dataTransfer.types) || [];
+    return Array.prototype.indexOf.call(types, "Files") !== -1;
+  };
+  composerIbar.addEventListener("dragenter", (ev) => {
+    if (!dragHasFiles(ev)) return;
+    ev.preventDefault();
+    dragDepth += 1;
+    composerIbar.classList.add("drag-files");
+  });
+  composerIbar.addEventListener("dragover", (ev) => {
+    if (!dragHasFiles(ev)) return;
+    ev.preventDefault();
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = "copy";
+  });
+  composerIbar.addEventListener("dragleave", (ev) => {
+    if (!dragHasFiles(ev)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) composerIbar.classList.remove("drag-files");
+  });
+  composerIbar.addEventListener("drop", (ev) => {
+    if (!dragHasFiles(ev)) return;
+    ev.preventDefault();
+    dragDepth = 0;
+    composerIbar.classList.remove("drag-files");
+    uploadFiles(ev.dataTransfer.files);
+  });
+}
 
 /* ---------------- tools ---------------- */
 let allTools = [];
