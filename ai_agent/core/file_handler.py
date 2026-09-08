@@ -282,6 +282,27 @@ class FileHandler:
         rec = self._records.get(file_id)
         return dict(rec) if rec else None
 
+    def delete(self, file_id: str) -> bool:
+        """Remove one stored upload: index record + file on disk.
+
+        Returns True when a record existed and was removed. Idempotent:
+        deleting a missing/unknown id returns False and never raises. The
+        index is the source of truth for later attach turns, so a disk
+        file that is already gone is treated as already-removed, not an
+        error.
+        """
+        with self._lock:
+            rec = self._records.pop(file_id, None)
+            if rec is not None:
+                self._save_index()
+        if rec is None:
+            return False
+        try:
+            os.remove(rec.get("path", ""))
+        except OSError:
+            pass
+        return True
+
     def files_for_session(self, sid: str) -> list:
         if not sid:
             return []

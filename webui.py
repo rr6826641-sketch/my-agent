@@ -2224,6 +2224,26 @@ def api_uploads_get(file_id):
                      download_name=rec["original_name"])
 
 
+@app.route("/api/uploads/<file_id>", methods=["DELETE"])
+def api_uploads_delete(file_id):
+    """Delete one stored upload (index record + disk file).
+
+    The record is cleaned even when its disk file is already gone (stale
+    index entry). Session ownership is enforced when the caller provides a
+    sid (query arg or active session): a record owned by a different
+    session is refused with 403; an unknown id is a 404.
+    """
+    rec = uploads.get(file_id)
+    if rec is None:
+        return jsonify({"error": "upload not found"}), 404
+    sid = (request.args.get("sid") or _state.get("session_id") or "").strip()
+    owner = (rec.get("sid") or "").strip()
+    if owner and sid and owner != sid:
+        return jsonify({"error": "upload belongs to another session"}), 403
+    uploads.delete(file_id)
+    return jsonify({"ok": True, "deleted": file_id})
+
+
 @app.route("/api/upload/session/<sid>/vision")
 def api_upload_session_vision(sid):
     """OpenAI-style multimodal content blocks for a session's image uploads.

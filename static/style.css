@@ -2516,3 +2516,7 @@ body{
   box-shadow:0 0 44px -8px rgba(255,64,88,.95);
 }
 .composer-ibar.drag-files #attach-drop-hint{display:block}
+
+/* Phase 3 - outgoing message previews for attached images */
+.msg.user .msg-imgs{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; justify-content:flex-end}
+.msg.user .msg-imgs img{max-height:150px; max-width:240px; border-radius:10px; border:1px solid rgba(255,64,88,.4); object-fit:cover; display:block; background:rgba(0,0,0,.25)}
