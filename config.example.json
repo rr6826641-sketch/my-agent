@@ -37,7 +37,6 @@
         "gryphe/mythomax-l2-13b",
         "sao10k/l3.1-euryale-70b",
         "nousresearch/hermes-4-405b",
-        "thinkingmachines/inkling:free",
         "qwen/qwen3-coder",
         "nvidia/nemotron-3-super-120b-a12b:free",
         "nvidia/nemotron-3-ultra-550b-a55b:free"

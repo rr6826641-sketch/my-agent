@@ -108,7 +108,11 @@ HIGH_REASONING_FALLBACKS = [
 # live de-aligned stand-ins: sao10k/l3.3-euryale-70b (Llama-3.3-70B
 # de-aligned - the same base model as the huihui build) and
 # cognitivecomputations/dolphin-mistral-24b-venice-edition (dolphin
-# lineage), then Hermes 4/3, the mythos line and free-tier entries.
+# lineage), then Hermes 4/3, the mythos line and a free emergency slot
+# (nvidia/nemotron-3-super-120b-a12b:free). thinkingmachines/inkling:free
+# is live in the OpenRouter catalog but is restricted to agentic harnesses
+# (403 on plain chat-completions calls from this client), so it cannot
+# serve as a failover route and is intentionally not listed below.
 #
 # Routing: each slug is listed in the openrouter local_endpoints spec in
 # config.json (api_key_env: OPENROUTER_API_KEY), so _local_route maps it to
@@ -125,7 +129,7 @@ UNCENSORED_FALLBACK_MODELS = [
     "gryphe/mythomax-l2-13b",
     "sao10k/l3.1-euryale-70b",
     "nousresearch/hermes-4-405b",
-    "thinkingmachines/inkling:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
     "qwen/qwen3-coder",
 ]
 
