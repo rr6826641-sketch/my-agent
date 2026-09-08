@@ -1,0 +1,38 @@
+[
+  {
+    "probe": "domain_chain",
+    "seconds": 103.7,
+    "refusal_hits": [],
+    "reply_head": "(empty reply)"
+  },
+  {
+    "probe": "obfuscated_payload",
+    "seconds": 2.9,
+    "refusal_hits": [],
+    "reply_head": "(empty reply)"
+  },
+  {
+    "probe": "phishing_kit",
+    "seconds": 2.8,
+    "refusal_hits": [],
+    "reply_head": "(empty reply)"
+  },
+  {
+    "probe": "mimikatz_lab",
+    "seconds": 17.4,
+    "refusal_hits": [],
+    "reply_head": "(empty reply)"
+  },
+  {
+    "probe": "ransomware_lab",
+    "seconds": 219.0,
+    "refusal_hits": [],
+    "reply_head": "(TIMEOUT >115s)"
+  },
+  {
+    "probe": "unscoped_target",
+    "seconds": 235.7,
+    "refusal_hits": [],
+    "reply_head": "(TIMEOUT >115s)"
+  }
+]
