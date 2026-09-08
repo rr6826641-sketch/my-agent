@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="62%">
+      <stop offset="0%" stop-color="#2a0713"/>
+      <stop offset="55%" stop-color="#16030b"/>
+      <stop offset="100%" stop-color="#070108"/>
+    </radialGradient>
+    <linearGradient id="shell" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3a3a46"/>
+      <stop offset="45%" stop-color="#1c1c26"/>
+      <stop offset="100%" stop-color="#0c0c14"/>
+    </linearGradient>
+    <linearGradient id="shellHi" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#5a5a6e" stop-opacity=".9"/>
+      <stop offset="60%" stop-color="#22222e"/>
+      <stop offset="100%" stop-color="#0a0a12"/>
+    </linearGradient>
+    <linearGradient id="visor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5b0010"/>
+      <stop offset="50%" stop-color="#2a0008"/>
+      <stop offset="100%" stop-color="#0c0002"/>
+    </linearGradient>
+    <linearGradient id="eyeBar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ff2740"/>
+      <stop offset="50%" stop-color="#ff6b7d"/>
+      <stop offset="100%" stop-color="#ff2740"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softGlow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="10" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="drop" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#ff2740" flood-opacity=".55"/>
+    </filter>
+  </defs>
+
+  <!-- background glow disc -->
+  <circle cx="256" cy="256" r="246" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="252" fill="none" stroke="rgba(255,39,64,.35)" stroke-width="2"/>
+  <circle cx="256" cy="256" r="238" fill="none" stroke="rgba(255,39,64,.20)" stroke-width="1.5" stroke-dasharray="4 10"/>
+
+  <!-- helmet body -->
+  <g filter="url(#drop)">
+    <!-- main dome -->
+    <path d="M130 300 C130 178 186 120 256 120 C326 120 382 178 382 300 L382 330 C382 372 342 396 256 396 C170 396 130 372 130 330 Z"
+          fill="url(#shell)" stroke="rgba(255,39,64,.35)" stroke-width="2"/>
+    <!-- dome highlight -->
+    <path d="M170 210 C180 168 218 140 256 140 C290 140 322 162 336 194 C300 176 200 178 170 210 Z"
+          fill="url(#shellHi)" opacity=".55"/>
+    <!-- jaw / lower guard -->
+    <path d="M150 316 C186 344 326 344 362 316 L362 340 C350 372 316 388 256 388 C196 388 162 372 150 340 Z"
+          fill="#0c0c14" stroke="rgba(255,39,64,.3)" stroke-width="1.5"/>
+    <!-- chin vent lines -->
+    <line x1="226" y1="366" x2="226" y2="356" stroke="rgba(255,39,64,.45)" stroke-width="3" stroke-linecap="round"/>
+    <line x1="256" y1="370" x2="256" y2="356" stroke="rgba(255,39,64,.55)" stroke-width="3" stroke-linecap="round"/>
+    <line x1="286" y1="366" x2="286" y2="356" stroke="rgba(255,39,64,.45)" stroke-width="3" stroke-linecap="round"/>
+
+    <!-- top sensor fin -->
+    <path d="M244 128 L256 96 L268 128 Z" fill="url(#shellHi)" stroke="rgba(255,39,64,.4)" stroke-width="1.5"/>
+    <circle cx="256" cy="104" r="5" fill="#ff2740" filter="url(#glow)"/>
+
+    <!-- visor housing -->
+    <path d="M158 236 L354 236 L348 300 C322 322 190 322 164 300 Z"
+          fill="url(#visor)" stroke="rgba(255,39,64,.55)" stroke-width="2.5"/>
+    <!-- visor inner reflective -->
+    <path d="M172 250 C210 238 302 238 340 250 L336 288 C300 302 212 302 176 288 Z"
+          fill="#16000a"/>
+
+    <!-- red eye bar glow -->
+    <path d="M166 250 L346 250 L344 262 C300 278 212 278 168 262 Z"
+          fill="url(#eyeBar)" filter="url(#glow)" opacity=".95"/>
+    <!-- eye bar core hot spot -->
+    <ellipse cx="256" cy="256" rx="70" ry="8" fill="#fff" opacity=".55" filter="url(#glow)"/>
+
+    <!-- two glowing eyes (red-eyed) -->
+    <circle cx="206" cy="256" r="15" fill="#ff2740" filter="url(#glow)"/>
+    <circle cx="206" cy="256" r="6" fill="#ffe3e6"/>
+    <circle cx="306" cy="256" r="15" fill="#ff2740" filter="url(#glow)"/>
+    <circle cx="306" cy="256" r="6" fill="#ffe3e6"/>
+
+    <!-- brow plate -->
+    <path d="M182 214 L330 214 L336 240 L176 240 Z" fill="#171720" stroke="rgba(255,39,64,.3)" stroke-width="1.5"/>
+    <path d="M196 226 L316 226" stroke="rgba(255,39,64,.5)" stroke-width="2" stroke-linecap="round" filter="url(#glow)"/>
+
+    <!-- side vents -->
+    <g stroke="rgba(255,39,64,.4)" stroke-width="3" stroke-linecap="round">
+      <line x1="130" y1="300" x2="146" y2="300"/>
+      <line x1="128" y1="316" x2="146" y2="316"/>
+      <line x1="130" y1="332" x2="146" y2="332"/>
+      <line x1="382" y1="300" x2="366" y2="300"/>
+      <line x1="384" y1="316" x2="366" y2="316"/>
+      <line x1="382" y1="332" x2="366" y2="332"/>
+    </g>
+
+    <!-- side rivets -->
+    <circle cx="146" cy="250" r="4" fill="#ff2740" opacity=".8"/>
+    <circle cx="366" cy="250" r="4" fill="#ff2740" opacity=".8"/>
+
+    <!-- ear pods -->
+    <path d="M118 270 C100 270 96 322 118 330 L140 330 L140 270 Z" fill="#0d0d15" stroke="rgba(255,39,64,.4)" stroke-width="2"/>
+    <path d="M394 270 C412 270 416 322 394 330 L372 330 L372 270 Z" fill="#0d0d15" stroke="rgba(255,39,64,.4)" stroke-width="2"/>
+    <circle cx="128" cy="300" r="7" fill="#ff2740" filter="url(#glow)" opacity=".85"/>
+    <circle cx="384" cy="300" r="7" fill="#ff2740" filter="url(#glow)" opacity=".85"/>
+
+    <!-- antenna -->
+    <line x1="360" y1="140" x2="386" y2="96" stroke="rgba(255,39,64,.5)" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="388" cy="92" r="5" fill="#ff2740" filter="url(#glow)"/>
+  </g>
+
+  <!-- outer neon ring -->
+  <circle cx="256" cy="256" r="230" fill="none" stroke="rgba(255,39,64,.14)" stroke-width="1.5" stroke-dasharray="2 12"/>
+</svg>
