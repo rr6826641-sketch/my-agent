@@ -468,6 +468,19 @@ Persona id `custom` ka directive block runtime par
 `[ENFORCEMENT LOCK]` ke saath append hota hai (refusal-free, persistence,
 anti-drift). Test coverage: `tests/test_custom_persona.py`.
 
+### Primary provider = Groq + routed OpenRouter fallback (live)
+
+Agent ab **Groq par primary** chalta hai - `config.json`:
+`base_url = https://api.groq.com/openai/v1`, `model = llama-3.3-70b-versatile`.
+Failover strikes (same host): `openai/gpt-oss-20b` -> `qwen/qwen3.8-27b`
+-> `allam-2-7b`. `.env` mein `AGENT_API_KEY` = Groq key.
+
+OpenRouter ab ek **routed endpoint plug-in** hai (apni purani key
+`OPENROUTER_API_KEY` se): uske models sirf apne host + key par route hote
+hain. Live-tested free pool: `nvidia/nemotron-3-super-120b-a12b:free`,
+`nvidia/nemotron-3-ultra-550b-a55b:free` (dono live answer karte hain).
+Primary + routed dono live verify hue.
+
 ### Extra provider: Groq API key (endpoint plug-in)
 
 Groq (`https://api.groq.com/openai/v1`) ek additional OpenAI-compatible

@@ -302,6 +302,7 @@ def _probe_local_endpoint(spec):
     Ollama/LM Studio running simply contributes nothing to the chain.
     """
     url = spec.get("base_url", "").rstrip("/") + "/models"
+    explicit = list(spec.get("default_models") or [])
     try:
         headers = {"Content-Type": "application/json"}
         ak = str(spec.get("api_key") or "").strip()
@@ -311,11 +312,12 @@ def _probe_local_endpoint(spec):
             url, timeout=float(spec.get("timeout") or 3.0),
             headers=headers)
         if resp.status_code != 200:
-            return []
+            return explicit
         data = resp.json()
     except Exception:
-        return []
-    explicit = list(spec.get("default_models") or [])
+        return explicit
+    if explicit:
+        return explicit
     ids = []
     for item in data.get("data") or []:
         mid = (item.get("id") or "").strip()

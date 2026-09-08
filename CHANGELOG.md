@@ -6,6 +6,18 @@ Sare notable changes is project ke. Format: `[Semantic Versioning](https://semve
 ## [Unreleased]
 
 ### Added
+- **Groq primary + routed OpenRouter fallback** — `config.json` now
+  points at `https://api.groq.com/openai/v1` /
+  `llama-3.3-70b-versatile`; same-host failover strikes
+  (`gpt-oss-20b`, `qwen3.8-27b`, `allam-2-7b`); OpenRouter runs as a
+  routed endpoint plug-in under its own preserved key
+  (`OPENROUTER_API_KEY`), with an explicit-model allow-list that
+  caps discovery and survives /models outages. Live proof: Groq
+  primary answered (GROQ_PRIMARY_LIVE: PASS); routed OpenRouter
+  nemotron free models answered (OPENROUTER_ROUTED_LIVE: PASS).
+- Tests: `tests/test_groq_endpoint.py` extended (explicit
+  allow-list cap + outage survival).
+
 - **Live MCP demo server** (`mcp_servers/local_fs_demo.py`) — zero-dependency Python
   stdio JSON-RPC MCP server exposing `fs_ls` / `fs_read` / `fs_stat` tools. Verified
   end-to-end: `REGISTERED_TOOLS: ['mcp_fs_ls', 'mcp_fs_read', 'mcp_fs_stat']`,

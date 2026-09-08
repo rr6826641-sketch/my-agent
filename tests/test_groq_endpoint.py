@@ -90,3 +90,38 @@ def test_chain_includes_endpoint_models_after_uncensored_pool(monkeypatch):
     chain = c._effective_fallbacks()
     assert chain.index("u-one") < chain.index("llama-3.3-70b-versatile")
     assert "llama-3.3-70b-versatile" in chain
+
+
+
+def test_probe_explicit_allowlist_caps_discovery(monkeypatch):
+    """Explicit default_models is an allow-list cap: only those ids are
+    returned even when the host lists hundreds of models."""
+
+    class R:
+        status_code = 200
+
+        @staticmethod
+        def json(**kw):
+            return {"data": [{"id": "a-cat-model"},
+                             {"id": "b-other"},
+                             {"id": "whisper-large-v3"}]}
+
+    monkeypatch.setattr(llm.requests, "get", lambda *a, **k: R())
+    ids = llm._probe_local_endpoint(
+        {"base_url": "https://x/v1", "api_key": "",
+         "default_models": ["a-cat-model", "c-explicit"], "timeout": 5.0})
+    assert ids == ["a-cat-model", "c-explicit"]
+
+
+def test_probe_keeps_explicit_models_on_outage(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(llm.requests, "get", boom)
+    ids = llm._probe_local_endpoint(
+        {"base_url": "https://x/v1", "api_key": "",
+         "default_models": ["keep-me"], "timeout": 5.0})
+    assert ids == ["keep-me"]
+    ids2 = llm._probe_local_endpoint(
+        {"base_url": "https://x/v1", "api_key": "", "timeout": 5.0})
+    assert ids2 == []

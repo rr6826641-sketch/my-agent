@@ -1,15 +1,13 @@
 {
-  "base_url": "https://openrouter.ai/api/v1",
-  "model": "nvidia/nemotron-3.5-lightning:free",
+  "base_url": "https://api.groq.com/openai/v1",
+  "model": "llama-3.3-70b-versatile",
   "mock_mode": false,
   "red_team_mode": false,
   "refusal_retries": 3,
   "fallback_models": [
-    "thinkingmachines/inkling:free",
-    "thinkingmachines/inkling-small:free",
-    "minimax/minimax-m3:free",
-    "liquid/lfm-2.5-2.6b:free",
-    "dots-studio/dots-3-note-preview:free"
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.8-27b",
+    "allam-2-7b"
   ],
   "max_iterations": 60,
   "parallel_max_workers": 4,
@@ -27,10 +25,15 @@
   "local_first": false,
   "local_endpoints": [
     {
-      "name": "groq",
-      "base_url": "https://api.groq.com/openai/v1",
-      "api_key_env": "GROQ_API_KEY",
-      "timeout": 8.0
+      "name": "openrouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "models": [
+        "nvidia/nemotron-3-super-120b-a12b:free",
+        "nvidia/nemotron-3-ultra-550b-a55b:free"
+      ],
+      "timeout": 20.0
     }
-  ]
+  ],
+  "auto": false
 }
