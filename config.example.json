@@ -13,5 +13,15 @@
   ],
   "max_iterations": 60,
   "parallel_max_workers": 4,
-  "mcp_servers": []
+  "mcp_servers": [
+    {
+      "name": "local-fs-demo",
+      "command": "python",
+      "args": [
+        "mcp_servers/local_fs_demo.py"
+      ],
+      "prefix": "mcp_",
+      "confirm": false
+    }
+  ]
 }

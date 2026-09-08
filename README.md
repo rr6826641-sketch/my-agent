@@ -419,6 +419,34 @@ Bas — LLM khud naya tool discover kar lega aur jab zaroorat ho use karega.
 
 ---
 
+## 🔌 MCP Server Wiring (Model Context Protocol)
+
+Agent runtime mein koi bhi MCP stdio server auto-wire ho sakta hai. Agent
+start hote hi config.json ke `mcp_servers` (ya `MCP_SERVERS` env JSON) se
+har server connect hota hai, `tools/list` se tools discover hote hain aur
+har tool live-register ho kar LLM ko advertise hota hai.
+
+### Bundled demo server (zero dependencies)
+`mcp_servers/local_fs_demo.py` ek chhota MCP filesystem server hai
+(fs_ls / fs_read / fs_stat) — koi pip package nahi chahiye.
+
+config.json mein:
+```json
+"mcp_servers": [{
+  "name": "local-fs-demo",
+  "command": "python",
+  "args": ["mcp_servers/local_fs_demo.py"],
+  "prefix": "mcp_",
+  "confirm": false
+}]
+```
+Agent start karo to tools `mcp_fs_ls`, `mcp_fs_read`, `mcp_fs_stat`
+ke naam se available ho jate hain aur ek `[MCP]` system note conversation
+mein inject hota hai. Har server ki failure isolated rehti hai — ek toota
+hua server baqi runtime ko nahi todta. Test coverage:
+`tests/test_mcp_client.py` (client engine) + `tests/test_mcp_runtime_wiring.py`
+(Agent-level auto-wiring).
+
 ## ✅ Naya kya hai (HackerAI-style upgrade)
 
 - **Parallel sub-agents** — `spawn_agents` (max 8 concurrent, per-agent timeout 900s, depth 3)
