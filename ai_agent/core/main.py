@@ -2579,6 +2579,9 @@ class Agent:
         execute_tool). A system note is appended to self.messages so the
         model knows which servers are online.
         """
+        state = getattr(self, "_mcp_state", None)
+        if not isinstance(state, dict):
+            state = self._mcp_state = {}
         specs = self._load_mcp_servers()
         if not specs:
             return
@@ -2613,9 +2616,13 @@ class Agent:
                 note = ("[MCP] Connected server %r: %d new tool(s) registered"
                         % (label, added))
                 logger.info(note)
+                state[label] = {"status": "ok",
+                                "tools": sorted({t.name for t in tools})}
                 self.messages.append({"role": "system", "content": note})
             except Exception as exc:
                 logger.warning("[MCP] failed to wire server %r: %s", label, exc)
+                state[label] = {"status": "failed", "error": str(exc),
+                                "tools": []}
             finally:
                 if client is not None and client.connected:
                     client.close()

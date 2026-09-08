@@ -447,6 +447,12 @@ hua server baqi runtime ko nahi todta. Test coverage:
 `tests/test_mcp_client.py` (client engine) + `tests/test_mcp_runtime_wiring.py`
 (Agent-level auto-wiring).
 
+### WebUI MCP status panel
+Tools view (`🛠️`) mein ek live **MCP strip** dikhti hai — har wired
+server (connected/failed) aur uske registered tools (`mcp_*` names) ke saath.
+Backend: `GET /api/mcp` agent ke `_mcp_state` se. UI update har
+`loadTools()` par hota hai.
+
 ## ✅ Naya kya hai (HackerAI-style upgrade)
 
 - **Parallel sub-agents** — `spawn_agents` (max 8 concurrent, per-agent timeout 900s, depth 3)

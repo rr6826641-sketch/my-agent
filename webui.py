@@ -1455,6 +1455,20 @@ def api_tools():
     return jsonify(tools)
 
 
+@app.route("/api/mcp")
+def api_mcp():
+    """Live MCP status: every wired server + tools they contributed."""
+    agent = _state.get("agent")
+    if agent is None:
+        return jsonify({"servers": {}, "mcp_tools": []})
+    servers = getattr(agent, "_mcp_state", None)
+    if not isinstance(servers, dict):
+        servers = {}
+    mcp_tools = [t.name for t in agent._tool_list
+                 if str(getattr(t, "name", "")).startswith("mcp_")]
+    return jsonify({"servers": servers, "mcp_tools": sorted(mcp_tools)})
+
+
 # --------------------------------------------------------------------------
 # Memory
 # --------------------------------------------------------------------------

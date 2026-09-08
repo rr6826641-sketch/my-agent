@@ -1321,6 +1321,36 @@ async function loadTools() {
   allTools = await fetchJSON("/api/tools");
   $("#tools-count").textContent = allTools.length + " tools registered";
   renderTools("");
+  loadMcpStrip();
+}
+async function loadMcpStrip() {
+  const strip = $("#mcp-strip");
+  if (!strip) return;
+  let data = null;
+  try { data = await fetchJSON("/api/mcp"); } catch (e) { strip.style.display = "none"; return; }
+  const servers = data.servers || {};
+  const names = Object.keys(servers);
+  const mcpTools = data.mcp_tools || [];
+  if (!names.length && !mcpTools.length) { strip.style.display = "none"; return; }
+  strip.style.display = "flex";
+  strip.innerHTML = "";
+  const chip = (txt, bg, fg, title) => {
+    const s = document.createElement("span");
+    s.style.cssText = "padding:2px 8px;border-radius:10px;color:" + fg + ";background:" + bg + ";border:1px solid " + fg + ";white-space:nowrap;";
+    if (title) s.title = title;
+    s.textContent = txt;
+    return s;
+  };
+  strip.appendChild(chip("MCP", "#0f1420", "#7fd0ff", "Model Context Protocol servers"));
+  names.forEach((n) => {
+    const st = servers[n] || {};
+    const ok = st.status === "ok";
+    strip.appendChild(chip(ok ? "● " + n : "✕ " + n,
+      ok ? "#08190f" : "#1f0d10", ok ? "#37e07a" : "#ff5a6a",
+      (ok ? "connected" : "failed") + " · " + ((st.tools || []).join(", ") || "no tools") + (st.error ? " · " + st.error : "")));
+  });
+  if (mcpTools.length)
+    strip.appendChild(chip(mcpTools.length + " mcp tool(s)", "#0f1118", "#8b95a8", mcpTools.join(", ")));
 }
 function renderTools(q) {
   const grid = $("#tool-grid");
