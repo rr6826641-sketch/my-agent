@@ -22,6 +22,8 @@ from ..continuity import (
 )
 from ..learning import SessionLearner
 from ..rules_engine import RulesEngine
+from ..compaction import (
+    CompactionStore, estimate_chars, extractive_digest)
 from ..tools import (
     create_tools, execute_tool, register_live_catalog,
 )
@@ -2071,6 +2073,7 @@ class Agent:
                  reasoning_engine=True,
                  learner=None, rules_engine=None, mission_store=None,
                  intent_reformulator=None,
+                 max_context_chars=120000, compaction_store=None,
                  self_evolution=True):
         self.llm = llm
         if self_evolution:
@@ -2079,6 +2082,10 @@ class Agent:
         self.name = name
         self.max_iterations = max_iterations
         self.max_messages = max_messages
+        self.max_context_chars = max_context_chars
+        self.compaction_store = compaction_store
+        self._compaction = None
+        self._session_digest_shown = False
         self.confirm_terminal = confirm_terminal
         self.spawn_depth = spawn_depth
         self.max_spawn_depth = max_spawn_depth
