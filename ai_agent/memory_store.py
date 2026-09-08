@@ -539,6 +539,28 @@ class GlobalKnowledge:
                 "SELECT COUNT(*) AS n FROM global_knowledge").fetchone()
         return row["n"] if row else 0
 
+    def stats(self):
+        """Knowledge-graph metrics for the dashboard: total records,
+        distinct targets, per-finding-type counts and the most recent
+        record timestamp (None when the store is empty). Best-effort
+        and lock-guarded like the rest of this class."""
+        with self._lock:
+            agg = self._conn.execute(
+                "SELECT COUNT(*) AS n,"
+                " COUNT(DISTINCT target_domain) AS t,"
+                " MAX(created_at) AS m FROM global_knowledge").fetchone()
+            types = {}
+            for r in self._conn.execute(
+                    "SELECT finding_type, COUNT(*) AS n"
+                    " FROM global_knowledge GROUP BY finding_type"):
+                types[r["finding_type"]] = int(r["n"])
+        return {
+            "records": int(agg["n"]),
+            "targets": int(agg["t"]),
+            "finding_types": types,
+            "latest": agg["m"],
+        }
+
 
 # ---------------------------------------------------------------------------
 # InstitutionalMemory: cross-conversation institutional notes (SQLite)

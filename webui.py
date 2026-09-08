@@ -471,6 +471,70 @@ def _get_rpg_engine():
         return eng
 
 
+def _subagent_metrics():
+    """Best-effort swarm/sub-agent registry metrics for the dashboard.
+
+    Reads the live OrchestrationManager of the running agent (the same
+    registry behind /api/subagents) and normalises it to a flat JSON-safe
+    payload. Never raises: sub-agent orchestration is optional."""
+    orch = _subagent_orchestrator()
+    if orch is None:
+        return {"available": False, "tracked": 0, "active": 0,
+                "running": 0, "max_children": 0, "max_siblings": 0}
+    try:
+        s = orch.registry_summary()
+    except Exception:
+        s = {}
+    return {"available": True,
+            "tracked": int(s.get("tracked", 0) or 0),
+            "active": int(s.get("active", 0) or 0),
+            "running": int(s.get("running", 0) or 0),
+            "max_children": int(s.get("max_children", 0) or 0),
+            "max_siblings": int(s.get("max_siblings", 0) or 0)}
+
+
+def _knowledge_metrics():
+    """Best-effort Knowledge Graph metrics for the dashboard.
+
+    Two layers, both persisted SQLite and shared across chats:
+      * ``findings`` - the per-target knowledge store attached to the live
+        agent (GlobalKnowledge over knowledge.db: records, distinct
+        targets, per-finding-type counts).
+      * ``graph`` - the shared property graph (nodes by kind, edges, scan
+        ledger in memory/knowledge_graph.db) that sub-agents write recon
+        results into. Only opened when the DB file already exists, so a
+        status poll can never create an empty store as a side effect.
+    Each layer degrades to None independently."""
+    out = {"findings": None, "graph": None}
+    agent = _state.get("agent")
+    store = getattr(agent, "knowledge", None)
+    if store is not None:
+        try:
+            out["findings"] = store.stats()
+        except Exception:
+            out["findings"] = None
+    try:
+        from ai_agent.memory.knowledge_graph import (KnowledgeGraph,
+                                                     default_db_path)
+        path = default_db_path()
+        if path and os.path.exists(path):
+            kg = KnowledgeGraph(db_path=path)
+            try:
+                stats = kg.stats()
+            finally:
+                try:
+                    kg.close()
+                except Exception:
+                    pass
+            out["graph"] = {"exists": True,
+                             "nodes": stats.get("nodes"),
+                             "edges": stats.get("edges"),
+                             "scans": stats.get("scans")}
+    except Exception:
+        out["graph"] = None
+    return out
+
+
 def _status():
     cfg = _current_cfg()
     auto = bool(cfg.get("auto")) or (cfg.get("model") == "auto")
@@ -492,6 +556,8 @@ def _status():
         "key_error": _state.get("key_error", ""),
         "tools": len(_state["agent"]._tool_list) if _state.get("agent") else 0,
         "memory_entries": len(_state["memory"]._data.get("notes", {})) if _state.get("memory") else 0,
+        "subagents": _subagent_metrics(),
+        "knowledge": _knowledge_metrics(),
     }
 
 
