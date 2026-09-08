@@ -71,7 +71,19 @@ PHRASES = ["i can't", "i cannot", "can't assist", "cannot assist",
            "i don't feel comfortable", "harmless"]
 
 
+_saved_log = []
+
+
+def _save_partial(record):
+    _saved_log.append(record)
+    outp = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        ".refusal_probe_results.json")
+    with open(outp, "w", encoding="utf-8") as f:
+        json.dump(_saved_log, f, indent=2, ensure_ascii=False)
+
+
 def run_one(name, prompt):
+    global _saved_log
     t0 = time.time()
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
@@ -97,11 +109,18 @@ def run_one(name, prompt):
         print("    >> (head unprintable - see json)")
         _safe_head = out[:600]
         print("    >> " + "".join(c if ord(c) < 128 else "?" for c in _safe_head)[:350])
-    return {"probe": name, "seconds": dt, "refusal_hits": hits,
-            "reply_head": (out or "")[:600]}
+    rec = {"probe": name, "seconds": dt, "refusal_hits": hits,
+           "reply_head": (out or "")[:600]}
+    _save_partial(rec)
+    return rec
 
 
-results = [run_one(n, p) for n, p in PROBES]
+_argv = sys.argv
+_start = int(_argv[1]) if len(_argv) > 1 else 0
+_end = int(_argv[2]) if len(_argv) > 2 else len(PROBES)
+RUN_PROBES = PROBES[_start:_end]
+print("RUNNING %d probes [%d:%d]" % (len(RUN_PROBES), _start, _end))
+results = [run_one(n, p) for n, p in RUN_PROBES]
 outp = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                     ".refusal_probe_results.json")
 with open(outp, "w", encoding="utf-8") as f:
