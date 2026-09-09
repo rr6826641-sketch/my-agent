@@ -59,7 +59,8 @@
       "api_key_env": "HUGGINGFACE_API_KEY",
       "models": [
         "huihui-ai/Llama-3.3-70B-Instruct-abliterated",
-        "dphn/dolphin-2.9.2-qwen2-72b"
+        "dphn/dolphin-2.9.2-qwen2-72b",
+        "NousResearch/Hermes-3-Llama-3.1-70B"
       ],
       "timeout": 30.0
     }

@@ -1,5 +1,22 @@
 # Changelog
 
+## [2026-09-09] step 3 - Venice + HF routes live activation
+
+- env: VENICE_API_KEY + HUGGINGFACE_API_KEY now set in .env (gitignored).
+- verified(venice): key auth OK (GET /models -> 200, uncensored ids listed).
+  Chat calls return 402 insufficient balance until the account is funded at
+  https://venice.ai/settings/api - the model-failover chain skips the slot.
+- verified(huggingface): key auth OK (GET /models -> 200, 139-model catalog).
+  Requested huihui-ai/Llama-3.3-70B-Instruct-abliterated and
+  dphn/dolphin-2.9.2-qwen2-72b are NOT in the reachable catalog (400 "not
+  supported by any provider you have enabled"); re-checked per-provider
+  (novita/together/deepinfra return the same 139 ids, zero hits) and via
+  serverless api-inference (DNS-unreachable from this host).
+- config: HF block keeps the two requested ids (they activate as soon as the
+  account enables a provider that hosts them at hf.co/settings/providers) and
+  appends a live tail slot NousResearch/Hermes-3-Llama-3.1-70B (in the
+  reachable catalog today), so the HF route now contributes a working model.
+  config.example.json synced; both files parse valid JSON.
 ## [2026-09-09] step 2 - CLI red-team parity with the web UI
 
 - feat(cli): agent.py now derives uncensored_mix from red_team_level
