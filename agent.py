@@ -10,6 +10,7 @@ Examples:
 import argparse
 import os
 
+from ai_agent import personas
 from ai_agent.config import PROJECT_DIR, load_config
 from ai_agent.core import Agent, IntentReformulator
 from ai_agent.llm import (MockClient, OpenAIClient,
@@ -44,8 +45,21 @@ def main():
     args = build_parser().parse_args()
     cfg = load_config(args)
 
+    uncensored = bool(cfg.get("red_team_mode"))
+    # Red Team level parity with the web UI: promax/promix widen the
+    # uncensored pool with the mythos/dolphin mix and rotate per request.
+    level = str(cfg.get("red_team_level") or "promax").lower()
+    mix = uncensored and level in ("promax", "promix")
+    # Persona directive block rides on the client so core.Agent appends it
+    # to the system prompt (CLI parity with webui._build_llm).
+    persona_block = personas.get_block(cfg.get("persona"),
+                                       uncensored=uncensored)
+
     if cfg["mock"]:
-        llm = MockClient(uncensored=cfg.get("red_team_mode"),
+        llm = MockClient(uncensored=uncensored,
+                        uncensored_mix=mix,
+                        pin_uncensored=bool(cfg.get("pin_uncensored")),
+                        pin_strict=bool(cfg.get("pin_strict")),
                         local_endpoints=cfg.get("local_endpoints"),
                         local_first=bool(cfg.get("local_first")))
         print("[mock mode] using the built-in test LLM")
@@ -55,18 +69,28 @@ def main():
             base_url=cfg["base_url"],
             model=cfg["model"],
             fallback_models=cfg.get("fallback_models"),
-            uncensored=cfg.get("red_team_mode"),
+            uncensored=uncensored,
+            refusal_retries=cfg.get("refusal_retries"),
             # Red Team Mode (pro-max): keep uncensored models first in the
             # failover chain so a drop/429 can't force the run onto a
             # safety-tuned generic fallback.
             uncensored_fallbacks=(UNCENSORED_FALLBACK_MODELS
-                                  if cfg.get("red_team_mode") else None),
+                                  if uncensored else None),
+            # Red Team Mode (pro-mix): widen the uncensored failover pool
+            # with the mythos/dolphin mix and rotate it per request.
+            uncensored_mix=mix,
+            # PIN levers: pin_uncensored drops the primary/censored models
+            # from the chain entirely; pin_strict drops the generic tails.
+            pin_uncensored=bool(cfg.get("pin_uncensored")),
+            pin_strict=bool(cfg.get("pin_strict")),
             local_endpoints=cfg.get("local_endpoints"),
             local_first=bool(cfg.get("local_first")),
         )
         if not cfg["api_key"] and cfg["base_url"].startswith("https://api.openai.com"):
             print("[warning] no API key set - add AGENT_API_KEY to .env "
                   "or pass --api-key (keys are never read from config.json)")
+
+    llm.persona_block = persona_block
 
     memory = MemoryStore(cfg["memory_file"])
     institutional = InstitutionalMemory(

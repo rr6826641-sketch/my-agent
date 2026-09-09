@@ -1,5 +1,15 @@
 # Changelog
 
+## [2026-09-09] step 2 - CLI red-team parity with the web UI
+
+- feat(cli): agent.py now derives uncensored_mix from red_team_level
+  (promax/promix) exactly like webui._build_llm, passes refusal_retries and
+  the pin_uncensored/pin_strict levers through to the client, and attaches
+  the persona directive block (personas.get_block) so the CLI system prompt
+  carries the same persona/ENFORCEMENT_LOCK tail as the web UI.
+- config: refusal_retries raised 3 -> 5 (refusal escalation budget on
+  authorized offensive-security runs); config.example.json documents
+  persona/red_team_level/pin_uncensored/pin_strict alongside it.
 ## [2026-09-08] uncensored pool v4 - HF Inference Providers + Venice routes
 
 - feat(router): the two requested abliterated builds that 404 on OpenRouter now

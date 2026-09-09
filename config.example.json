@@ -3,7 +3,7 @@
   "model": "llama-3.3-70b-versatile",
   "mock_mode": false,
   "red_team_mode": false,
-  "refusal_retries": 3,
+  "refusal_retries": 5,
   "fallback_models": [
     "openai/gpt-oss-20b",
     "qwen/qwen3.8-27b",
@@ -64,5 +64,9 @@
       "timeout": 30.0
     }
   ],
-  "auto": false
+  "auto": false,
+  "persona": "promax",
+  "red_team_level": "promax",
+  "pin_uncensored": false,
+  "pin_strict": false
 }
