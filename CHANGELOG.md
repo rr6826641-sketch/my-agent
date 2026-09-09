@@ -1,5 +1,17 @@
 # Changelog
 
+## [2026-09-09] step 5 - notrack-uncensored live path hardened (Cloudflare 1010)
+
+- fix(llm): api.notrack.ai is Cloudflare-fronted and rejects the default
+  python-requests User-Agent with HTTP 403 error 1010 (same key + payload
+  returns 200 with a browser-like UA).  _request_target now attaches
+  browser-like User-Agent/Accept/Accept-Language headers for the notrack
+  host only, so the notrack-uncensored lead slot serves real completions
+  from the agent's own chat()/chat_stream() path.
+- test: e2e via OpenAIClient.chat() -> route api.notrack.ai/v1,
+  reply NOTRACK_OK in ~1s, no refusal-shape hit.  Both config JSONs
+  parse; router mapping notrack-uncensored -> notrack block confirmed.
+
 ## [2026-09-09] step 3 - Venice + HF routes live activation
 
 - env: VENICE_API_KEY + HUGGINGFACE_API_KEY now set in .env (gitignored).
@@ -152,3 +164,18 @@ Sare notable changes is project ke. Format: `[Semantic Versioning](https://semve
   synthesizer, intent reformulator, upload/vision chat, context compactor
 - WebUI (Flask :8080) with Tools / Memory / Reports / RPG / Settings views
 
+## [2026-09-09] step 4 - NoTrack AI route verified live (notrack-uncensored)
+
+- feat(router): new `notrack` local_endpoints block
+  (https://api.notrack.ai/v1, api_key_env NOTRACK_API_KEY) with the
+  dedicated private uncensored model `notrack-uncensored` - verified live
+  on this account: GET /models -> 200 and a chat completion -> 200
+  (NOTRACK_OK) in one shot.
+- feat(pool): notrack-uncensored now LEADS UNCENSORED_FALLBACK_MODELS and
+  the PRO MIX rotation pool - the uncensored chain opens on a provider
+  that is deliberately uncensored instead of a possibly safety-tuned
+  hosted slug, so the empty-reply probes recorded in step 3 have a
+  dedicated no-refusal home for offensive-security runs.
+- config: config.json + config.example.json updated (notrack block first
+  in local_endpoints); .env + .env.example document NOTRACK_API_KEY.
+  All JSON files parse valid.

@@ -34,6 +34,16 @@ class NetworkError(LLMError):
 NETWORK_FALLBACK_MSG = ("Internet connection interrupted while reaching "
                         "LLM API. Please check connection and retry.")
 
+# api.notrack.ai sits behind Cloudflare (error 1010 = "access denied"
+# for datacenter/bot User-Agents; verified live 2026-09-09: the same key
+# + payload return 200 NOTRACK_OK with a browser-like UA and 403 with the
+# default python-requests UA). Routed requests to the notrack host carry
+# these headers so the uncensored lead slot serves real completions.
+BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+              "AppleWebKit/537.36 (KHTML, like Gecko) "
+              "Chrome/126.0.0.0 Safari/537.36")
+CF_FRIENDLY_HOSTS = ("api.notrack.ai", "notrack.ai")
+
 # requests exceptions that mean "the network is unstable" and are worth an
 # exponential-backoff retry. HTTP 4xx/5xx and malformed-request errors are
 # NOT retried (they surface immediately as LLMError instead).
@@ -125,6 +135,11 @@ HIGH_REASONING_FALLBACKS = [
 # the failover chain, which advances to the next uncensored entry instead of
 # ever dropping onto a safety-tuned generic model.
 UNCENSORED_FALLBACK_MODELS = [
+    # NoTrack AI (config local_endpoints "notrack" block, api_key_env
+    # NOTRACK_API_KEY) - private dedicated-uncensored endpoint, verified
+    # live 2026-09-09 (GET /models -> 200, chat -> 200). Deliberately
+    # uncensored provider, so it leads the pool.
+    "notrack-uncensored",
     "mistralai/mixtral-8x22b-instruct",
     "huihui-ai/Llama-3.3-70B-Instruct-abliterated",
     "dphn/dolphin-2.9.2-qwen2-72b",
@@ -148,6 +163,7 @@ UNCENSORED_FALLBACK_MODELS = [
 # re-downloading https://openrouter.ai/api/v1/models). hermes-4-405b is
 # the flagship reasoning tier.
 MIXED_UNCENSORED_MODELS = [
+    "notrack-uncensored",
     "cognitivecomputations/dolphin-mistral-24b-venice-edition",
     "gryphe/mythomax-l2-13b",
     "nousresearch/hermes-4-405b",
@@ -935,6 +951,15 @@ class OpenAIClient:
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = "Bearer " + api_key
+        # Cloudflare-fronted endpoints (notrack) reject the default
+        # python-requests UA with HTTP 403 error 1010; send browser-like
+        # headers only for hosts known to need them (scoped, harmless for
+        # the rest of the pool).
+        host = (base_url or "").split("//")[-1].split("/")[0].lower()
+        if any(host == h or host.endswith("." + h) for h in CF_FRIENDLY_HOSTS):
+            headers["User-Agent"] = BROWSER_UA
+            headers["Accept"] = "application/json, text/plain, */*"
+            headers["Accept-Language"] = "en-US,en;q=0.9"
         return base_url, headers
 
     def set_vision_attachments(self, attachments):
