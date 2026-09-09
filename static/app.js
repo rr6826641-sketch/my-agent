@@ -206,7 +206,10 @@ function openSettingsPane(name) {
     t.setAttribute("aria-selected", on ? "true" : "false");
   });
   document.querySelectorAll(".settings-pane").forEach((p) => {
-    p.classList.toggle("active", p.id === "pane-" + name);
+    const on = p.id === "pane-" + name;
+    p.classList.toggle("active", on);
+    p.setAttribute("aria-hidden", on ? "false" : "true");
+    if (on) { const sc = p.querySelector(".pane-scroll"); if (sc) sc.scrollTop = 0; }
   });
   currentSettingsPane = name;
   if (name === "tools") loadTools();
