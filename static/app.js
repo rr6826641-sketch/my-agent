@@ -507,9 +507,14 @@ function addTyping() {
   return t;
 }
 
-function scrollDown() {
+function scrollToBottom() {
+  // Drive the viewport to the physically last pixel: the 120px dynamic
+  // bottom padding on .chat-log keeps the final line clear of the
+  // sticky composer dock, so the last rendered row is always visible.
+  if (!chatLog) return;
   chatLog.scrollTop = chatLog.scrollHeight;
 }
+function scrollDown() { scrollToBottom(); }
 
 function addRouteChip(label, reason) {
   const div = document.createElement("div");
@@ -956,6 +961,7 @@ function sendMessage(text) {
       }
       preview.text += e.content || "";
       preview.bubble.querySelector(".bubble").textContent = preview.text;
+      scrollToBottom(); // live stream: keep the growing bubble in view
     } else if (e.type === "tool_call") {
       typing.remove();
       preview = null; // next assistant text gets a fresh bubble
@@ -988,6 +994,7 @@ function sendMessage(text) {
       }
       finalAdded = true;
       preview = null;
+      scrollToBottom(); // finished render: snap to reveal the last line
       finish(); // stream done — clear working…, reset busy, no auto-reconnect
     } else if (e.type === "error") {
       typing.remove();
