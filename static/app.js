@@ -195,24 +195,59 @@ async function fetchJSON(url, opts) {
 }
 
 /* ---------------- view switching ---------------- */
+let currentSettingsPane = "general";
+
+function openSettingsPane(name) {
+  const tab = document.querySelector(`.settings-tab[data-subview="${name}"]`);
+  if (!tab) return;
+  document.querySelectorAll(".settings-tab").forEach((t) => {
+    const on = t === tab;
+    t.classList.toggle("active", on);
+    t.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  document.querySelectorAll(".settings-pane").forEach((p) => {
+    p.classList.toggle("active", p.id === "pane-" + name);
+  });
+  currentSettingsPane = name;
+  if (name === "tools") loadTools();
+  if (name === "memory") loadMemory();
+  if (name === "reports") loadReports();
+  if (name === "rpg") loadRPGView();
+  if (name === "general") { loadSettings(); loadPersona(); }
+  if (name === "system") loadSystem();
+}
+
+function goToSettingsPane(name) {
+  document.querySelectorAll(".nav-item").forEach((b) => b.classList.remove("active"));
+  document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
+  const navBtn = document.querySelector('.nav-item[data-view="settings"]');
+  if (navBtn) navBtn.classList.add("active");
+  const view = $("#view-settings");
+  if (view) view.classList.add("active");
+  openSettingsPane(name);
+}
+
 function switchView(name) {
+  if (name !== "settings" && ["tools", "memory", "reports", "rpg", "system", "general"].indexOf(name) !== -1) {
+    goToSettingsPane(name);
+    return;
+  }
   document.querySelectorAll(".nav-item").forEach((b) => b.classList.remove("active"));
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
   const navBtn = document.querySelector(`.nav-item[data-view="${name}"]`);
   if (navBtn) navBtn.classList.add("active");
   const view = $("#view-" + name);
   if (view) view.classList.add("active");
-  if (name === "tools") loadTools();
-  if (name === "memory") loadMemory();
-  if (name === "reports") loadReports();
-  if (name === "rpg") loadRPGView();
   if (name === "chat") updateExportPill();
-  if (name === "settings") { loadSettings(); loadPersona(); }
-  if (name === "system") loadSystem();
+  if (name === "settings") openSettingsPane(currentSettingsPane);
 }
 
 document.querySelectorAll(".nav-item").forEach((btn) => {
   btn.addEventListener("click", () => switchView(btn.dataset.view));
+});
+
+document.querySelectorAll(".settings-tab").forEach((btn) => {
+  btn.addEventListener("click", () => openSettingsPane(btn.dataset.subview));
 });
 
 $("#btn-new").addEventListener("click", () => {
@@ -2538,7 +2573,7 @@ async function refreshBoard() {
   document.querySelectorAll(".qc[data-action]").forEach((b) => {
     b.addEventListener("click", () => {
       const act = b.dataset.action;
-      if (act === "tools") { switchView("tools"); return; }
+      if (act === "tools") { goToSettingsPane("tools"); return; }
       if (inputBox) {
         inputBox.value = Q_MSG[act] || "";
         inputBox.focus();

@@ -2523,3 +2523,31 @@ body{
 /* Phase 3 - outgoing message previews for attached images */
 .msg.user .msg-imgs{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; justify-content:flex-end}
 .msg.user .msg-imgs img{max-height:150px; max-width:240px; border-radius:10px; border:1px solid rgba(255,64,88,.4); object-fit:cover; display:block; background:rgba(0,0,0,.25)}
+/* ---------- settings panel: consolidated sub-tabs (UI refactor) ---------- */
+#view-settings.view{overflow:hidden; padding-bottom:0}
+.settings-tabs{
+  display:flex; flex-wrap:wrap; gap:6px; padding:12px 18px 10px;
+  border-bottom:1px solid var(--stroke); margin-bottom:14px;
+}
+.settings-tab{
+  position:relative; display:inline-flex; align-items:center; gap:7px;
+  padding:7px 13px; border:1px solid transparent; border-radius:10px;
+  background:transparent; color:var(--mut); font:600 13px var(--font);
+  cursor:pointer; white-space:nowrap;
+  transition:color .16s ease, background .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+.settings-tab .ni{width:16px; text-align:center; font-style:normal; font-size:14px}
+.settings-tab:hover{background:var(--glass); color:var(--txt)}
+.settings-tab.active{
+  color:#fff;
+  background:linear-gradient(120deg,rgba(244,63,94,.18),rgba(190,18,60,.14));
+  border-color:rgba(244,63,94,.28);
+  box-shadow:0 0 0 1px rgba(244,63,94,.28) inset, 0 6px 18px -8px rgba(244,63,94,.35);
+}
+.settings-tab.active .ni{filter:drop-shadow(0 0 6px rgba(244,63,94,.9))}
+.settings-tab.active .badge{background:rgba(244,63,94,.25); box-shadow:0 0 10px -2px rgba(244,63,94,.6)}
+.settings-pane{
+  display:none; flex-direction:column; min-height:0; flex:1 1 auto;
+  overflow-y:auto; padding:16px 18px 18px;
+}
+.settings-pane.active{display:flex; animation:viewIn .5s cubic-bezier(.2,.8,.25,1) both}
