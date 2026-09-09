@@ -99,20 +99,24 @@ HIGH_REASONING_FALLBACKS = [
 # so a 429/empty-body drop mid-engagement never lands the next request on a
 # model that will simply refuse the authorized offensive-security task.
 #
-# ONLINE-ONLY pool (no local downloads): every slug below is served by
-# OpenRouter today - verified against the live /models catalog.  The
-# originally requested abliterated builds, huihui-ai/llama-3.3-70b-
-# instruct-abliterated and cognitivecomputations/dolphin-2.9.2-qwen2-72b,
-# are NOT on OpenRouter (404, re-checked), so the pool leads with
-# mistralai/mixtral-8x22b-instruct (no built-in refusal) and the closest
-# live de-aligned stand-ins: sao10k/l3.3-euryale-70b (Llama-3.3-70B
-# de-aligned - the same base model as the huihui build) and
-# cognitivecomputations/dolphin-mistral-24b-venice-edition (dolphin
-# lineage), then Hermes 4/3, the mythos line and a free emergency slot
-# (nvidia/nemotron-3-super-120b-a12b:free). thinkingmachines/inkling:free
-# is live in the OpenRouter catalog but is restricted to agentic harnesses
-# (403 on plain chat-completions calls from this client), so it cannot
-# serve as a failover route and is intentionally not listed below.
+# TWO-PROVIDER pool: OpenRouter slugs are verified against the live
+# /models catalog; the originally requested abliterated builds
+# (huihui-ai/Llama-3.3-70B-Instruct-abliterated and dolphin-2.9.2-
+# qwen2-72b) are NOT on OpenRouter (404, re-checked), so they are served
+# instead through HuggingFace Inference Providers (router.huggingface.co
+# - config local_endpoints "huggingface" block, api_key_env
+# HUGGINGFACE_API_KEY).  Note: cognitivecomputations/ moved to the dphn
+# org, so the canonical HF repo id is dphn/dolphin-2.9.2-qwen2-72b (the
+# old slug redirects).  The pool leads with mistralai/mixtral-8x22b-
+# instruct (no built-in refusal, OpenRouter), then the two HF abliterated
+# builds, then the closest live de-aligned stand-ins: sao10k/l3.3-
+# euryale-70b (Llama-3.3-70B de-aligned - same base model as the huihui
+# build) and cognitivecomputations/dolphin-mistral-24b-venice-edition
+# (dolphin lineage), then Hermes 4/3, the mythos line and free emergency
+# slots.  thinkingmachines/inkling:free is live in the OpenRouter catalog
+# but is restricted to agentic harnesses (403 on plain chat-completions
+# calls from this client), so it cannot serve as a failover route and is
+# intentionally not listed below.
 #
 # Routing: each slug is listed in the openrouter local_endpoints spec in
 # config.json (api_key_env: OPENROUTER_API_KEY), so _local_route maps it to
@@ -122,6 +126,8 @@ HIGH_REASONING_FALLBACKS = [
 # ever dropping onto a safety-tuned generic model.
 UNCENSORED_FALLBACK_MODELS = [
     "mistralai/mixtral-8x22b-instruct",
+    "huihui-ai/Llama-3.3-70B-Instruct-abliterated",
+    "dphn/dolphin-2.9.2-qwen2-72b",
     "sao10k/l3.3-euryale-70b",
     "cognitivecomputations/dolphin-mistral-24b-venice-edition",
     "nousresearch/hermes-4-70b",
@@ -147,6 +153,12 @@ MIXED_UNCENSORED_MODELS = [
     "nousresearch/hermes-4-405b",
     "nousresearch/hermes-4-70b",
     "sao10k/l3.3-euryale-70b",
+    # Venice.ai private uncensored tier (config local_endpoints "venice"
+    # block, api_key_env VENICE_API_KEY) - live ids from the 2026-09
+    # Venice catalog; both support function calling + vision.  Their own
+    # Dolphin-24B (venice-uncensored line) hosts the dolphin lineage.
+    "venice-uncensored-1-2",
+    "venice-uncensored-role-play",
 ]
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,22 @@
 # Changelog
+
+## [2026-09-08] uncensored pool v4 - HF Inference Providers + Venice routes
+
+- feat(router): the two requested abliterated builds that 404 on OpenRouter now
+  have a live home - huihui-ai/Llama-3.3-70B-Instruct-abliterated and
+  dphn/dolphin-2.9.2-qwen2-72b (cognitivecomputations moved to the dphn org;
+  canonical id verified against huggingface.co/api) are routed through the new
+  `huggingface` local_endpoints block (https://router.huggingface.co/v1,
+  api_key_env HUGGINGFACE_API_KEY).
+- feat(router): new `venice` local_endpoints block (https://api.venice.ai/api/v1,
+  api_key_env VENICE_API_KEY) with live uncensored catalog ids verified 2026-09:
+  venice-uncensored-1-2 + venice-uncensored-role-play (both function-calling
+  capable), added to the PRO MIX rotation pool.
+- feat(pool): UNCENSORED_FALLBACK_MODELS now leads mixtral-8x22b-instruct
+  (OpenRouter) -> huihui abliterated -> dolphin-2.9.2-qwen2-72b (HF route)
+  -> euryale/dolphin-venice/hermes stand-ins -> free emergency slots.
+- config: .env.example documents VENICE_API_KEY + HUGGINGFACE_API_KEY.
+
 ## 2026-09-08
 
 ### Fixed

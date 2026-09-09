@@ -42,6 +42,26 @@
         "nvidia/nemotron-3-ultra-550b-a55b:free"
       ],
       "timeout": 20.0
+    },
+    {
+      "name": "venice",
+      "base_url": "https://api.venice.ai/api/v1",
+      "api_key_env": "VENICE_API_KEY",
+      "models": [
+        "venice-uncensored-1-2",
+        "venice-uncensored-role-play"
+      ],
+      "timeout": 30.0
+    },
+    {
+      "name": "huggingface",
+      "base_url": "https://router.huggingface.co/v1",
+      "api_key_env": "HUGGINGFACE_API_KEY",
+      "models": [
+        "huihui-ai/Llama-3.3-70B-Instruct-abliterated",
+        "dphn/dolphin-2.9.2-qwen2-72b"
+      ],
+      "timeout": 30.0
     }
   ],
   "auto": false
