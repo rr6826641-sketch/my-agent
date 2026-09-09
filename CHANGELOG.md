@@ -17,6 +17,9 @@
   appends a live tail slot NousResearch/Hermes-3-Llama-3.1-70B (in the
   reachable catalog today), so the HF route now contributes a working model.
   config.example.json synced; both files parse valid JSON.
+
+- verified live: router chat with NousResearch/Hermes-3-Llama-3.1-70B -> 200,
+  reply HF_OK in 2.0 s - the HF route serves real completions on this account.
 ## [2026-09-09] step 2 - CLI red-team parity with the web UI
 
 - feat(cli): agent.py now derives uncensored_mix from red_team_level
