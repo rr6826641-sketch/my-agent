@@ -278,4 +278,76 @@ def test_phase1_command_center_stretches_full_height(mock_app):
     stages = re.findall(
         r"\.cc-stage\{[^}]*display:flex[^}]*justify-content:space-between",
         css, re.S)
-    assert len(stages) >= 2, "both theme .cc-stage blocks keep space-between flex column"
+    assert len(stages) >= 2, "both theme .cc-stage blocks keep space-between flex column"# ---------------------------------------------------------------------------
+# Phase 2 - bottom-dock zero-gap alignment contract (consistent across all
+# screen resolutions).
+# ---------------------------------------------------------------------------
+
+
+def _phase1_blocks(tail):
+    composer = re.search(r"\.composer,\s*\.command-input-container\{([^}]*)\}",
+                         tail, re.S).group(1)
+    status = re.search(r"\.cc-statusbar\{([^}]*)\}", tail, re.S).group(1)
+    return composer, status
+
+
+def _media_blocks(css):
+    """Extract full @media blocks with brace balancing."""
+    blocks, i = [], 0
+    while True:
+        i = css.find("@media", i)
+        if i == -1:
+            break
+        brace = css.find("{", i)
+        depth, j = 0, brace
+        while j < len(css):
+            if css[j] == "{":
+                depth += 1
+            elif css[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    blocks.append(css[i:j + 1])
+                    break
+            j += 1
+        i = j
+    return blocks
+
+
+def test_phase2_composer_statusbar_zero_gap(mock_app):
+    """Zero-gap contract: dock margin-bottom and status bar margin-top are
+    both forced to 0 (!important) -> combined gap between composer and
+    cc-statusbar is exactly 0px, dock sits flush against the status bar."""
+    composer, status = _phase1_blocks(_phase1_tail(_css(mock_app)))
+    mb = float(re.search(r"margin-bottom:([\d.]+)px", composer).group(1))
+    mt = float(re.search(r"margin-top:([\d.]+)px", status).group(1))
+    assert mb == 0.0 and mt == 0.0
+    assert mb + mt == 0.0
+    assert "!important" in composer and "!important" in status
+
+
+def test_phase2_contract_consistent_across_resolutions(mock_app):
+    """Resolution consistency: the flush rules are global and appended
+    AFTER the last @media query (no media queries, no viewport units
+    inside), so high and low resolution screens receive the identical
+    zero-gap contract."""
+    css = _css(mock_app)
+    tail = _phase1_tail(css)
+    assert "@media" not in tail
+    assert tail.rstrip().endswith("}")
+    assert css.index("PHASE 1 - input dock flush against bottom status bar") \
+        > css.rfind("@media")
+
+
+def test_phase2_no_media_block_reintroduces_gap(mock_app):
+    """No @media block may set a non-zero composer margin-bottom or status
+    bar margin-top (that would reopen the gap on some device widths)."""
+    css = _css(mock_app)
+    for blk in _media_blocks(css):
+        for m in re.finditer(r"\.composer[^{]*\{[^}]*margin-bottom:\s*([\d.]+)",
+                             blk, re.S):
+            assert float(m.group(1)) == 0.0, \
+                "media block reopens dock gap: %s" % m.group(0)
+        for m in re.finditer(r"\.cc-statusbar\{[^}]*margin-top:\s*([\d.]+)",
+                             blk, re.S):
+            assert float(m.group(1)) == 0.0, \
+                "media block reopens statusbar gap: %s" % m.group(0)
