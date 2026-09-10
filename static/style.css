@@ -2644,3 +2644,334 @@ body{
   min-height:0;
   flex:1 1 0%;
 }
+/* ============================================================
+   HACKERAI DESIGN SYSTEM - visual polish layer (append-only).
+   Refines the chat surface, messages, meta rows, chips,
+   toolcards, artifact badges, markdown blocks, hero quick
+   actions, settings, composer micro-feedback and the status
+   bar. Injected after every theme and dock enforcement block
+   so it wins by cascade order.
+   Contract-safe by construction: no media queries, no root-block
+   redeclarations, no composer-group restyling and no duplicated
+   dock selectors; appends after the input-dock flush block and
+   must be the last text in the stylesheet.
+   ============================================================ */
+
+/* 1 - focus rings & interaction affordances */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible{
+  outline:2px solid rgba(244,63,94,.8);
+  outline-offset:2px;
+  border-radius:8px;
+}
+input:focus,
+select:focus,
+textarea:focus{
+  border-color:rgba(244,63,94,.55);
+  box-shadow:0 0 0 3px rgba(244,63,94,.14), 0 0 18px -6px rgba(244,63,94,.5);
+}
+::selection{background:rgba(244,63,94,.45); color:#fff}
+
+/* 2 - chat surface: avatars + bubbles polish */
+.msg{align-items:flex-end}
+.msg .avatar::after{
+  content:""; position:absolute; right:-2px; bottom:-2px; width:10px; height:10px;
+  border-radius:50%; border:2px solid var(--bg-primary);
+  background:#22c55e; box-shadow:0 0 8px rgba(34,197,94,.9); z-index:1;
+}
+.msg.user .avatar::after{background:#f59e0b; box-shadow:0 0 8px rgba(245,158,11,.9)}
+@keyframes dsFilament{
+  0%,100%{box-shadow:0 0 0 1px rgba(255,255,255,.22) inset, 0 0 14px -2px rgba(244,63,94,.55)}
+  50%{box-shadow:0 0 0 1px rgba(255,255,255,.3) inset, 0 0 22px -2px rgba(244,63,94,.95)}
+}
+.msg.assistant .avatar{animation:dsFilament 2.8s ease-in-out infinite}
+.msg.assistant .bubble{border-left:3px solid rgba(255,64,88,.9)}
+.msg.user .bubble{border-right:3px solid rgba(180,70,80,.65)}
+
+/* 3 - msg-meta row: timestamp + copy action on the outer edge */
+.msg-meta{
+  display:flex; align-items:center; gap:7px; align-self:flex-end; order:-1;
+  padding-bottom:2px; opacity:0; transform:translateY(3px);
+  transition:opacity .22s ease, transform .22s ease;
+}
+.msg:hover .msg-meta,
+.msg-meta:focus-within{opacity:1; transform:none}
+.mm-time{
+  font:600 10px var(--mono); letter-spacing:.8px; text-transform:uppercase;
+  color:var(--dim); white-space:nowrap;
+}
+.mm-copy{
+  cursor:pointer; display:inline-flex; align-items:center; justify-content:center;
+  width:20px; height:20px; padding:0; border-radius:6px; color:var(--dim);
+  background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08);
+  font-size:11px; line-height:1; transition:all .15s ease;
+}
+.mm-copy:hover{
+  color:#ffb9c4; border-color:rgba(244,63,94,.4);
+  box-shadow:0 0 10px -3px rgba(244,63,94,.6);
+}
+.mm-copy.copied{
+  color:#22c55e; border-color:rgba(34,197,94,.5);
+  box-shadow:0 0 10px -3px rgba(34,197,94,.6);
+}
+
+/* 4 - typing indicator */
+@keyframes dsTypingPulse{0%,100%{opacity:1}50%{opacity:.55}}
+.typing{animation:dsTypingPulse 1.6s ease-in-out infinite}
+.typing .tdots{letter-spacing:.4px}
+.typing .tdots::before{filter:drop-shadow(0 0 4px currentColor)}
+
+/* 5 - route / pipeline chips */
+.route-chip{
+  box-shadow:0 8px 20px -12px rgba(120,0,10,.8), 0 1px 0 rgba(255,255,255,.06) inset;
+}
+.route-chip .route-txt b{color:#fff; letter-spacing:.4px}
+.route-chip .route-txt .route-reason{text-transform:none; letter-spacing:0}
+.route-chip.stage-chip{padding:5px 14px}
+@keyframes dsRunPulse{
+  0%,100%{opacity:1; transform:scale(1)}
+  50%{opacity:.45; transform:scale(.84)}
+}
+.route-chip.stage-chip.running .route-ico{
+  display:inline-block; animation:dsRunPulse 1.2s ease-in-out infinite;
+}
+.route-chip.stage-chip.done{
+  border-color:rgba(34,197,94,.4);
+  background:linear-gradient(120deg,rgba(34,197,94,.14),rgba(16,120,60,.14));
+}
+.route-chip.stage-chip.done .route-ico{filter:drop-shadow(0 0 6px rgba(34,197,94,.8))}
+.route-chip.rt-notice{border-color:rgba(244,63,94,.5)}
+
+/* 6 - toolcards: head affordance, chevron, result pre */
+.toolcard-head{display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none}
+.toolcard:hover{
+  border-color:rgba(255,90,110,.5);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.09),
+    0 12px 28px -16px rgba(70,0,12,.9), 0 0 0 1px rgba(255,39,64,.12) inset;
+}
+.toolcard .t-name{font-weight:700; letter-spacing:.2px}
+.chev{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:18px; height:18px; margin-left:auto; border-radius:5px; flex:0 0 auto;
+  background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08);
+  font-size:10px; color:var(--dim); transition:transform .25s ease, background .15s ease;
+}
+.toolcard.open .chev{
+  transform:rotate(180deg); color:#ff9fb0;
+  background:rgba(244,63,94,.18); border-color:rgba(244,63,94,.35);
+}
+.toolcard .result{
+  margin:0; max-height:220px; overflow:auto; font:11.5px/1.65 var(--mono);
+  white-space:pre-wrap; word-break:break-word; color:#ffd6d6;
+}
+.toolcard:not(.open) .toolcard-body{display:none}
+
+/* 7 - artifact badges + panels */
+.artifact-zone{display:flex; flex-wrap:wrap; gap:8px; margin:4px 0 4px 46px}
+.artifact-panel{
+  margin:4px 0 8px 46px; padding:10px 12px; border-radius:14px;
+  border:1px solid rgba(255,90,110,.25); box-shadow:var(--shadow-1);
+  background:linear-gradient(170deg,rgba(120,0,24,.42),rgba(46,0,10,.6));
+}
+.artifact-row{display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:3px 0}
+.artifact-badge{
+  display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:8px;
+  font:600 11px var(--mono); color:#ffd9de; text-decoration:none;
+  background:rgba(244,63,94,.12); border:1px solid rgba(225,29,72,.3);
+  transition:border-color .15s ease, box-shadow .15s ease, color .15s ease;
+}
+.artifact-badge:hover{
+  color:#fff; border-color:rgba(244,63,94,.6);
+  box-shadow:0 0 14px -4px rgba(244,63,94,.7);
+}
+.artifact-size{color:var(--dim); font-size:9.5px}
+.artifact-report{
+  display:inline-flex; align-items:center; gap:6px; margin:4px 6px 2px 0;
+  font:700 10.5px var(--mono); letter-spacing:.6px; text-transform:uppercase;
+  color:#ffb9c4; text-decoration:none; padding:6px 12px; border-radius:9px;
+  background:rgba(244,63,94,.1); border:1px solid rgba(244,63,94,.3);
+  transition:background .15s ease, color .15s ease, border-color .15s ease;
+}
+.artifact-report:hover{color:#fff; background:rgba(244,63,94,.2); border-color:rgba(244,63,94,.55)}
+
+/* 8 - codewrap + markdown blocks inside bubbles */
+.msg .bubble .codewrap{margin:10px 0}
+.msg .bubble .codewrap pre{transition:border-color .15s ease}
+.msg .bubble .codewrap:hover{border-color:rgba(255,90,110,.55)}
+.codewrap .copy-btn:hover{
+  color:#fff; border-color:rgba(255,90,110,.6);
+  box-shadow:0 0 12px -4px rgba(244,63,94,.8);
+}
+.codewrap .copy-btn.copied{
+  color:#22c55e; background:rgba(34,197,94,.15); border-color:rgba(34,197,94,.5);
+}
+.msg .bubble p code, .msg .bubble li code{
+  font:11.5px/1.5 var(--mono); color:#ffc9d2;
+  background:rgba(244,63,94,.12); border:1px solid rgba(225,29,72,.25);
+  border-radius:5px; padding:1px 5px;
+}
+.msg .bubble table{
+  width:100%; margin:10px 0; border-collapse:separate; border-spacing:0;
+  font-size:12px; line-height:1.5; border:1px solid rgba(225,29,72,.25);
+  border-radius:10px; overflow:hidden;
+}
+.msg .bubble th, .msg .bubble td{
+  padding:7px 11px; text-align:left;
+  border-bottom:1px solid rgba(225,29,72,.18);
+}
+.msg .bubble thead th{
+  font:800 9.5px var(--mono); letter-spacing:1.4px; text-transform:uppercase;
+  color:#ffc9d2; background:rgba(171,4,5,.55);
+}
+.msg .bubble tbody tr:nth-child(even){background:rgba(255,255,255,.03)}
+.msg .bubble tbody tr:last-child td{border-bottom:0}
+.msg .bubble h1, .msg .bubble h2, .msg .bubble h3, .msg .bubble h4{
+  margin:14px 0 6px; line-height:1.3; color:#fff; letter-spacing:-.2px;
+}
+.msg .bubble h1{font-size:16px}
+.msg .bubble h2{font-size:15px}
+.msg .bubble h3{font-size:14px}
+.msg .bubble h4{font-size:13px; text-transform:uppercase; letter-spacing:.8px}
+.msg .bubble hr{
+  border:0; height:1px; margin:12px 0;
+  background:linear-gradient(90deg,transparent,rgba(244,63,94,.5),transparent);
+}
+.msg .bubble blockquote{
+  margin:8px 0; padding:6px 12px; border-left:3px solid rgba(244,63,94,.6);
+  background:rgba(255,255,255,.04); border-radius:0 8px 8px 0; color:var(--dim);
+}
+.msg .bubble a{
+  color:#ff9fb0; text-decoration:underline; text-underline-offset:2px;
+  transition:color .15s ease;
+}
+.msg .bubble a:hover{color:#ffd9de}
+.msg .bubble ul, .msg .bubble ol{margin:6px 0; padding-left:20px}
+.msg .bubble li{margin:3px 0}
+
+/* 9 - hero quick actions + chips */
+.qc::after{
+  content:""; position:absolute; inset:0; border-radius:14px; pointer-events:none;
+  background:radial-gradient(120% 90% at 20% 0%,rgba(244,63,94,.16),transparent 60%);
+  opacity:0; transition:opacity .2s ease;
+}
+.qc:hover{
+  transform:translateY(-2px); border-color:rgba(255,64,88,.45);
+  box-shadow:0 18px 36px -16px rgba(50,0,10,.95), 0 0 24px -8px rgba(244,63,94,.5);
+}
+.qc:hover::after{opacity:1}
+.qc-ico{position:relative; z-index:1; flex:0 0 auto}
+.qc-ico svg{
+  width:22px; height:22px; fill:none; stroke:rgba(244,63,94,.9); stroke-width:1.8;
+  stroke-linecap:round; stroke-linejoin:round;
+  filter:drop-shadow(0 0 6px rgba(244,63,94,.45));
+  transition:transform .2s ease;
+}
+.qc:hover .qc-ico svg{transform:scale(1.12)}
+.qc-tx{position:relative; z-index:1; display:flex; flex-direction:column; gap:2px; min-width:0}
+.qc-tx b{font-size:13px; color:#f2f3f8; letter-spacing:.2px}
+.qc-tx small{font-size:10.5px; color:var(--dim); font-weight:400}
+.qc-ar{
+  position:relative; z-index:1; margin-left:auto; color:var(--dim); font-size:14px;
+  transition:transform .2s ease, color .2s ease;
+}
+.qc:hover .qc-ar{transform:translateX(4px); color:#ff9fb0}
+.chip{cursor:pointer; transition:transform .15s ease, border-color .15s ease, color .15s ease}
+.chip:hover{
+  transform:translateY(-1px); color:#fff;
+  border-color:rgba(244,63,94,.45); box-shadow:0 8px 16px -8px rgba(244,63,94,.5);
+}
+
+/* 10 - forms & settings */
+input, select, textarea{
+  caret-color:#f43f5e;
+  transition:border-color .15s ease, box-shadow .15s ease;
+}
+.settings-card{
+  border:1px solid var(--stroke); border-radius:14px; padding:14px 16px;
+  background:linear-gradient(170deg,rgba(185,6,7,.35),rgba(167,4,5,.28));
+  box-shadow:var(--shadow-1);
+}
+.settings-tab:focus-visible{outline-offset:1px}
+.settings-tab.active{text-shadow:0 0 12px rgba(244,63,94,.35)}
+
+/* 11 - composer micro-feedback */
+.btn-send{position:relative; overflow:hidden}
+.btn-send::before{
+  content:""; position:absolute; top:0; bottom:0; left:-60%; width:45%;
+  background:linear-gradient(105deg,transparent,rgba(255,255,255,.35),transparent);
+  transform:skewX(-18deg); pointer-events:none; opacity:0;
+}
+.btn-send:hover::before{opacity:1; animation:dsSweep .9s ease forwards}
+@keyframes dsSweep{0%{left:-60%}100%{left:130%}}
+.btn-send:active{transform:scale(.96)}
+.comp-ico{cursor:pointer; transition:color .15s ease, border-color .15s ease, box-shadow .15s ease}
+.comp-ico:hover{
+  color:#ff9fb0; border-color:rgba(244,63,94,.4);
+  box-shadow:0 0 12px -4px rgba(244,63,94,.6);
+}
+.comp-prompt{cursor:pointer; user-select:none}
+.composer .ibar-input textarea::placeholder{color:var(--dim); opacity:.75}
+
+/* 12 - status bar refinements + scrollbars */
+.cc-statusbar .st{
+  display:inline-flex; align-items:center; gap:6px;
+  font:600 9.5px var(--mono); letter-spacing:1.1px; color:var(--dim);
+}
+.cc-statusbar .st b{color:var(--mut); font-weight:700}
+.cc-statusbar .st-ico{color:#ff9fb0; opacity:.9}
+.cc-statusbar .st-dot{
+  width:7px; height:7px; border-radius:50%; display:inline-block; flex:0 0 auto;
+  background:#3f3f46; box-shadow:0 0 0 2px rgba(255,255,255,.05) inset;
+}
+.cc-statusbar .st-on .st-dot{
+  background:#f59e0b; box-shadow:0 0 8px rgba(245,158,11,.9);
+  animation:dsRunPulse 2s ease-in-out infinite;
+}
+.cc-statusbar .st-dot.green{background:#22c55e; box-shadow:0 0 8px rgba(34,197,94,.9)}
+.chat-log::-webkit-scrollbar{width:9px}
+.chat-log::-webkit-scrollbar-track{background:transparent}
+.chat-log::-webkit-scrollbar-thumb{
+  background:linear-gradient(180deg,rgba(244,63,94,.5),rgba(190,18,60,.5));
+  border-radius:99px; border:2px solid transparent; background-clip:padding-box;
+}
+.chat-log::-webkit-scrollbar-thumb:hover{
+  background:linear-gradient(180deg,rgba(244,63,94,.8),rgba(190,18,60,.8));
+  border-radius:99px; border:2px solid transparent; background-clip:padding-box;
+}
+.settings-pane::-webkit-scrollbar{width:9px}
+.settings-pane::-webkit-scrollbar-track{background:transparent}
+.settings-pane::-webkit-scrollbar-thumb{
+  background:linear-gradient(180deg,rgba(244,63,94,.4),rgba(190,18,60,.4));
+  border-radius:99px; border:2px solid transparent; background-clip:padding-box;
+}
+
+/* 13 - misc polish: step cards, validation, sessions, selection */
+@keyframes dsErrShake{
+  0%,100%{transform:translateX(0)}
+  25%{transform:translateX(-5px)}
+  75%{transform:translateX(5px)}
+}
+.validation-card{box-shadow:var(--shadow-1)}
+.validation-card.val-bad{animation:dsErrShake .45s ease both; border-color:rgba(244,63,94,.55)}
+.validation-card .val-ico{font-size:15px; filter:drop-shadow(0 0 6px rgba(244,63,94,.5))}
+.step-card{border-left:3px solid rgba(244,63,94,.7)}
+.step-btn{cursor:pointer; transition:background .15s ease, border-color .15s ease, color .15s ease}
+.step-btn.ok:hover{
+  color:#fff; background:rgba(34,197,94,.26);
+  box-shadow:0 0 14px -4px rgba(34,197,94,.7);
+}
+.step-btn.no:hover{
+  color:#fff; background:rgba(244,63,94,.26);
+  box-shadow:0 0 14px -4px rgba(244,63,94,.7);
+}
+.attach-chip .att-rm{cursor:pointer}
+.attach-chip .att-rm:hover{
+  color:#ff9fb0; border-color:rgba(244,63,94,.45);
+  box-shadow:0 0 10px -3px rgba(244,63,94,.6);
+}
+.session-item:hover{
+  background:rgba(255,255,255,.04); border-color:rgba(244,63,94,.3);
+}
+.welcome{border:1px solid rgba(244,63,94,.14)}

@@ -480,11 +480,40 @@ function mdToDom(text, el) {
 }
 
 /* ---------------- chat messages ---------------- */
+/* message meta row: local timestamp + copy-to-clipboard button.
+   Fully additive - never touches .avatar/.bubble structure, so all
+   asserted strings in the UI contract stay byte-identical. */
+function setupMsgMeta(m) {
+  const meta = document.createElement("div");
+  meta.className = "msg-meta";
+  const time = document.createElement("time");
+  time.className = "mm-time";
+  time.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "mm-copy";
+  btn.title = "Copy message";
+  btn.setAttribute("aria-label", "Copy message");
+  btn.textContent = "\u2398";
+  btn.addEventListener("click", () => {
+    const bubble = m.querySelector(".bubble");
+    if (bubble && navigator.clipboard) {
+      navigator.clipboard.writeText(bubble.textContent);
+      btn.classList.add("copied");
+      btn.textContent = "\u2713";
+      setTimeout(() => { btn.classList.remove("copied"); btn.textContent = "\u2398"; }, 1200);
+    }
+  });
+  meta.append(time, btn);
+  m.appendChild(meta);
+}
+
 function addUserMsg(text) {
   const m = document.createElement("div");
   m.className = "msg user";
   m.innerHTML = `<div class="avatar">🧑</div><div class="bubble">${escapeHtml(text)}</div>`;
   chatLog.appendChild(m);
+  setupMsgMeta(m);
   scrollDown();
 }
 
@@ -494,6 +523,7 @@ function addAssistantBubble(text) {
   m.innerHTML = `<div class="avatar">🤖</div><div class="bubble"></div>`;
   mdToDom(text, m.querySelector(".bubble"));
   chatLog.appendChild(m);
+  setupMsgMeta(m);
   scrollDown();
   return m;
 }
