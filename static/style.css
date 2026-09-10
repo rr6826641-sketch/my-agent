@@ -2492,9 +2492,15 @@ body{
    ============================================================ */
 .composer-ibar .ibar-input{flex-wrap:wrap}
 .attach-tray{
-  flex:1 1 100%; order:9; display:flex; flex-wrap:wrap; gap:6px;
-  padding:4px 2px 6px; align-items:center; min-width:0;
+  position:absolute; left:10px; right:96px; top:100%; z-index:5;
+  display:flex; flex-wrap:wrap; gap:6px; align-items:center; min-width:0;
+  margin-top:5px; padding:4px 6px;
+  background:linear-gradient(170deg,rgba(24,6,10,.88),rgba(10,3,6,.84));
+  border:1px solid rgba(255,39,64,.22); border-radius:11px;
+  backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+  box-shadow:0 10px 28px -12px rgba(110,0,18,.85);
 }
+.attach-tray[hidden]{display:none}
 .attach-chip{
   display:inline-flex; align-items:center; gap:6px; max-width:240px; min-width:0;
   background:linear-gradient(180deg,rgba(255,64,88,.13),rgba(122,0,22,.10));
