@@ -282,7 +282,7 @@ a:hover{text-decoration:underline}
 .pill:disabled{opacity:.4; cursor:not-allowed; transform:none}
 
 /* ---------- chat ---------- */
-.chat-log{flex:1; min-height:0; overflow-y:auto; padding:6px 4px 190px; display:flex; flex-direction:column; gap:14px;
+.chat-log{flex:1; min-height:0; overflow-y:auto; padding:6px 4px 140px; display:flex; flex-direction:column; gap:14px;
   scroll-behavior:smooth}
 .welcome{
   margin:auto; max-width:620px; text-align:center; padding:44px 26px;
@@ -2561,9 +2561,9 @@ body{
      position:sticky; bottom:0; z-index:50 (above chat-log z1 /
      cc-dash z2), opaque --bg-primary background so streamed
      content scrolls smoothly underneath with no bleed-through.
-   - .chat-log keeps an 190px bottom cushion so the final table
+   - .chat-log keeps a 140px bottom cushion so the final table
      row / reminder line of long reports scrolls fully clear of
-     the dock (composer ~106px + statusbar ~36px + margin).
+     the dock (core dock ~128px + breathing room).
    - .command-input-container is the spec name for the same dock
      (kept here for forward-compat).
    ============================================================ */
@@ -2578,7 +2578,7 @@ body{
 }
 .cc-stage .chat-log,
 #chat-log{
-  padding-bottom:190px;
+  padding-bottom:140px;
 }
 
 /* ============================================================
@@ -2617,7 +2617,7 @@ body{
 }
 .cc-stage .chat-log,
 #chat-log{
-  padding-bottom:190px;
+  padding-bottom:140px;
 }
 
 /* ============================================================
