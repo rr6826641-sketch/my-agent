@@ -2429,14 +2429,14 @@ body{
 .composer-ibar .bar-actions .btn-send{width:38px; height:30px; border-radius:10px}
 .composer-ibar .comp-tools{display:flex; align-items:center; gap:6px}
 .composer-ibar .comp-ico{
-  width:31px; height:31px; display:grid; place-items:center; cursor:pointer;
+  width:34px; height:34px; min-width:34px; display:grid; place-items:center; cursor:pointer;
   color:rgba(255,185,195,.85);
   background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.012));
   border:1px solid rgba(255,255,255,.10); border-radius:10px;
   transition:all .16s ease;
 }
 .composer-ibar .comp-ico svg{
-  width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.8;
+  width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8;
   stroke-linecap:round; stroke-linejoin:round;
 }
 .composer-ibar .comp-ico:hover{
@@ -2643,13 +2643,16 @@ body{
 /* ============================================================
 @media (max-width:640px){
   .composer-ibar .ibar-input textarea{padding-right:132px}
-  .composer-ibar .ibar-actions{right:3px; bottom:3px; gap:3px; padding:2px 3px 2px 5px}
+  .composer-ibar .ibar-actions{right:3px; bottom:3px; gap:4px; padding:3px 4px 3px 6px}
   .composer-ibar .ibar-actions .comp-tools{gap:2px}
-  .composer-ibar .comp-ico{width:26px; height:26px; min-width:26px}
-  .composer-ibar .bar-actions .btn-send{width:32px; height:26px}
+  .composer-ibar .comp-ico{width:31px; height:31px; min-width:31px}
+  .composer-ibar .bar-actions .btn-send{width:34px; height:30px}
 }
 @media (max-width:420px){
-  .composer-ibar .ibar-input textarea{padding-right:118px}
+  .composer-ibar .ibar-input textarea{padding-right:128px}
+  .composer-ibar .comp-ico{width:29px; height:29px; min-width:29px}
+  .composer-ibar .bar-actions .btn-send{width:32px; height:28px}
+  .composer-ibar .ibar-actions{gap:3px; padding:2px 3px 2px 5px}
 }
 
    PHASE 1 - input dock flush against bottom status bar.
