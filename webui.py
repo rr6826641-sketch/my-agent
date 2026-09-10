@@ -27,6 +27,7 @@ from flask import (Flask, jsonify, render_template, request, Response,
 
 from ai_agent.config import (PROJECT_DIR, load_config, config_status, save_env_key)
 from ai_agent.core import Agent, IntentReformulator, RunCancelled
+from ai_agent.core.event_stream import hub
 from ai_agent.llm import (MockClient, OpenAIClient,
                           UNCENSORED_FALLBACK_MODELS,
                           MIXED_UNCENSORED_MODELS)
@@ -840,6 +841,12 @@ def api_chat():
 
     def worker():
         pending_tool = {"name": None, "args": "{}"}
+        # PHASE 1 - tag the worker thread so every tool execution event
+        # inherits this run/session identity on the live stream.
+        try:
+            hub.attach_context(run_id=run_id, session_id=sid)
+        except Exception:
+            pass
         turn_artifacts = []
         # one timestamp folder per assessment turn:
         # artifacts/{chat_id}/{run_ts}/{tool}_{ts}_{suffix}.{ext}
@@ -848,6 +855,25 @@ def api_chat():
         try:
             for event in run_iter:
                 etype = event.get("type")
+                # PHASE 1 - re-broadcast sub-agent/validation lifecycle
+                # state onto the real-time execution stream.
+                if etype in ("validation_start", "validation_spawned",
+                             "validation_done") or (
+                        etype and etype.startswith("validation")):
+                    try:
+                        hub.subagent_state(
+                            name=etype,
+                            status={"validation_start": "running",
+                                    "validation_spawned": "running",
+                                    "validation_done": "completed"}.get(
+                                        etype, "running"),
+                            detail=event.get("reason")
+                            or event.get("summary")
+                            or ("%s findings" % len(event.get("findings") or [])
+                                if event.get("findings") else None),
+                            run_id=run_id, session_id=sid)
+                    except Exception:
+                        pass
                 if etype == "tool_call":
                     pending_tool["name"] = event.get("name")
                     pending_tool["args"] = event.get("arguments") or "{}"
@@ -945,6 +971,74 @@ def api_chat():
                     headers={"Cache-Control": "no-cache",
                              "X-Accel-Buffering": "no",
                              "X-Run-Id": run_id})
+
+
+def _exec_stream_generator(after=0, run_filter=None, sid_filter=None):
+    """PHASE 1 - SSE generator factory for the execution event stream.
+
+    Subscribes on first advance; yields the SSE keep-alive retry line,
+    then any replay window, then live events as they are emitted.
+    """
+    def _passes(evt):
+        if run_filter and evt.get("run_id") != run_filter:
+            return False
+        if sid_filter and evt.get("session_id") != sid_filter:
+            return False
+        return True
+
+    sub_id, q = hub.subscribe()
+    try:
+        yield "retry: 1500\n\n"
+        # replay window for late joiners (newest first)
+        for evt in reversed(hub.replay(limit=after or None)):
+            if _passes(evt):
+                yield ("event: exec\ndata: " +
+                       json.dumps(evt, ensure_ascii=False) + "\n\n")
+        while True:
+            try:
+                evt = q.get(timeout=15)
+            except queue.Empty:
+                yield ": keep-alive\n\n"
+                continue
+            if _passes(evt):
+                yield ("event: exec\ndata: " +
+                       json.dumps(evt, ensure_ascii=False) + "\n\n")
+    finally:
+        hub.unsubscribe(sub_id)
+
+
+@app.route("/api/exec/stream")
+def api_exec_stream():
+    """PHASE 1 - real-time execution event stream (SSE).
+
+    Fans every execution event (terminal command started/running/finished,
+    tool invocations, git actions, sub-agent state) out as JSON payloads:
+
+      data: {"run_id": ..., "session_id": ..., "step_type": "terminal",
+             "command": ..., "stdout": ..., "stderr": ...,
+             "status": "running|completed|failed|cancelled",
+             "exit_code": ..., "duration_ms": ..., "ts": ...}
+
+    Query params:
+      ?after=<n>   emit the last <n> historical events first (replay)
+      ?run_id=<id> filter to one run
+      ?session=<s> filter to one chat session
+
+    Keep-alive comments are sent every 15s; the HTTP connection stays open
+    and events are pushed the moment they are emitted.
+    """
+    try:
+        after = int(request.args.get("after") or 0)
+    except (TypeError, ValueError):
+        after = 0
+    run_filter = (request.args.get("run_id") or "").strip() or None
+    sid_filter = (request.args.get("session") or "").strip() or None
+    return Response(stream_with_context(
+        _exec_stream_generator(after=after, run_filter=run_filter,
+                               sid_filter=sid_filter)),
+        content_type="text/event-stream; charset=utf-8",
+        headers={"Cache-Control": "no-cache",
+                 "X-Accel-Buffering": "no"})
 
 
 @app.route("/api/chat/step", methods=["POST"])

@@ -11,6 +11,7 @@ import subprocess
 import threading
 import time
 
+from ..core.event_stream import hub
 from .base import kill_proc_tree, register_proc, unregister_proc
 
 # Real ConPTY backend (optional): gives children a genuine Windows console
@@ -829,34 +830,118 @@ def tool_list_sessions(active_only=False):
 
 # ---------------------------------------------------------------- one-shot
 
+def _pump_stream(pipe, sink, run_id, stream_kind, step_type, command):
+    """Read one pipe line-by-line, appending decoded text to sink and
+    emitting each line live through the event hub (during execution).
+    """
+    if pipe is None:
+        return
+    try:
+        while True:
+            raw = pipe.readline()
+            if not raw:
+                break
+            text = _decode_output(raw)
+            if text:
+                sink.append(text)
+                try:
+                    hub.step_output(stream=stream_kind, chunk=text,
+                                    run_id=run_id, step_type=step_type,
+                                    command=command)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
 def tool_run_terminal(command, timeout=60, max_output=20000):
     if not command or not command.strip():
         return "Error: empty command"
     proc = None
+    # PHASE 1 - live real-time execution events (guarded; never fatal).
+    # Derive run_id FIRST (inheriting the enclosing tool run when present)
+    # so the start/output/end frames all share one identity, even when the
+    # tool is invoked directly outside execute_tool().
+    sid = hub.context().get("session_id")
+    try:
+        run_id = hub.context().get("run_id") or hub.begin_run(
+            step_type="terminal", command=command, session_id=sid)
+        hub.step_start(step_type="terminal", command=command, session_id=sid,
+                       run_id=run_id)
+    except Exception:
+        run_id = None
     try:
         proc = subprocess.Popen(
             command, shell=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         register_proc(proc)
-        stdout, stderr = proc.communicate(timeout=timeout)
-        out = _decode_output(stdout)
-        err = _decode_output(stderr)
+        out_parts, err_parts = [], []
+        t_out = threading.Thread(
+            target=_pump_stream,
+            args=(proc.stdout, out_parts, run_id, "stdout", "terminal", command),
+            daemon=True)
+        t_err = threading.Thread(
+            target=_pump_stream,
+            args=(proc.stderr, err_parts, run_id, "stderr", "terminal", command),
+            daemon=True)
+        t_out.start()
+        t_err.start()
+        deadline = time.time() + timeout
+        timed_out = False
+        while t_out.is_alive() or t_err.is_alive() or proc.poll() is None:
+            if time.time() >= deadline:
+                timed_out = True
+                break
+            time.sleep(0.05)
+        if timed_out:
+            raise subprocess.TimeoutExpired(proc, timeout)
+        t_out.join(1)
+        t_err.join(1)
+        out = "".join(out_parts)
+        err = "".join(err_parts)
         parts = [out]
         if err.strip():
             parts.append("[stderr]\n" + err)
         text = "\n".join(parts).strip() or "(no output)"
-        return "[exit code %s]\n%s" % (proc.returncode, text[:max_output])
+        ret = "[exit code %s]\n%s" % (proc.returncode, text[:max_output])
+        try:
+            if run_id is not None:
+                hub.step_end(
+                    run_id=run_id, step_type="terminal", command=command,
+                    status="completed" if proc.returncode == 0 else "failed",
+                    exit_code=proc.returncode,
+                    stdout=out[:max_output] or None, stderr=err[:max_output] or None)
+                hub.end_run(run_id,
+                            "completed" if proc.returncode == 0 else "failed",
+                            proc.returncode)
+        except Exception:
+            pass
+        return ret
     except subprocess.TimeoutExpired:
         if proc is not None:
             kill_proc_tree(proc)
+        try:
+            if run_id is not None:
+                hub.step_end(run_id=run_id, step_type="terminal",
+                             command=command, status="failed", exit_code=124)
+                hub.end_run(run_id, "failed", 124)
+        except Exception:
+            pass
         return "[command timed out after %ss]" % timeout
     except Exception as exc:
+        try:
+            if run_id is not None:
+                hub.step_end(run_id=run_id, step_type="terminal",
+                             command=command, status="failed", exit_code=-1,
+                             stderr="%s: %s" % (type(exc).__name__, exc))
+                hub.end_run(run_id, "failed", -1)
+        except Exception:
+            pass
         return "run_terminal error: %s" % exc
     finally:
         if proc is not None:
             unregister_proc(proc)
-
 
 def tool_read_file(path, max_chars=60000):
     try:

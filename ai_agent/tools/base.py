@@ -6,6 +6,8 @@ import subprocess
 import threading
 import time
 
+from ..core.event_stream import hub, _step_type_for
+
 
 class Tool:
     def __init__(self, name, description, parameters, func, confirm=False):
@@ -86,6 +88,14 @@ def kill_active_procs(include_sessions=False):
 
 
 
+def _compact_args(args):
+    """Short JSON-ish label of the args for the stream command field."""
+    try:
+        return json.dumps(args, separators=(",", ":"), ensure_ascii=False)[:500]
+    except Exception:
+        return "{}"
+
+
 def execute_tool(tool_by_name, tool_call, timeout=TOOL_TIMEOUT,
                  cancel_event=None):
     """Run one tool call; returns the string result.
@@ -104,33 +114,72 @@ def execute_tool(tool_by_name, tool_call, timeout=TOOL_TIMEOUT,
             args = {}
         if not isinstance(args, dict):
             args = {}
+        cmd_args = args  # keep original dict for the tool call below
     except (KeyError, TypeError) as exc:
         return "Tool call parse error: %s" % exc
     tool = tool_by_name.get(fn_name)
     if tool is None:
         return "Unknown tool: %s" % fn_name
 
+    # PHASE 1 - real-time execution event stream: open a run lifecycle and
+    # emit the 'running' frame BEFORE the tool executes. All hub calls are
+    # guarded so stream failures can never break tool execution.
+    step_type = _step_type_for(fn_name)
+    cmd_label = _compact_args(args)
+    run_id = None
+    t0 = time.time()
+    try:
+        run_id = hub.begin_run(step_type=step_type, command=cmd_label)
+        hub.step_start(step_type=step_type, command=cmd_label, run_id=run_id,
+                       session_id=hub.context().get("session_id"))
+    except Exception:
+        pass
+
     box = {}
 
     def _run():
         try:
-            box["out"] = truncate(tool.func(**args))
+            if run_id is not None:
+                hub.attach_context(run_id=run_id, step_type=step_type,
+                                   command=cmd_label)
+        except Exception:
+            pass
+        try:
+            box["out"] = truncate(tool.func(**cmd_args))
         except TypeError as exc:
             box["out"] = "Bad arguments for %s: %s" % (fn_name, exc)
         except Exception as exc:
             box["out"] = "%s error: %s" % (fn_name, exc)
 
+    def _emit_end(out, status="completed", exit_code=0):
+        try:
+            if run_id is not None:
+                hub.step_end(
+                    run_id=run_id, status=status, exit_code=exit_code,
+                    stdout=out if isinstance(out, str) else None,
+                    stderr=None,
+                    duration_ms=int((time.time() - t0) * 1000))
+                hub.end_run(run_id, status, exit_code)
+        except Exception:
+            pass
+
     worker = threading.Thread(target=_run, daemon=True)
     worker.start()
-    deadline = time.time() + timeout
+    deadline = t0 + timeout
     while True:
         if cancel_event is not None and cancel_event.is_set():
             kill_active_procs(include_sessions=True)
+            _emit_end("[cancelled by user]", "cancelled", -1)
             return "[cancelled by user]"
         worker.join(0.2)
         if not worker.is_alive():
             break
         if time.time() >= deadline:
             kill_active_procs()
+            _emit_end("[%s timed out after %ds — killed]" % (fn_name, timeout),
+                      "failed", 124)
             return ("[%s timed out after %ds — killed]" % (fn_name, timeout))
-    return box.get("out", "(no output)")
+    out = box.get("out", "(no output)")
+    _emit_end(out, "completed" if run_id is not None else "completed",
+              0 if run_id is not None else None)
+    return out
