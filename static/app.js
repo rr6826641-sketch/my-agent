@@ -849,6 +849,405 @@ function addValidationSummary(summary, verified, rejected, unverified, count) {
   return div;
 }
 
+/* =============================================================
+   LIVE AGENT ACTIVITY PANEL
+   Renders REAL execution events only. Every timeline row / tool
+   card / status change is driven by an actual lifecycle event from
+   the running Agent:
+     - /api/chat SSE        (task_started, planning, tool_call,
+                             tool_result, final, error, pipeline_*,
+                             validation_*, task_completed, task_failed)
+     - /api/exec/stream SSE (terminal / git / sub-agent events with
+                             real command + stdout, via EventStreamHub)
+   Nothing is invented, faked, or hardcoded. Output is sanitized so
+   secrets/keys/tokens never reach the panel.
+   ============================================================= */
+const ActivityPanel = (() => {
+  const MAX_ROWS = 250, MAX_TOOLS = 60;
+  let rows = [];        // timeline row elements (oldest first)
+  let tools = [];       // tool card elements
+  let openTools = [];   // stack of started-but-unfinished tool cards
+  let runState = "WAITING";
+  let stepCounter = 0;
+  let processingRow = null;  // "Processing result" row
+  let thinkingRow = null;    // "Generating response" row
+  let execSource = null;
+  let execLine = 1;          // unique id for exec rows
+
+  const byId = (id) => document.getElementById(id);
+
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  // Redact obvious secrets so the panel never leaks credentials.
+  function sanitizeRaw(s) {
+    let out = String(s == null ? "" : s);
+    out = out.replace(/(sk-[A-Za-z0-9_-]{8,})/g, "sk-••••••");
+    out = out.replace(/(ghp_[A-Za-z0-9]{12,})/g, "ghp_••••••");
+    out = out.replace(/((?:Bearer|Authorization|api[_-]?key|apikey|password|passwd|secret|token|client[_-]?secret)\s*[:=]\s*)(["']?)[A-Za-z0-9._\-]{6,}\2/gi, "$1••••••");
+    return out;
+  }
+  const sanitize = sanitizeRaw;
+
+  function tsNow() {
+    return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+  function fmtMs(ms) {
+    if (!ms) return "";
+    if (ms < 1000) return Math.round(ms) + "ms";
+    return (ms / 1000).toFixed(1) + "s";
+  }
+  function shortArgs(args) {
+    let s = (typeof args === "string" ? args : JSON.stringify(args));
+    s = sanitize(s.length > 260 ? s.slice(0, 260) + "…" : s);
+    return esc(s); // escape AFTER sanitize so HTML from args can't inject
+  }
+
+  function setStatus(state, text, cls) {
+    runState = state;
+    const pill = byId("activity-status-pill");
+    const led = byId("activity-led");
+    const txt = byId("activity-status-text");
+    if (!pill) return;
+    pill.className = "pill " + (cls || "smart");
+    if (led) led.className = "led " + (state === "RUNNING" ? "green" : state === "FAILED" ? "red" : state === "COMPLETED" ? "green" : "amber");
+    if (txt) txt.textContent = text || state;
+  }
+
+  function emptyHint(on) {
+    const el = byId("activity-empty");
+    if (el) el.style.display = on ? "" : "none";
+    const t = byId("activity-tools-empty");
+    if (t) t.style.display = (tools.length === 0 && on) ? "" : "none";
+  }
+
+  // one timeline row. Returns {row, id, set}(set updates status/sub).
+  function addRow(ico, title, sub, status, ts) {
+    const box = byId("activity-timeline");
+    if (!box) return null;
+    emptyHint(false);
+    const id = "ar" + (++execLine);
+    const row = document.createElement("div");
+    row.className = "act-row " + status;
+    row.id = id;
+    row.innerHTML =
+      `<span class="act-ico">${ico}</span>` +
+      `<span class="act-body"><b class="act-title">${esc(title)}</b>` +
+      (sub ? `<span class="act-sub">${esc(sanitize(sub))}</span>` : "") +
+      `</span><span class="act-ts">${esc(ts || tsNow())}</span>` +
+      `<span class="act-st"></span>`;
+    box.appendChild(row);
+    rows.push(row);
+    while (rows.length > MAX_ROWS) {
+      const old = rows.shift();
+      if (old && old.parentNode) old.parentNode.removeChild(old);
+    }
+    box.scrollTop = box.scrollHeight; // auto-scroll to newest
+    return {
+      row, id,
+      set(status, sub) {
+        row.className = "act-row " + status;
+        const subEl = row.querySelector(".act-sub");
+        if (subEl && sub !== undefined) subEl.textContent = sanitize(sub);
+        const st = row.querySelector(".act-st");
+        if (st) st.textContent = status === "running" ? "RUNNING" : status === "completed" ? "COMPLETED" : status === "failed" ? "FAILED" : (status || "").toUpperCase();
+      },
+    };
+  }
+
+  // status chip used on tool cards
+  function chip(state, text) {
+    return `<span class="act-chip act-chip-${state}">${esc(text || state.toUpperCase())}</span>`;
+  }
+
+  // one tool card (TOOL EXECUTION column). Real tool_call / tool_result
+  // events drive start and completion; terminal exec events update rows.
+  function addToolCard(name, args, evId, status) {
+    const box = byId("activity-tools");
+    if (!box) return null;
+    emptyHint(false);
+    const card = document.createElement("div");
+    const startedMs = Date.now();
+    card.className = "act-tool act-tool-running";
+    card.innerHTML =
+      `<div class="act-tool-head"><b class="act-tool-name">${esc(name)}</b> ${chip("running", "RUNNING")}</div>` +
+      `<div class="act-tool-body">` +
+      `<div class="act-tool-row"><span class="act-tool-k">ACTION</span><span class="act-tool-v">${shortArgs(args)}</span></div>` +
+      `<div class="act-tool-row"><span class="act-tool-k">START</span><span class="act-tool-v act-tool-ts">${esc(tsNow())}</span></div>` +
+      `<pre class="act-tool-out"></pre>` +
+      `</div>`;
+    box.appendChild(card);
+    tools.push(card);
+    while (tools.length > MAX_TOOLS) {
+      const old = tools.shift();
+      if (old && old.parentNode) old.parentNode.removeChild(old);
+    }
+    const rec = { card, name, startedMs, startedAt: tsNow(), status: status || "running", evId };
+    openTools.push(rec);
+    return rec;
+  }
+
+  function findOpenTool(evId) {
+    if (openTools.length) {
+      // prefer the top of the stack (last started) — matches the real
+      // execution order of the Agent's tool loop
+      return openTools[openTools.length - 1];
+    }
+    return null;
+  }
+
+  function finishTool(rec, ok, output, evId) {
+    if (!rec || !rec.card || !rec.card.isConnected) { openTools.shift(); return; }
+    const idx = openTools.indexOf(rec);
+    if (idx !== -1) openTools.splice(idx, 1);
+    const state = ok ? "completed" : "failed";
+    rec.card.className = "act-tool act-tool-" + state;
+    const durMs = Date.now() - rec.startedMs;
+    const head = rec.card.querySelector(".act-tool-head");
+    if (head) {
+      head.innerHTML = `<b class="act-tool-name">${esc(rec.name)}</b> ` +
+        (ok ? chip("completed", "COMPLETED") : chip("failed", "FAILED"));
+      const end = document.createElement("div");
+      end.className = "act-tool-row";
+      end.innerHTML = `<span class="act-tool-k">${ok ? "DONE" : "END"}</span><span class="act-tool-v act-tool-ts">${esc(tsNow())}${durMs >= 0 ? " · " + esc(fmtMs(durMs)) : ""}</span>`;
+      rec.card.querySelector(".act-tool-body").appendChild(end);
+    }
+    const out = rec.card.querySelector(".act-tool-out");
+    if (out) {
+      const snippet = String(output || "").slice(0, 350);
+      out.textContent = sanitize(snippet) || "(no output)";
+      out.style.display = snippet ? "block" : "none";
+    }
+  }
+
+  function showFinal(title, content, failed) {
+    const box = byId("activity-final");
+    if (!box) return;
+    box.hidden = false;
+    box.className = "activity-final" + (failed ? " activity-final-fail" : "");
+    const head = box.querySelector(".activity-final-head");
+    if (head) head.textContent = failed ? "✗ TASK FAILED — REASON" : title || "✓ TASK COMPLETED — FINAL RESULT";
+    const body = byId("activity-final-body");
+    if (body) body.textContent = sanitize(String(content || "").slice(0, 6000));
+  }
+
+  function closeExecStream() {
+    if (execSource) {
+      try { execSource.close(); } catch (e) { /* noop */ }
+      execSource = null;
+    }
+  }
+
+  // /api/exec/stream — REAL terminal / git / sub-agent execution events
+  // from the backend EventStreamHub. Only events belonging to the current
+  // run are shown, and step_type "tool" is skipped because chat SSE
+  // already covers tool_call/tool_result (avoids duplicate entries).
+  function openExecStream() {
+    closeExecStream();
+    try {
+      execSource = new EventSource("/api/exec/stream?after=0");
+      execSource.onmessage = (msg) => {
+        let evt;
+        try { evt = JSON.parse(msg.data); } catch (e) { return; }
+        if (evt.run_id && activeRunId && evt.run_id !== activeRunId) return;
+        if (evt.step_type === "tool") return; // covered by chat lifecycle
+        const cmd = sanitize(String(evt.command || evt.detail || evt.name || ""));
+        const out = sanitize(String(evt.stdout || evt.stderr || ""));
+        if (evt.status === "running") {
+          const r = addRow("⚙", (evt.step_type || "tool").toUpperCase() + " — running", cmd, "running");
+          if (r) r.row.dataset.eid = "exec" + evt.ts;
+        } else {
+          const ok = evt.status !== "failed" && evt.status !== "cancelled";
+          const rowsAll = byId("activity-timeline").querySelectorAll(".act-row");
+          const last = rowsAll[rowsAll.length - 1];
+          const r = addRow(ok ? "✓" : "✗", (evt.step_type || "tool").toUpperCase() + " — " + (ok ? "completed" : evt.status), cmd, ok ? "completed" : "failed");
+          if (r && out) {
+            const subEl = r.row.querySelector(".act-sub");
+            if (subEl) subEl.textContent = out.slice(0, 160);
+          }
+          if (evt.duration_ms) {
+            const tsEl = r.row.querySelector(".act-ts");
+            if (tsEl) tsEl.textContent = tsNow() + " · " + fmtMs(evt.duration_ms);
+          }
+        }
+      };
+    } catch (e) {
+      execSource = null;
+    }
+  }
+
+  function reset() {
+    closeExecStream();
+    const t = byId("activity-timeline"); if (t) t.innerHTML = "";
+    const tw = byId("activity-tools"); if (tw) tw.innerHTML = "";
+    const fin = byId("activity-final"); if (fin) { fin.hidden = true; }
+    rows = []; tools = []; openTools = [];
+    stepCounter = 0; processingRow = null; thinkingRow = null;
+    emptyHint(true);
+    setStatus("WAITING", "WAITING", "smart");
+  }
+
+  // Mapper: one REAL chat-SSE event -> panel updates. Called once per
+  // event, from the existing stream handler. Pure real events only.
+  function onLifecycle(e) {
+    const type = e.type;
+    try {
+      if (type === "task_started") {
+        setStatus("RUNNING", "RUNNING", "smart");
+        addRow("●", "Task started", "", "running");
+        return;
+      }
+      if (type === "planning") {
+        addRow("→", "Analyzing request — building execution plan", e.detail || "", "running");
+        return;
+      }
+      if (type === "route") {
+        addRow("→", "Model routed", "Smart Router → " + (e.label || e.model || "auto") + (e.reason ? " · " + e.reason : ""), "completed");
+        return;
+      }
+      if (type === "pipeline_start") {
+        stepCounter = 0;
+        pipeStep = 0;
+        addRow("●", "Autonomous pipeline started", (e.target || "") + " · " + ((e.stages || []).length || 4) + " stages", "running");
+        return;
+      }
+      if (type === "stage_start") {
+        pipeStep = (e.num != null ? e.num : (pipeStep + 1));
+        pipeRows[pipeStep] = addRow("→", "Stage " + pipeStep + ": " + (e.title || ""), "", "running");
+        return;
+      }
+      if (type === "stage_complete") {
+        const r = pipeRows[(e.num != null ? e.num : pipeStep)];
+        if (r) r.set("completed", "✓ Stage finished");
+        return;
+      }
+      if (type === "pipeline_done") {
+        setStatus("COMPLETED", "COMPLETED", "smart");
+        addRow("✓", "Task completed", "pipeline finished", "completed");
+        showFinal("✓ TASK COMPLETED — FINAL RESULT", e.report || "");
+        return;
+      }
+      if (type === "llm") {
+        if (!thinkingRow) thinkingRow = addRow("○", "Generating response…", "", "running");
+        return;
+      }
+      if (type === "delta") {
+        if (!processingRow) processingRow = addRow("○", "Processing result…", "", "running");
+        return;
+      }
+      if (type === "tool_call") {
+        if (processingRow) { processingRow.set("completed", "✓ Result obtained"); processingRow = null; }
+        if (thinkingRow) { thinkingRow.set("completed", "✓ Reasoning complete"); thinkingRow = null; }
+        stepCounter += 1;
+        const t = addRow("●", "Executing tool: " + (e.name || "tool"), "Step " + stepCounter + " — " + shortArgs(e.arguments), "running");
+        const rec = addToolCard(e.name || "tool", e.arguments, e.id, "running");
+        if (t && rec) rec.toolRow = t;
+        return;
+      }
+      if (type === "tool_result") {
+        const failed = /error|failed|not installed|timed out|exception/i.test(e.content || "");
+        const rec = findOpenTool(null);
+        if (rec) {
+          finishTool(rec, !failed, e.content, e.id);
+          if (rec.toolRow) rec.toolRow.set(failed ? "failed" : "completed", failed ? "✗ Tool failed" : "✓ Tool completed");
+        } else {
+          addRow(failed ? "✗" : "✓", "Tool result", !failed ? "✓ completed" : "✗ failed", failed ? "failed" : "completed");
+        }
+        return;
+      }
+      if (type === "step_approval") {
+        addRow("⏸", "Waiting for operator approval", "Step-By-Step mode — ", "waiting");
+        return;
+      }
+      if (type === "final") {
+        setStatus("COMPLETED", "COMPLETED", "smart");
+        if (processingRow) { processingRow.set("completed", "✓ Processing done"); processingRow = null; }
+        if (thinkingRow) { thinkingRow.set("completed", "✓ Response generated"); thinkingRow = null; }
+        addRow("✓", "Task completed — final response ready", "", "completed");
+        showFinal("✓ TASK COMPLETED — FINAL RESULT", e.content || "");
+        return;
+      }
+      if (type === "error") {
+        setStatus("FAILED", "FAILED", "danger");
+        addRow("✗", "Task failed", e.content || "run error", "failed");
+        showFinal("✗ TASK FAILED — REASON", e.content || "run error", true);
+        return;
+      }
+      if (type === "artifacts") {
+        addRow("✓", "Artifacts saved", (e.artifacts || []).length + " output(s) stored", "completed");
+        return;
+      }
+      if (type === "notice") {
+        addRow("☠", "Red Team retry", e.text || e.content || "auto-retry", "completed");
+        return;
+      }
+      if (type === "validation_spawned") {
+        addRow("⇄", "Validation sub-agent spawned", e.reason || "", "running");
+        return;
+      }
+      if (type === "validation_start") {
+        addRow("⇄", "Validator re-checking findings", (e.count || 0) + " finding(s)", "running");
+        return;
+      }
+      if (type === "validation_tool_call") {
+        const t = addRow("●", "Validator tool: " + (e.name || "tool"), "VAL — " + shortArgs(e.arguments), "running");
+        const rec = addToolCard("VAL " + (e.name || "tool"), e.arguments, e.id, "running");
+        if (t && rec) rec.toolRow = t;
+        return;
+      }
+      if (type === "validation_tool_result") {
+        const failed = /error|failed|not installed|timed out/i.test(e.content || "");
+        const rec = findOpenTool(null);
+        if (rec) {
+          finishTool(rec, !failed, e.content, e.id);
+          if (rec.toolRow) rec.toolRow.set(failed ? "failed" : "completed", failed ? "✗ Tool failed" : "✓ Tool completed");
+        }
+        return;
+      }
+      if (type === "validation") {
+        addRow("⇄", "Validator: " + (e.status || "finding"), e.finding ? (e.status === "rejected" ? "✗ " : "✓ ") + String(e.finding).slice(0, 140) : (e.reason || ""), e.status === "rejected" ? "failed" : "completed");
+        return;
+      }
+      if (type === "validation_done") {
+        setStatus("COMPLETED", "COMPLETED", "smart");
+        addRow("✓", "Validation complete", (e.summary || "") + " · " + (Number(e.verified) || 0) + " verified", "completed");
+        return;
+      }
+      if (type === "task_completed") {
+        setStatus("COMPLETED", "COMPLETED", "smart");
+        addRow("✓", "Task completed", e.note || (e.duration_ms ? "Duration " + fmtMs(e.duration_ms) : ""), "completed");
+        return;
+      }
+      if (type === "task_failed") {
+        setStatus("FAILED", "FAILED", "danger");
+        addRow("✗", "Task failed", e.reason || "run failed", "failed");
+        return;
+      }
+    } catch (err) {
+      // the activity panel must NEVER break the chat stream
+    }
+  }
+
+  // fin: called when the chat stream ends. Closes the exec stream and
+  // reconciles the status pill if no terminal event arrived.
+  function onStreamClosed() {
+    closeExecStream();
+    if (runState === "RUNNING") setStatus("WAITING", "STREAM CLOSED", "smart");
+  }
+
+  // track pipeline stage rows between events
+  let pipeStep = 0;
+  const pipeRows = {};
+
+  const clearBtn = byId("activity-clear");
+  if (clearBtn) clearBtn.addEventListener("click", reset);
+
+  return { reset, onLifecycle, onStreamClosed, openExecStream, setStatus };
+})();
+
 /* ---------------- send / SSE (fetch + AbortController) ---------------- */
 // EventSource has no abort() API, so the stream is fetched as a raw
 // ReadableStream and SSE frames are parsed by hand. That lets the Stop
@@ -866,6 +1265,7 @@ function setStreaming(on) {
 function sendMessage(text) {
   if (busy || !text.trim()) return;
   const message = text.trim();
+  ActivityPanel.reset(); // fresh LIVE ACTIVITY run for this message
   inputBox.value = "";
   autosize();
   InteractionBarController.messageSent();
@@ -897,6 +1297,7 @@ function sendMessage(text) {
     typing.remove();
     busy = false;
     setStreaming(false); // stop square -> send arrow
+    ActivityPanel.onStreamClosed(); // close the exec stream, reconcile status pill
     $("#chat-hint").textContent = "";
     if (note && !finalAdded) {
       addAssistantBubble(note);
@@ -925,6 +1326,7 @@ function sendMessage(text) {
   // EventSource onmessage handler.
   function handleEvent(e) {
     armWatchdog(); // any event counts as activity
+    ActivityPanel.onLifecycle(e); // real events -> LIVE ACTIVITY panel
     if (e.type === "start") return;
 
     if (e.type === "route") {
@@ -1090,6 +1492,7 @@ function sendMessage(text) {
       if (!res.ok) throw new Error("HTTP " + res.status);
       if (!res.body) throw new Error("stream unavailable");
       activeRunId = res.headers.get("X-Run-Id") || null;
+      ActivityPanel.openExecStream(); // REAL terminal/git/sub-agent events
       const reader = res.body.getReader();
       const decoder = new TextDecoder("utf-8");
       let buf = "";
@@ -2271,6 +2674,10 @@ async function refreshBoard() {
     const mo = new MutationObserver(updateChatActive);
     mo.observe(chatLogEl, { childList: true });
   }
+  // UI-FIX watchdog: re-evaluate every 500 ms so a streamed agent
+  // response can NEVER stay hidden behind the dashboard if an observer
+  // event was missed or fired during a session load/new-chat race.
+  if (chatLogEl) setInterval(updateChatActive, 500);
 
   /* ---------------- live clock (header pill + statusbar) ---------------- */
   const pad = (n) => String(n).padStart(2, "0");

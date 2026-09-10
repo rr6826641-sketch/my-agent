@@ -852,9 +852,57 @@ def api_chat():
         # artifacts/{chat_id}/{run_ts}/{tool}_{ts}_{suffix}.{ext}
         run_ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
+        # ---- LIVE AGENT ACTIVITY: real lifecycle events ----------------
+        # Every payload below reflects an actual transition of THIS run:
+        # the worker is up (task_started), the agent is engaged and about
+        # to consume its plan (planning), a terminal state is emitted
+        # exactly once (task_completed / task_failed). Nothing is fake.
+        started_ts = time.time()
+        lifecycle_end = {}  # set when a terminal lifecycle event fires
+
+        def _push_lifecycle(evt):
+            """Record + queue a lifecycle event; never raises into the loop."""
+            try:
+                _record_event(sid, evt)
+            except Exception:
+                pass
+            try:
+                q.put_nowait(evt)
+            except queue.Full:
+                return False
+            return True
+
+        _push_lifecycle({"type": "task_started", "run_id": run_id,
+                         "session_id": sid, "ts": started_ts})
+        _push_lifecycle({"type": "planning", "run_id": run_id,
+                         "session_id": sid, "ts": time.time(),
+                         "detail": "Request received - the Agent is engaged and building its execution plan."})
+
+        def _mark_task_completed():
+            if lifecycle_end.get("done"):
+                return
+            lifecycle_end["done"] = True
+            _push_lifecycle({"type": "task_completed", "run_id": run_id,
+                             "session_id": sid, "ts": time.time(),
+                             "duration_ms": int((time.time() - started_ts) * 1000)})
+
+        def _mark_task_failed(reason):
+            if lifecycle_end.get("done"):
+                return
+            lifecycle_end["done"] = True
+            _push_lifecycle({"type": "task_failed", "run_id": run_id,
+                             "session_id": sid, "ts": time.time(),
+                             "reason": (reason or "run failed")[:400],
+                             "duration_ms": int((time.time() - started_ts) * 1000)})
+
         try:
             for event in run_iter:
                 etype = event.get("type")
+                # derive task terminal state from REAL stream events
+                if etype in ("final", "pipeline_done", "pipeline_failed"):
+                    _mark_task_completed()
+                elif etype == "error":
+                    _mark_task_failed(event.get("content") or "run failed")
                 # PHASE 1 - re-broadcast sub-agent/validation lifecycle
                 # state onto the real-time execution stream.
                 if etype in ("validation_start", "validation_spawned",
@@ -916,8 +964,10 @@ def api_chat():
                     break
         except RunCancelled:
             pass  # user pressed Stop; clean shutdown below
+            _mark_task_failed("cancelled by user (Stop pressed)")
         except Exception as exc:
             msg_err = "%s: %s" % (type(exc).__name__, exc)
+            _mark_task_failed(msg_err)
             try:
                 _record_event(sid, {"type": "error", "content": msg_err})
             except Exception:
@@ -927,6 +977,14 @@ def api_chat():
             except queue.Full:
                 pass
         finally:
+            # clean end of stream without a terminal event (e.g. Stop) -
+            # still mark the lifecycle as finished so the panel closes out.
+            if not lifecycle_end.get("done"):
+                lifecycle_end["done"] = True
+                _push_lifecycle({"type": "task_completed", "run_id": run_id,
+                                 "session_id": sid, "ts": time.time(),
+                                 "duration_ms": int((time.time() - started_ts) * 1000),
+                                 "note": "run ended"})
             try:
                 _record_stream_done(sid, agent)
             except Exception:

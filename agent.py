@@ -108,7 +108,7 @@ def main():
     )
 
     if cfg["once"]:
-        print(agent.run(cfg["once"]))
+        _stream_reply(agent, cfg["once"])
         return
 
     print(BANNER)
@@ -127,7 +127,43 @@ def main():
         if line.startswith("/"):
             _handle_command(line, agent, memory)
             continue
-        print("\nagent> %s" % agent.run(line))
+        _stream_reply(agent, line)
+
+
+def _stream_reply(agent, text):
+    """Live transparent mode: stream every step (llm thinking, tool
+    calls, tool output, subagent events) to the terminal in real time,
+    then print the final answer. Nothing is hidden anymore."""
+    collected = []
+    print()
+    for ev in agent.run_stream(text):
+        t = ev.get("type")
+        if t == "llm":
+            c = (ev.get("content") or "").strip()
+            if c:
+                print("\n[think] %s" % c[:1500])
+        elif t == "tool_call":
+            name = ev.get("name") or "tool"
+            args = (ev.get("arguments") or "").strip()
+            print("\n>>> [TOOL] %s" % name)
+            if args:
+                print("    %s" % args[:600])
+            print("    [RUNNING...]")
+        elif t == "tool_result":
+            out = (ev.get("content") or "").strip()
+            if out:
+                print("    [OUT] %s" % (out[:800] + ("..." if len(out) > 800 else "")))
+            print("    [✓ done]")
+        elif t == "error":
+            print("\n[ERROR] %s" % (ev.get("content") or ""))
+        elif t == "spawn":
+            print("\n[SUB-AGENT] spawned: %s" % (ev.get("name") or ev.get("task") or "?"))
+        elif t == "subagent_result":
+            print("[SUB-AGENT] returned: %s" % (ev.get("content") or ev.get("summary") or "")[:600])
+        elif t == "final":
+            f = ev.get("content") or ""
+            collected.append(f)
+            print("\nagent> %s" % f)
 
 
 def _handle_command(line, agent, memory):

@@ -48,6 +48,7 @@
 
     <nav class="nav">
       <button class="nav-item active" data-view="chat"><i class="ni">💬</i><span>Chat</span></button>
+      <button class="nav-item" data-view="activity"><i class="ni">⚡</i><span>Live Activity</span></button>
       <button class="nav-item" data-view="settings"><i class="ni">⚙️</i><span>Settings</span></button>
     </nav>
 
@@ -107,7 +108,7 @@
           <!-- hero -->
           <div class="cc-hero">
             <div class="cc-avatar">
-              <img src="/static/assets/avatar_tactical_red.png" class="cc-av-img" alt="AI Agent tactical avatar">
+              <img src="/static/assets/agent_skull_redteam.png" class="cc-av-img" alt="AI Agent skull and crossbones avatar">
             </div>
             <h1 class="cc-title">AI Agent armed</h1>
             <p class="cc-sub">I can run terminal commands, scan networks, fuzz web apps, search the web, manage files and remember things across sessions.</p>
@@ -383,6 +384,44 @@
           <button class="btn-primary" id="sys-refresh">⟳ Refresh</button>
         </header>
         <pre class="sys-box" id="sys-box">loading…</pre>
+      </div>
+    </section>
+
+    <!-- ---------- LIVE AGENT ACTIVITY VIEW ---------- -->
+    <section class="view" id="view-activity">
+      <header class="chat-header">
+        <div class="ht">
+          <div class="ht-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg></div>
+          <div>
+            <h2>Live Agent Activity</h2>
+            <p>The panel shows REAL execution events streamed live from the running Agent — nothing is fabricated.</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <span class="pill smart" id="activity-status-pill" title="Execution stream state"><i class="led amber" id="activity-led"></i><span id="activity-status-text">WAITING</span></span>
+          <button class="pill export" id="activity-clear" title="Clear the activity log">🗑 CLEAR</button>
+        </div>
+      </header>
+
+      <div class="activity-body">
+        <div class="activity-cols">
+          <div class="activity-col activity-col-main">
+            <div class="activity-panel-head">⚡ PROGRESS TIMELINE</div>
+            <div class="activity-timeline" id="activity-timeline">
+              <p class="activity-empty" id="activity-empty">No active run — send a message in Chat and every real Agent action (planning, tool calls, terminal commands, sub-agents, final result) will appear here live.</p>
+            </div>
+          </div>
+          <div class="activity-col">
+            <div class="activity-panel-head">🛠 TOOL EXECUTION</div>
+            <div class="activity-tools" id="activity-tools">
+              <p class="activity-empty" id="activity-tools-empty">Tools the Agent actually invokes will appear here with start time, action and status.</p>
+            </div>
+          </div>
+        </div>
+        <div class="activity-final" id="activity-final" hidden>
+          <div class="activity-final-head">✓ TASK COMPLETED — FINAL RESULT</div>
+          <div class="activity-final-body" id="activity-final-body"></div>
+        </div>
       </div>
     </section>
 

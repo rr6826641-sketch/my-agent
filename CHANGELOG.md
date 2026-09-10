@@ -179,3 +179,11 @@ Sare notable changes is project ke. Format: `[Semantic Versioning](https://semve
 - config: config.json + config.example.json updated (notrack block first
   in local_endpoints); .env + .env.example document NOTRACK_API_KEY.
   All JSON files parse valid.
+
+## [2026-09-10] v0.7.0 - live-transparent upgrade
+
+- feat(cli): agent.py now streams every step live to the terminal ([think] reasoning,
+  [TOOL] calls, [OUT] results, [SUB-AGENT] spawns) via run_stream instead of
+  printing only the final answer - full screen visibility of agent work.
+- feat(config): pin_uncensored + pin_strict enabled - uncensored model chain
+  (notrack/venice/openrouter/hf-abliterated) locked as primary routing.

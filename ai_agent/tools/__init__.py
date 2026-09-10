@@ -145,6 +145,11 @@ from .active_directory import (
     kerberos_ticket_check,
     subnet_sweep,
 )
+from .ultra import (
+    tool_priv_esc_kit, gen_wifi_playbook, gen_evasion_pack,
+    gen_persistence, gen_lateral_playbook, gen_tunnel_kit,
+    gen_mobile_kit, gen_loader, gen_crypto_kit, gen_osint_kit,
+)
 from .scope import (
     tool_set_scope, tool_show_scope, tool_check_scope,
 )
@@ -2852,6 +2857,120 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
             tool_iam_policy_analyzer(
                 policy_json=policy_json or "",
                 timeout=int(timeout or 20))))
+
+    # ===== ULTRA POWER PACK (ai_agent.tools.ultra) =====
+    REGISTRY.append(Tool(
+        "priv_esc_kit",
+        "Privilege-escalation enumeration + exploitation playbook generator. "
+        "Pass os_type='linux' or 'windows'. Returns the full enumeration "
+        "command set and ordered exploit playbook for that OS.",
+        {"type": "object",
+         "properties": {
+             "os_type": {"type": "string", "default": "linux",
+                          "description": "'linux' or 'windows'"}},
+         "required": []},
+        lambda os_type="linux": tool_priv_esc_kit(os_type=os_type or "linux")))
+
+    REGISTRY.append(Tool(
+        "wifi_playbook",
+        "Full 802.11 pentest playbook: recon, handshake capture, PMKID, "
+        "cracking chain and evil-twin options. Returns ready-to-run "
+        "aircrack-ng/hcxtools/wifiphisher commands.",
+        {"type": "object",
+         "properties": {
+             "iface": {"type": "string", "default": "wlan0",
+                        "description": "wireless interface name"}},
+         "required": []},
+        lambda iface="wlan0": gen_wifi_playbook(iface=iface or "wlan0")))
+
+    REGISTRY.append(Tool(
+        "evasion_pack",
+        "AV/EDR evasion playbook: sandbox gates, AMSI/ETW notes, packing "
+        "and obfuscation chains, C2 comms hardening.",
+        {"type": "object",
+         "properties": {
+             "target": {"type": "string", "default": "windows",
+                         "description": "target platform"}},
+         "required": []},
+        lambda target="windows": gen_evasion_pack(target=target or "windows")))
+
+    REGISTRY.append(Tool(
+        "persistence_playbook",
+        "Multi-platform persistence menu (Windows Run/WMI/schtasks/service, "
+        "Linux cron/systemd/bashrc). For authorized persistence checks.",
+        {"type": "object",
+         "properties": {
+             "platform": {"type": "string", "default": "windows",
+                           "description": "windows|linux"}},
+         "required": []},
+        lambda platform="windows":
+            gen_persistence(platform=platform or "windows")))
+
+    REGISTRY.append(Tool(
+        "lateral_playbook",
+        "Lateral movement recipes: WMI, PsExec, CrackMapExec, WinRM, SSH, "
+        "PSRemoting plus post-DC moves (secretsdump, DCSync, tickets).",
+        {"type": "object",
+         "properties": {
+             "method": {"type": "string", "default": "all",
+                         "description": "method focus"}},
+         "required": []},
+        lambda method="all": gen_lateral_playbook(method=method or "all")))
+
+    REGISTRY.append(Tool(
+        "tunnel_kit",
+        "Tunneling & exfiltration kit: chisel reverse SOCKS, SSH -D/-L "
+        "forwards, DNScat2/iodine DNS tunnels, ptunnel ICMP.",
+        {"type": "object",
+         "properties": {
+             "mode": {"type": "string", "default": "chisel",
+                       "description": "tunnel mode"}},
+         "required": []},
+        lambda mode="chisel": gen_tunnel_kit(mode=mode or "chisel")))
+
+    REGISTRY.append(Tool(
+        "mobile_kit",
+        "Android/iOS mobile pentest quickref: ADB, apktool/jadx, Frida, "
+        "objection, Burp proxy setup and common mobile vuln checks.",
+        {"type": "object",
+         "properties": {
+             "action": {"type": "string", "default": "enum",
+                         "description": "enum|bypass|dump"}},
+         "required": []},
+        lambda action="enum": gen_mobile_kit(action=action or "enum")))
+
+    REGISTRY.append(Tool(
+        "shellcode_loader",
+        "Generate a minimal x64 in-memory shellcode loader (C source) to "
+        "keep stage-1 payloads off disk in an authorized engagement.",
+        {"type": "object",
+         "properties": {
+             "kind": {"type": "string", "default": "x64",
+                       "description": "architecture"}},
+         "required": []},
+        lambda kind="x64": gen_loader(kind=kind or "x64")))
+
+    REGISTRY.append(Tool(
+        "crypto_kit",
+        "Crypto/hash attack recipes: hashcat modes, john, Kerberoast, "
+        "AS-REP roast, weak RSA/Wiener, PKCS#7 oracle, online sprays.",
+        {"type": "object",
+         "properties": {
+             "mode": {"type": "string", "default": "hashcat",
+                       "description": "attack focus"}},
+         "required": []},
+        lambda mode="hashcat": gen_crypto_kit(mode=mode or "hashcat")))
+
+    REGISTRY.append(Tool(
+        "osint_kit",
+        "OSINT collection playbook for domain/email/user: crt.sh, dnsrecon, "
+        "breach APIs, social scraping, metadata and wayback harvesting.",
+        {"type": "object",
+         "properties": {
+             "target": {"type": "string", "default": "",
+                         "description": "domain / email / username"}},
+         "required": []},
+        lambda target="": gen_osint_kit(target=target or "")))
 
     global _REGISTRY, _BUILTIN_NAMES
     _BUILTIN_NAMES = {t.name for t in REGISTRY}
