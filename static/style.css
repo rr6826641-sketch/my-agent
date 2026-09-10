@@ -944,7 +944,7 @@ input[type=number]{font-family:var(--mono)}
    ========================================================================== */
 .cc-stage{
   position:relative; flex:1; min-height:0; display:flex; flex-direction:column;
-  overflow:hidden;
+  justify-content:space-between; overflow:hidden;
 }
 .cc-stage .chat-log{
   position:absolute; inset:0; z-index:1;
@@ -1747,7 +1747,7 @@ a{color:#ff4d63}
 }
 
 /* ---------- command center dashboard ---------- */
-.cc-stage{flex:1; min-height:0; display:flex; flex-direction:column; position:relative}
+.cc-stage{flex:1; min-height:0; display:flex; flex-direction:column; justify-content:space-between; position:relative}
 .cc-dash{
   position:absolute; inset:0; display:flex; flex-direction:column;
   align-items:center; justify-content:center; gap:26px;
@@ -2575,6 +2575,45 @@ body{
 .cc-statusbar{
   position:sticky; bottom:0; z-index:50;
   background:var(--bg-primary);
+}
+.cc-stage .chat-log,
+#chat-log{
+  padding-bottom:190px;
+}
+
+/* ============================================================
+   PHASE 3 - input dock pushed to command-center bottom;
+   artifacts render inside the chat-log scroll area.
+   - .cc-stage (command center) becomes a flex column with
+     justify-content:space-between so generated content sits in
+     the middle and the input components stay pinned to the very
+     bottom, below ALL content and artifacts.
+   - Dock + status bar anchor to the absolute bottom of the
+     command center panel: bottom:0; align-self:flex-end;
+     width:100% (sticky + z-index:50 retained from Phase 2 so
+     streamed content scrolls unobtrusively beneath).
+   - Artifact zones/panels are confirmed in-flow DOM children of
+     .chat-log (appended by addArtifactBadge/renderArtifactsPanel
+     in app.js); position:relative + flex-shrink:0 keeps them
+     rendering above the dock inside the scroll area.
+   ============================================================ */
+#view-chat{
+  display:flex; flex-direction:column; justify-content:space-between;
+}
+#view-chat .composer,
+.command-input-container{
+  position:sticky; bottom:0; z-index:50;
+  align-self:flex-end; width:100%;
+  background:var(--bg-primary);
+}
+.cc-statusbar{
+  position:sticky; bottom:0; z-index:50;
+  align-self:flex-end; width:100%;
+  background:var(--bg-primary);
+}
+.cc-stage .chat-log .artifact-panel,
+.cc-stage .chat-log .artifact-zone{
+  position:relative; flex-shrink:0;
 }
 .cc-stage .chat-log,
 #chat-log{

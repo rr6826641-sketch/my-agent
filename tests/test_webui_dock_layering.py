@@ -163,4 +163,77 @@ def test_long_report_markup_renders(mock_app):
     assert "<table>" in report and "</table>" in report
     assert "Reminder:" in report
     assert ".msg" in css and ".msg.assistant" in css
-    assert html.index('class="cc-statusbar"') > html.index("");  # sanity: page served
+    assert html.index('class="cc-statusbar"') > html.index("");  # sanity: page served# ---------------------------------------------------------------------------
+# Phase 3 - input dock pushed to command-center bottom; artifacts inside
+# the chat-log scroll area (above the dock).
+# ---------------------------------------------------------------------------
+
+
+def _phase3_tail(css):
+    assert "PHASE 3" in css, "PHASE 3 enforcement block missing"
+    return css[css.index("PHASE 3"):]
+
+
+def test_phase3_stage_flex_column_space_between(mock_app):
+    """Command center container (.cc-stage) is a flex column with
+    justify-content:space-between so generated content stays centered and
+    the input components are pushed permanently to the bottom."""
+    css = _css(mock_app)
+    stages = re.findall(
+        r"\.cc-stage\{[^}]*flex-direction:column[^}]*justify-content:space-between",
+        css, re.S)
+    assert len(stages) >= 2, "both theme .cc-stage blocks must be space-between flex columns"
+
+    tail = _phase3_tail(css)
+    view = re.search(r"#view-chat\{([^}]*)\}", tail, re.S).group(1)
+    assert "display:flex" in view
+    assert "flex-direction:column" in view
+    assert "justify-content:space-between" in view
+
+
+def test_phase3_dock_absolute_bottom_anchor(mock_app):
+    """Input dock + status bar anchor to the absolute bottom of the
+    command center panel: bottom:0; align-self:flex-end; width:100%."""
+    tail = _phase3_tail(_css(mock_app))
+    for selector in ("#view-chat \\.composer,\\s*\\.command-input-container",
+                     "\\.cc-statusbar"):
+        block = re.search(selector + r"\{([^}]*)\}", tail, re.S).group(1)
+        assert "position:sticky" in block, selector
+        assert "bottom:0" in block, selector
+        assert "align-self:flex-end" in block, selector
+        assert "width:100%" in block, selector
+        assert "z-index:50" in block, selector
+        assert "background:var(--bg-primary)" in block, selector
+
+
+def test_phase3_artifacts_inside_chat_log_scroll_area(mock_app):
+    """Artifact zones/panels render in-flow above the dock: CSS keeps them
+    relative non-shrinking children of .chat-log, and app.js appends them
+    to the chat log (addArtifactBadge -> chatLog; renderArtifactsPanel ->
+    chatLog.appendChild)."""
+    tail = _phase3_tail(_css(mock_app))
+    art = re.search(r"\.cc-stage \.chat-log \.artifact-(?:panel|zone),"
+                    r"\s*\.cc-stage \.chat-log \.artifact-(?:panel|zone)\{([^}]*)\}",
+                    tail, re.S).group(1)
+    assert "position:relative" in art
+    assert "flex-shrink:0" in art
+
+    js = mock_app.get("/static/app.js").get_data(as_text=True)
+    assert "(container || chatLog).appendChild(wrap)" in js \
+        or "chatLog.appendChild(wrap)" in js, \
+        "addArtifactBadge must append into chatLog"
+    assert "chatLog.appendChild(div)" in js, \
+        "renderArtifactsPanel must append into chatLog"
+
+
+def test_phase3_artifacts_render_above_dock_in_dom(mock_app):
+    """Generated artifacts live inside chat-log (the scroll area), which
+    precedes the composer dock in the DOM -> artifacts sit above the dock,
+    which stays strictly at the bottom margin."""
+    html = mock_app.get("/").get_data(as_text=True)
+    chat_log = html.index('class="chat-log"')
+    stage = html.index('class="cc-stage"')
+    composer = html.index('class="composer composer-ibar"')
+    statusbar = html.index('class="cc-statusbar"')
+    # chat-log is nested inside cc-stage, both before the pinned dock
+    assert stage < chat_log < composer < statusbar
