@@ -236,4 +236,46 @@ def test_phase3_artifacts_render_above_dock_in_dom(mock_app):
     composer = html.index('class="composer composer-ibar"')
     statusbar = html.index('class="cc-statusbar"')
     # chat-log is nested inside cc-stage, both before the pinned dock
-    assert stage < chat_log < composer < statusbar
+    assert stage < chat_log < composer < statusbar# ---------------------------------------------------------------------------
+# Phase 1 - input dock flush against bottom status bar (zero gap).
+# ---------------------------------------------------------------------------
+
+
+def _phase1_tail(css):
+    mark = "PHASE 1 - input dock flush against bottom status bar"
+    assert mark in css, "PHASE 1 enforcement block missing"
+    return css[css.index(mark):]
+
+
+def test_phase1_dock_flush_against_statusbar(mock_app):
+    """Dock sits flush against the status bar: composer margin-bottom and
+    status bar margin-top are both forced to 0 (!important), so the gap
+    between input field/buttons and the bottom status bar is zero."""
+    tail = _phase1_tail(_css(mock_app))
+    composer = re.search(r"\.composer,\s*\.command-input-container\{([^}]*)\}",
+                         tail, re.S).group(1)
+    status = re.search(r"\.cc-statusbar\{([^}]*)\}", tail, re.S).group(1)
+    assert "margin-bottom:0px !important" in composer
+    assert "margin-top:0px !important" in status
+    assert "margin-bottom:0px !important" in status
+    mb = float(re.search(r"margin-bottom:([\d.]+)px", composer).group(1))
+    mt = float(re.search(r"margin-top:([\d.]+)px", status).group(1))
+    assert mb + mt == 0.0, \
+        "zero gap required: composer margin-bottom %spx + statusbar margin-top %spx" % (mb, mt)
+
+
+def test_phase1_command_center_stretches_full_height(mock_app):
+    """Command center (.cc-stage) stretches to 100% inner height as a flex
+    column with space-between, so the dock + status bar pack flush to the
+    bottom edge of the panel."""
+    tail = _phase1_tail(_css(mock_app))
+    stage = re.search(r"\.cc-stage\{([^}]*)\}", tail, re.S).group(1)
+    assert "height:100%" in stage
+    assert "min-height:0" in stage
+    assert "flex:1 1 0%" in stage
+
+    css = _css(mock_app)
+    stages = re.findall(
+        r"\.cc-stage\{[^}]*display:flex[^}]*justify-content:space-between",
+        css, re.S)
+    assert len(stages) >= 2, "both theme .cc-stage blocks keep space-between flex column"

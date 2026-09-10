@@ -2619,3 +2619,28 @@ body{
 #chat-log{
   padding-bottom:190px;
 }
+
+/* ============================================================
+   PHASE 1 - input dock flush against bottom status bar.
+   - .composer margin-bottom forced to 0 (!important) and
+     .cc-statusbar margin-top/bottom forced to 0 (!important):
+     zero empty gap between input field, action buttons and the
+     bottom status bar.
+   - Command center (.cc-stage) stretches to 100% inner height as
+     a flex column (keeps justify-content:space-between from the
+     PHASE 3 block) so the dock + status bar pack flush to the
+     bottom edge of the panel.
+   ============================================================ */
+.composer,
+.command-input-container{
+  margin-bottom:0px !important;
+}
+.cc-statusbar{
+  margin-top:0px !important;
+  margin-bottom:0px !important;
+}
+.cc-stage{
+  height:100%;
+  min-height:0;
+  flex:1 1 0%;
+}
