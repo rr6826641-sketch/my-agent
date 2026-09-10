@@ -2622,3 +2622,133 @@ async function refreshBoard() {
     });
   });
 })();
+/* ================= PHASE 2 - live execution blocks =================
+   Real-time tool execution renderer: connects the chat viewport to the
+   /api/exec/stream SSE fan-out from PHASE 1 and renders a dark-themed
+   execution block for every command being run, e.g.
+
+     [TERMINAL OUTPUT] nmap -sV 10.10.10.1      ▶ running
+     $ ...live stdout line 1...
+     [GIT] git status                            ✓ done (0)
+
+   Blocks keyed by run_id: start frame creates the block, stdout/stderr
+   frames stream into the <pre> bodies live (with auto-scroll), the
+   terminal frame finalizes it with a status badge. Historical replay
+   events older than 10 min are skipped so a fresh page load never
+   floods the viewport with old runs. Fully additive to the chat log.
+   ------------------------------------------------------------------ */
+(() => {
+  const LABELS = { terminal: "TERMINAL OUTPUT", git: "GIT",
+                   subagent: "SUB-AGENT", tool: "TOOL", command: "COMMAND" };
+  const ICONS  = { terminal: "🖥️", git: "🌿", subagent: "🤖", tool: "🧰", command: "⚡" };
+  const blocks = new Map(); // run_id -> {card, out, err, status, done}
+  const RETRY_MS = 2500;
+  const STALE_AFTER_S = 600; // skip replay events older than 10 min
+
+  function labelFor(stepType) {
+    return LABELS[stepType] || (stepType || "tool").toUpperCase();
+  }
+  function iconFor(stepType) {
+    return ICONS[stepType] || "▸";
+  }
+  function clean(text) {
+    return String(text == null ? "" : text).replace(/\r\n/g, "\n");
+  }
+
+  function ensureBlock(evt) {
+    const rid = evt.run_id;
+    if (!rid || blocks.has(rid)) return blocks.get(rid);
+    const card = document.createElement("div");
+    card.className = "exec-block running";
+    const st = evt.step_type || "tool";
+    const head = document.createElement("div");
+    head.className = "exec-head";
+    const ico = document.createElement("span");
+    ico.className = "exec-ico"; ico.textContent = iconFor(st);
+    const tag = document.createElement("span");
+    tag.className = "exec-tag"; tag.textContent = "[" + labelFor(st) + "]";
+    const cmd = document.createElement("code");
+    cmd.className = "exec-cmd"; cmd.textContent = clean(evt.command || "");
+    const status = document.createElement("span");
+    status.className = "exec-status running";
+    status.textContent = evt.status === "running" ? "▶ running" : "● queued";
+    head.append(ico, tag, cmd, status);
+    const body = document.createElement("div");
+    body.className = "exec-body";
+    const out = document.createElement("pre");
+    out.className = "exec-out";
+    const err = document.createElement("pre");
+    err.className = "exec-err";
+    body.append(out, err);
+    card.append(head, body);
+    const typing = document.getElementById("typing");
+    if (typing) chatLog.insertBefore(card, typing);
+    else chatLog.appendChild(card);
+    const b = { card, out, err, status, done: false };
+    blocks.set(rid, b);
+    scrollToBottom();
+    return b;
+  }
+
+  function finalizeBlock(evt) {
+    const rid = evt.run_id;
+    const b = blocks.get(rid);
+    if (!b || b.done) return;
+    b.done = true;
+    const st = evt.status; // completed | failed | cancelled
+    b.card.classList.remove("running");
+    b.card.classList.add(st || "done");
+    b.status.className = "exec-status " + (st || "done");
+    const label = st === "completed" ? "✓ done"
+                : st === "failed"   ? "✗ failed"
+                : st === "cancelled" ? "✕ cancelled" : "done";
+    b.status.textContent = label + (evt.exit_code != null ? " (" + evt.exit_code + ")" : "");
+    if (evt.duration_ms != null) {
+      const ms = evt.duration_ms;
+      const dur = document.createElement("span");
+      dur.className = "exec-dur";
+      dur.textContent = (ms >= 1000 ? (ms / 1000).toFixed(1) + "s" : ms + "ms");
+      b.card.querySelector(".exec-head").appendChild(dur);
+    }
+    if (evt.stdout) b.out.textContent = clean(evt.stdout);
+    if (evt.stderr) b.err.textContent = clean(evt.stderr);
+    scrollToBottom();
+  }
+
+  function handleExec(evt) {
+    if (!evt || typeof evt !== "object") return;
+    // skip stale replay history so fresh loads never flood the viewport
+    if (evt.ts && (Date.now() / 1000 - evt.ts) > STALE_AFTER_S) return;
+    const b = ensureBlock(evt);
+    if (!b) return;
+    if (evt.stream === "stdout" && evt.stdout) {
+      b.out.textContent = (b.out.textContent ? b.out.textContent + "\n" : "") + clean(evt.stdout);
+      scrollToBottom();
+    } else if (evt.stream === "stderr" && evt.stderr) {
+      b.err.textContent = (b.err.textContent ? b.err.textContent + "\n" : "") + clean(evt.stderr);
+      scrollToBottom();
+    } else if (evt.stream === null && evt.status && evt.status !== "running") {
+      finalizeBlock(evt); // terminal frame: completed / failed / cancelled
+    }
+  }
+
+  let es = null;
+  function connect() {
+    if (es) { try { es.close(); } catch {} }
+    es = new EventSource("/api/exec/stream");
+    es.addEventListener("exec", (e) => {
+      try { handleExec(JSON.parse(e.data)); } catch { /* skip malformed frame */ }
+    });
+    es.onopen = () => { /* connection established; blocks flow in */ };
+    // EventSource reconnects natively on error - do NOT also reconnect
+    // manually or duplicate connections would pile up.
+    es.onerror = () => { /* handled by EventSource auto-reconnect */ };
+  }
+
+  // boot the stream once the chat log exists
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", connect);
+  } else {
+    connect();
+  }
+})();
