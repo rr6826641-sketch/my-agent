@@ -1,3 +1,12 @@
+## [2026-09-11] v0.8.7 - ULTRA POWER MODE (uncensored max-capability profile)
+
+- feat(prompt): permanent ULTRA POWER MODE directive block added to system_prompt.txt -
+  full-autonomy engagement driving (enumerate -> chain -> exploit -> validate), zero
+  technique filters within the security context, parallelized recon defaults, live-
+  until-refuted hypothesis handling, evidence-capped severity claims, and ultra-dense
+  outputs (exact commands + request/response artifacts, Critical->Low ranking).
+- sync: profile rails match the uncensored behavioral policy already enforced in-session.
+
 # Changelog
 
 ## [2026-09-11] v0.8.6 - 3D 32K HD lock screen edition
