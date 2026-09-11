@@ -767,6 +767,82 @@ def gatekeeper_lockscreen_js():
 
 
 # --------------------------------------------------------------------------
+# Gatekeeper lock-screen API (STEP 1 backend)
+# Lazy-imported so the WebUI boots even without optional crypto deps; the
+# overlay treats a missing/erroring backend as "not configured yet".
+# --------------------------------------------------------------------------
+
+_gk = None
+
+
+def _gatekeeper():
+    global _gk
+    if _gk is None:
+        from ai_agent.webui.gatekeeper import Gatekeeper
+        _gk = Gatekeeper()
+    return _gk
+
+
+@app.route("/api/gatekeeper/status")
+def api_gatekeeper_status():
+    return jsonify(_gatekeeper().status())
+
+
+@app.route("/api/gatekeeper/setup", methods=["POST"])
+def api_gatekeeper_setup():
+    """First-run master-password enrolment."""
+    data = request.get_json(force=True, silent=True) or {}
+    password = (data.get("password") or "").strip()
+    if not password:
+        return jsonify({"ok": False, "error": "password required"}), 400
+    try:
+        _gatekeeper().setup(password, auto_lock_s=int(data.get("auto_lock_s") or 900))
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return jsonify({"ok": True})
+
+
+@app.route("/api/gatekeeper/unlock", methods=["POST"])
+def api_gatekeeper_unlock():
+    data = request.get_json(force=True, silent=True) or {}
+    password = (data.get("password") or "").strip()
+    if not password:
+        return jsonify({"ok": False, "error": "password required"}), 400
+    try:
+        token = _gatekeeper().unlock(password)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid password or not set up"}), 401
+    return jsonify({"ok": True, "token": token})
+
+
+@app.route("/api/gatekeeper/lock", methods=["POST"])
+def api_gatekeeper_lock():
+    _gatekeeper().lock()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/gatekeeper/webauthn/assert", methods=["POST"])
+def api_gatekeeper_webauthn_assert():
+    """Two-phase WebAuthn assertion: no credential_id -> begin (challenge),
+    credential_id + parts -> complete (ok + token on success)."""
+    data = request.get_json(force=True, silent=True) or {}
+    gk = _gatekeeper()
+    try:
+        if data.get("credential_id"):
+            result = gk.webauthn_complete_assert(
+                data["credential_id"],
+                data.get("client_data", ""),
+                data.get("auth_data", ""),
+                data.get("signature", ""),
+            )
+            return jsonify(result)
+        challenge = gk.webauthn_begin_assert()
+        return jsonify({"ok": True, "mode": "begin", **challenge})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+# --------------------------------------------------------------------------
 # Chat API (SSE stream so tool calls appear live)
 # --------------------------------------------------------------------------
 

@@ -74,7 +74,14 @@
         if (!res.ok) return payload.then(function (p) { throw new Error((p && p.error) || "fingerprint-failed"); });
         return payload;
       })
-      .then(function () { hideOverlay(); })
+      .then(function (p) {
+        setBusy(false);
+        if (p && p.mode === "begin") {
+          showError("Biometric challenge issued — touch your authenticator.");
+        } else {
+          hideOverlay();
+        }
+      })
       .catch(function (err) {
         setBusy(false);
         if (err && err.message === "webauthn-backend-unavailable") {

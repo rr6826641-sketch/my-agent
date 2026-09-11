@@ -98,3 +98,36 @@ def test_lockscreen_assets_served(app_client):
     js_resp = app_client.get("/gatekeeper/lockscreen.js")
     assert js_resp.status_code == 200
     assert "/api/gatekeeper/unlock" in js_resp.get_data(as_text=True)
+
+
+def test_gatekeeper_status_endpoint(app_client):
+    resp = app_client.get("/api/gatekeeper/status")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert "setup" in data and "locked" in data
+
+
+def test_gatekeeper_setup_unlock_endpoints(app_client):
+    r1 = app_client.post("/api/gatekeeper/setup", json={"password": "Master-Pass-2026"})
+    assert r1.status_code == 200 and r1.get_json()["ok"] is True
+    r2 = app_client.post("/api/gatekeeper/unlock", json={"password": "Master-Pass-2026"})
+    assert r2.status_code == 200 and r2.get_json()["ok"] is True
+    assert "token" in r2.get_json()
+    r3 = app_client.post("/api/gatekeeper/unlock", json={"password": "wrong-pass"})
+    assert r3.status_code == 401
+
+
+def test_gatekeeper_lock_and_status_flow(app_client):
+    app_client.post("/api/gatekeeper/setup", json={"password": "Master-Pass-2026"})
+    app_client.post("/api/gatekeeper/unlock", json={"password": "Master-Pass-2026"})
+    st = app_client.get("/api/gatekeeper/status").get_json()
+    assert st["locked"] is False
+    app_client.post("/api/gatekeeper/lock", json={})
+    st2 = app_client.get("/api/gatekeeper/status").get_json()
+    assert st2["locked"] is True
+
+
+def test_gatekeeper_webauthn_assert_not_registered(app_client):
+    app_client.post("/api/gatekeeper/setup", json={"password": "Master-Pass-2026"})
+    resp = app_client.post("/api/gatekeeper/webauthn/assert", json={})
+    assert resp.status_code == 400
