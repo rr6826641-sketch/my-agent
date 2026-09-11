@@ -5,7 +5,8 @@
       full-screen overlay entry point, master-password input and the
       fingerprint/biometric button.
     - ai_agent/webui/static/gatekeeper_lockscreen.css forces
-      z-index: 9999, fixed full-viewport coverage and backdrop blur.
+      z-index: 9999, fixed full-viewport coverage, crisp HD styling
+      (explicitly no backdrop blur - blur-free by design).
     - ai_agent/webui/static/gatekeeper_lockscreen.js wires password +
       fingerprint unlock handlers.
 * Render check (mock mode): loading the WebUI shows the lockscreen
@@ -47,7 +48,11 @@ def test_css_is_full_screen_topmost():
     css = CSS.read_text(encoding="utf-8")
     assert "z-index: 9999" in css
     assert "position: fixed" in css
-    assert "backdrop-filter: blur" in css or "-webkit-backdrop-filter: blur" in css
+    # HD TURBO lockscreen (v0.8.3+): razor-sharp by design - blur must
+    # never come back, otherwise the password screen turns blurry again.
+    assert "backdrop-filter" not in css
+    assert "-webkit-backdrop-filter" not in css
+    assert ".gk-blur-layer" in css  # sharp HD ambient glow layer (no blur)
     assert ".gk-hidden" in css  # overlay only hides after unlock
 
 
