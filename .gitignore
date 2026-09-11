@@ -66,3 +66,13 @@ _layout_test.html
 _meta_extract.txt
 extract_meta.py
 fix_comment.py
+
+# Observation suite runtime data (screenshots/keylog/window log) - NEVER commit
+observations/
+
+# Local backups
+*.bak
+
+# Scratch / temp patch files
+_gk_semantic_test.py
+_patch_gk_tmp.py

@@ -845,6 +845,35 @@ def api_gatekeeper_lock():
     return jsonify({"ok": True})
 
 
+@app.route("/api/gatekeeper/settings", methods=["GET"])
+def api_gatekeeper_settings_get():
+    return jsonify({"ok": True,
+                    "auto_lock_s": _gatekeeper().status().get("auto_lock_s")})
+
+
+@app.route("/api/gatekeeper/settings", methods=["POST"])
+def api_gatekeeper_settings_post():
+    """Change auto_lock_s at runtime. 0 = auto-lock disabled.
+    Requires a valid unlock token (gatekeeper must be unlocked)."""
+    data = request.get_json(force=True, silent=True) or {}
+    gk = _gatekeeper()
+    token = (data.get("token") or "").strip()
+    if not token or not gk.verify_token(token):
+        return jsonify({"ok": False,
+                        "error": "gatekeeper locked or token invalid"}), 401
+    try:
+        seconds = int(data.get("auto_lock_s"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False,
+                        "error": "auto_lock_s must be an integer"}), 400
+    if seconds < 0:
+        return jsonify({"ok": False,
+                        "error": "auto_lock_s cannot be negative"}), 400
+    gk.set_auto_lock_seconds(seconds)
+    return jsonify({"ok": True,
+                    "auto_lock_s": gk.status().get("auto_lock_s")})
+
+
 @app.route("/api/gatekeeper/webauthn/assert", methods=["POST"])
 def api_gatekeeper_webauthn_assert():
     """Two-phase WebAuthn assertion: no credential_id -> begin (challenge),

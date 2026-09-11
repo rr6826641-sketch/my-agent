@@ -2063,6 +2063,13 @@ def _compact_args(args, limit=80):
     return s
 
 
+# ---- ULTRA ENGINE shared singleton ----------------------------------------
+# One boot per Python process: sub-agents / webui workers all share the same
+# UltraGM + ObservationSuite instead of each installing its own hooks.
+_ULTRA_SHARED = None
+_ULTRA_LOCK = threading.Lock()
+
+
 class Agent:
     def __init__(self, llm, memory=None, name="HackerAI",
                  max_iterations=60, max_messages=400,
@@ -2123,6 +2130,43 @@ class Agent:
         # authorized Red Team / Security Audit scope before LLM payload
         # construction.
         self._reformulator = intent_reformulator
+        # ---- ULTRA ENGINE bridge: opt-in via env ULTRA_ENABLED=1 or
+        # config.json "ultra_enabled": true. When on, boot_ultra() supplies
+        # the uncensored UltraGM persona + observation suite, so the webui
+        # automatically runs on the upgraded engine (no caller change).
+        self.ultra_enabled = False
+        self._ultra = None
+        self._ultra_prompt = ""
+        try:
+            _ultra_on = str(os.environ.get("ULTRA_ENABLED", "")).lower() \
+                in ("1", "true", "yes", "on")
+            _ultra_off = str(os.environ.get("ULTRA_ENABLED", "")).lower() \
+                in ("0", "false", "off", "no")
+            if (not _ultra_on) and (not _ultra_off):
+                from ..config import load_config
+                _ultra_on = bool(load_config({}).get("ultra_enabled"))
+            if _ultra_on:
+                global _ULTRA_SHARED
+                from ..config import PROJECT_DIR
+                from ..ultra_launcher import boot_ultra, start_suite
+                with _ULTRA_LOCK:
+                    if _ULTRA_SHARED is None:
+                        _h = boot_ultra(project_dir=PROJECT_DIR)
+                        try:
+                            _obs = bool(load_config({}).get(
+                                "ultra_observations", True))
+                        except Exception:
+                            _obs = True
+                        if _obs:
+                            start_suite(_h)
+                        _h["sys_prompt"] = _h["ultra_gm"].build_system_prompt()
+                        _ULTRA_SHARED = _h
+                self._ultra = _ULTRA_SHARED
+                self._ultra_prompt = _ULTRA_SHARED.get("sys_prompt", "") or ""
+                self.ultra_enabled = True
+        except Exception:
+            self.ultra_enabled = False
+            self._ultra = None
         self._last_intent = None
         # Autonomous Self-Evolution & Dynamic Tool Synthesis Engine
         # (default on): capability-gap observations on tool results /
@@ -2210,6 +2254,27 @@ class Agent:
         self._last_user_input = ""
 
     # ------------------------------------------------------------ prompt
+
+    def _ultra_observation_block(self):
+        """Latest per-window input digest for the ULTRA engine context."""
+        try:
+            if getattr(self, "_ultra", None) is None:
+                return ""
+            suite = self._ultra.get("observation_suite")
+            if suite is None or not hasattr(suite, "recent_inputs"):
+                return ""
+            entries = suite.recent_inputs(5)
+            if not entries:
+                return ""
+            lines = ["[ULTRA OBSERVATIONS] latest per-window input context:"]
+            for e in entries:
+                txt = (e.get("text", "") or "")[:160]
+                lines.append("- %s | %s | %d keys | %r" % (
+                    e.get("window", "?"), e.get("kind", "input"),
+                    e.get("n_keys", 0), txt))
+            return "\n".join(lines)
+        except Exception:
+            return ""
 
     def _system_prompt(self):
         if self.npc_persona:
@@ -2314,6 +2379,11 @@ class Agent:
         rules = self._self_rules_block()
         if rules:
             prompt = "%s\n\n%s" % (prompt, rules)
+        # ULTRA engine: the uncensored UltraGM persona + semantic lore block
+        # lands last so it binds hardest on the reasoning agent.
+        ultra_block = getattr(self, "_ultra_prompt", "") or ""
+        if ultra_block:
+            prompt = "%s\n\n%s" % (prompt, ultra_block)
         return prompt
 
     # ------------------------------------------- tactical reasoning engine
@@ -3019,6 +3089,14 @@ class Agent:
         self._maybe_compact()
         self._maybe_trim()
         yield {"type": "start", "content": user_input}
+        # ULTRA engine: attach a compact per-window observation digest so the
+        # upgraded agent sees live environment context (browser-form aware).
+        if self.ultra_enabled and self._ultra is not None:
+            obs_block = self._ultra_observation_block()
+            if obs_block:
+                self.messages.append({"role": "system",
+                                      "content": obs_block})
+                yield {"type": "ultra_observation", "block": obs_block}
         # F3: if a paused mission checkpoint exists and this message asks
         # to continue it, inject the resume block so the next LLM turn
         # picks the work back up instead of starting over.

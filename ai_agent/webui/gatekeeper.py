@@ -209,10 +209,14 @@ class GatekeeperStore:
         return self.device_key
 
     def auto_lock_seconds(self) -> int:
-        return int(self._data.get("auto_lock_s") or DEFAULT_AUTO_LOCK_S)
+        val = self._data.get("auto_lock_s")
+        if val is None:
+            return DEFAULT_AUTO_LOCK_S
+        return max(0, int(val))
 
     def set_auto_lock_seconds(self, seconds: int) -> None:
-        self._data["auto_lock_s"] = int(seconds)
+        self._data["auto_lock_s"] = max(0, int(seconds))
+        self.save()
 
     def bump_sess_v(self) -> int:
         self._data["sess_v"] = int(self._data.get("sess_v") or 0) + 1
@@ -264,7 +268,8 @@ def _normalize_doc(doc: dict, now_fn) -> dict:
     out["created"] = doc.get("created") or now_fn()
     out["master_hash"] = doc.get("master_hash")
     out["device_key"] = doc.get("device_key")
-    out["auto_lock_s"] = int(doc.get("auto_lock_s") or DEFAULT_AUTO_LOCK_S)
+    _al = doc.get("auto_lock_s")
+    out["auto_lock_s"] = int(_al) if _al is not None else DEFAULT_AUTO_LOCK_S
     out["sess_v"] = int(doc.get("sess_v") or 0)
     creds = doc.get("credentials")
     out["credentials"] = creds if isinstance(creds, dict) else {}
@@ -373,6 +378,11 @@ class TokenManager:
 
     _HEADER = {"alg": "HS256", "typ": "JWT"}
     GRACE_SECONDS = 300  # tokens stay valid up to 5 minutes past auto-lock
+
+
+# Token lifetime when auto-lock is disabled (auto_lock_s == 0):
+# 30 days so the session does not silently die during long use.
+NO_AUTO_LOCK_TOKEN_TTL_S = 30 * 86400
     SUBJECT = "gatekeeper"
 
     def __init__(self, device_key: bytes, master_hash: str):
@@ -720,6 +730,11 @@ class Gatekeeper:
                 self._store.bump_sess_v()
             self._unlocked = False
 
+    def set_auto_lock_seconds(self, seconds: int) -> None:
+        """Change the idle auto-lock timeout (0 = disabled). Persists to disk."""
+        with self._lock:
+            self._store.set_auto_lock_seconds(int(seconds))
+
     def change_password(self, old_password: str, new_password: str) -> None:
         with self._lock:
             stored = self._store.master_hash
@@ -742,8 +757,11 @@ class Gatekeeper:
         with self._lock:
             if not self._unlocked:
                 return False
+            auto_lock_s = self._store.auto_lock_seconds()
+            if auto_lock_s <= 0:
+                return False  # 0 = auto-lock disabled (never locks)
             idle = self._now() - self._last_activity
-            if idle > self._store.auto_lock_seconds():
+            if idle > auto_lock_s:
                 self._store.bump_sess_v()
                 self._unlocked = False
                 return True
@@ -781,7 +799,9 @@ class Gatekeeper:
         if not self._store.is_setup():
             raise GatekeeperError("gatekeeper is not set up")
         tm = TokenManager(self._store.device_key, self._store.master_hash)
-        ttl = self._store.auto_lock_seconds() + TokenManager.GRACE_SECONDS
+        auto_lock_s = self._store.auto_lock_seconds()
+        ttl = (auto_lock_s + TokenManager.GRACE_SECONDS
+               if auto_lock_s > 0 else NO_AUTO_LOCK_TOKEN_TTL_S)
         return tm.mint(self._store.sess_v, ttl, now=self._now())
 
     # -- WebAuthn facade ----------------------------------------------------
