@@ -830,7 +830,7 @@ def tool_list_sessions(active_only=False):
 
 # ---------------------------------------------------------------- one-shot
 
-def _pump_stream(pipe, sink, run_id, stream_kind, step_type, command):
+def _pump_run_stream(pipe, sink, run_id, stream_kind, step_type, command):
     """Read one pipe line-by-line, appending decoded text to sink and
     emitting each line live through the event hub (during execution).
     """
@@ -878,11 +878,11 @@ def tool_run_terminal(command, timeout=60, max_output=20000):
         register_proc(proc)
         out_parts, err_parts = [], []
         t_out = threading.Thread(
-            target=_pump_stream,
+            target=_pump_run_stream,
             args=(proc.stdout, out_parts, run_id, "stdout", "terminal", command),
             daemon=True)
         t_err = threading.Thread(
-            target=_pump_stream,
+            target=_pump_run_stream,
             args=(proc.stderr, err_parts, run_id, "stderr", "terminal", command),
             daemon=True)
         t_out.start()
