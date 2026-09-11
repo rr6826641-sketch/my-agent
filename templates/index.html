@@ -149,6 +149,16 @@
           </div>
         </div>
 
+        <!-- ============ LIVE AGENT ACTIVITY (in-chat mirror) ============ -->
+        <div class="live-feed" id="live-feed" hidden>
+          <div class="lf-head">
+            <span class="lf-title">&#9889; LIVE AGENT ACTIVITY</span>
+            <span class="lf-status" id="lf-status"><i class="lf-led"></i>IDLE</span>
+            <button type="button" class="lf-toggle" id="lf-toggle" title="Collapse / expand live feed" aria-label="Collapse live feed">&#8212;</button>
+          </div>
+          <div class="lf-list" id="lf-list"></div>
+        </div>
+
         <!-- composer -->
         <footer class="composer composer-ibar">
           <div id="attach-drop-hint" hidden>Drop files to attach</div>

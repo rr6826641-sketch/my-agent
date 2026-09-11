@@ -291,3 +291,19 @@ Sare notable changes is project ke. Format: `[Semantic Versioning](https://semve
   title (26px/900) and password input (16px, 46px tall, letter-spacing 3px).
 - fix(css): repaired .gk-skip:hover rule that was missing its opening brace.
 - test: braces balanced, zero blur()/backdrop-filter left in lock screen stylesheet.
+
+## [2026-09-11] v0.8.4 - LIVE SCREEN MIRROR (agent actions visible while chatting)
+
+- fix(webui): LIVE ACTIVITY exec stream never rendered. The backend frames
+  execution events as `event: exec`, but the client subscribed with a plain
+  `execSource.onmessage` handler, which browsers never fire for named SSE
+  events. Switched to execSource.addEventListener("exec", ...) so terminal/
+  git/sub-agent events now stream to the panel in real time.
+- feat(webui): new in-chat LIVE AGENT ACTIVITY feed. Every real action row
+  (task start, planning, tool call, terminal command, result, validation,
+  final) is mirrored as a live line directly above the composer, so the
+  operator watches the Agent work without switching to the Live Activity tab.
+  Auto-shows on run start, collapsible, colour-coded status pill (RUNNING /
+  COMPLETED / FAILED), auto-scroll, bounded to 140 rows, secret-sanitised.
+- test: node --check static/app.js clean; mirror hooked into addRow so no
+  action can bypass the feed.

@@ -925,6 +925,37 @@ const ActivityPanel = (() => {
   }
 
   // one timeline row. Returns {row, id, set}(set updates status/sub).
+  function mirror(ico, title, sub, status) {
+    const wrap = byId("live-feed"), list = byId("lf-list");
+    if (!wrap || !list) return;
+    wrap.hidden = false;
+    const row = document.createElement("div");
+    row.className = "lf-row lf-" + (status || "running");
+    row.innerHTML = `<span class="lf-ico">${ico}</span>` +
+      `<span class="lf-tx">${esc(title)}` +
+      (sub ? ` <span class="lf-sub">${esc(sanitize(String(sub)))}</span>` : "") +
+      `</span><span class="lf-ts">${esc(tsNow())}</span>`;
+    list.appendChild(row);
+    while (list.children.length > 140) list.removeChild(list.firstChild);
+    list.scrollTop = list.scrollHeight;
+    const pill = byId("lf-status");
+    if (pill) {
+      const txt = status === "completed" ? "COMPLETED"
+                : status === "failed" ? "FAILED"
+                : status === "waiting" ? "WAITING" : "RUNNING";
+      pill.className = "lf-status lf-" + txt.toLowerCase();
+      pill.innerHTML = '<i class="lf-led"></i>' + txt;
+    }
+  }
+
+  function clearMirror() {
+    const wrap = byId("live-feed"), list = byId("lf-list");
+    if (list) list.innerHTML = "";
+    if (wrap) wrap.hidden = true;
+    const pill = byId("lf-status");
+    if (pill) { pill.className = "lf-status"; pill.innerHTML = '<i class="lf-led"></i>IDLE'; }
+  }
+
   function addRow(ico, title, sub, status, ts) {
     const box = byId("activity-timeline");
     if (!box) return null;
@@ -946,6 +977,7 @@ const ActivityPanel = (() => {
       if (old && old.parentNode) old.parentNode.removeChild(old);
     }
     box.scrollTop = box.scrollHeight; // auto-scroll to newest
+    try { mirror(ico, title, sub, status); } catch (e) {}
     return {
       row, id,
       set(status, sub) {
@@ -1049,7 +1081,8 @@ const ActivityPanel = (() => {
     closeExecStream();
     try {
       execSource = new EventSource("/api/exec/stream?after=0");
-      execSource.onmessage = (msg) => {
+      // FIX: backend sends `event: exec`, so onmessage never fired.
+      execSource.addEventListener("exec", (msg) => {
         let evt;
         try { evt = JSON.parse(msg.data); } catch (e) { return; }
         if (evt.run_id && activeRunId && evt.run_id !== activeRunId) return;
@@ -1073,7 +1106,7 @@ const ActivityPanel = (() => {
             if (tsEl) tsEl.textContent = tsNow() + " · " + fmtMs(evt.duration_ms);
           }
         }
-      };
+      });
     } catch (e) {
       execSource = null;
     }
@@ -1086,6 +1119,7 @@ const ActivityPanel = (() => {
     const fin = byId("activity-final"); if (fin) { fin.hidden = true; }
     rows = []; tools = []; openTools = [];
     stepCounter = 0; processingRow = null; thinkingRow = null;
+    clearMirror();
     emptyHint(true);
     setStatus("WAITING", "WAITING", "smart");
   }
@@ -1244,6 +1278,14 @@ const ActivityPanel = (() => {
 
   const clearBtn = byId("activity-clear");
   if (clearBtn) clearBtn.addEventListener("click", reset);
+
+  const lfToggle = byId("lf-toggle");
+  if (lfToggle) lfToggle.addEventListener("click", function () {
+    const list = byId("lf-list");
+    if (!list) return;
+    const collapsed = list.classList.toggle("lf-collapsed");
+    lfToggle.textContent = collapsed ? "+" : "—";
+  });
 
   return { reset, onLifecycle, onStreamClosed, openExecStream, setStatus };
 })();
