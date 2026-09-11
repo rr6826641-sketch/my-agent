@@ -1,0 +1,60 @@
+<!-- =====================================================================
+     Gatekeeper Lock Screen Overlay (STEP 1)
+     Renders as the FIRST layer on page load; blocks all WebUI access
+     until the master password or fingerprint/biometric succeeds.
+     ===================================================================== -->
+<div class="gatekeeper-lockscreen" id="gatekeeper-lockscreen" role="dialog"
+     aria-modal="true" aria-labelledby="gatekeeper-title" data-lock-mode="check">
+  <div class="gk-blur-layer" aria-hidden="true"></div>
+
+  <div class="gk-panel" role="document">
+    <div class="gk-lock-badge" aria-hidden="true">
+      <svg viewBox="0 0 48 48" width="48" height="48">
+        <defs>
+          <linearGradient id="gk-g" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#ff2740"/><stop offset="1" stop-color="#a20e1c"/>
+          </linearGradient>
+        </defs>
+        <rect width="48" height="48" rx="13" fill="url(#gk-g)"/>
+        <path d="M14 40h20a8 8 0 0 1-20 0a9 9 0 0 0 20 0a8 8 0 0 0-20 0M16 26a6 6 0 0 1-9-13h12a9 9 0 0 0 6 4"
+              fill="none" stroke="#05060c" stroke-width="2.6" stroke-linecap="round"/>
+        <path d="M14 15a7 7 0 0 1 18-11h15" fill="none" stroke="#05060c" stroke-width="2.8" stroke-linecap="round"/>
+      </svg>
+    </div>
+
+    <h1 class="gk-title" id="gatekeeper-title">AGENT LOCKED</h1>
+    <p class="gk-sub">Enter the master password or scan your fingerprint to unlock the command center.</p>
+
+    <form class="gk-form" id="gk-form" autocomplete="off">
+      <label class="gk-label" for="gk-password">Master Password</label>
+      <div class="gk-input-row">
+        <input class="gk-input" id="gk-password" name="password" type="password"
+               placeholder="················" autocomplete="current-password"
+               autocapitalize="off" autocorrect="off" spellcheck="false"
+               aria-label="Master password" disabled>
+        <button class="gk-submit" id="gk-submit" type="submit" disabled aria-label="Unlock">
+          <span>UNLOCK</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5v14"/></svg>
+        </button>
+      </div>
+    </form>
+
+    <div class="gk-bio-row">
+      <button class="gk-fingerprint" id="gk-fingerprint" type="button"
+              title="Fingerprint / biometric unlock" aria-label="Fingerprint biometric unlock" disabled>
+        <svg viewBox="0 0 32 32" aria-hidden="true">
+          <path d="M8 26a10 10 0 0 1-4-20a12 12 0 0 0 4 20a9 9 0 0 0-4-21"
+                fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+          <path d="M13 10a7 7 0 0 1 7-4M20 6a7 7 0 0 1-7 6M11 19a7 7 0 0 1 10 6"
+                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span>Fingerprint</span>
+      </button>
+      <span class="gk-hint" id="gk-hint" role="status"></span>
+    </div>
+
+    <button class="gk-skip" id="gk-skip" type="button" hidden>Continue →</button>
+
+    <p class="gk-error" id="gk-error" role="alert" hidden></p>
+  </div>
+</div>

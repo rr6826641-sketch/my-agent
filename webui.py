@@ -73,6 +73,19 @@ _rpg_runs = {}  # game_id -> (run_id, threading.Event)
 
 app = Flask(__name__)
 
+# STEP 1: serve the gatekeeper lock-screen overlay templates/static from
+# ai_agent/webui/ so {% include 'gatekeeper_lockscreen.html' %} resolves.
+from jinja2 import ChoiceLoader, FileSystemLoader  # noqa: E402
+_WEBUI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ai_agent", "webui")
+app.jinja_loader = ChoiceLoader([
+    app.jinja_loader,
+    FileSystemLoader(os.path.join(_WEBUI_DIR, "templates")),
+])
+
+
+def _webui_static(name):
+    return send_file(os.path.join(_WEBUI_DIR, "static", name))
+
 
 # --------------------------------------------------------------------------
 # OpenRouter model catalog + Smart Auto-Model Router
@@ -733,6 +746,24 @@ def _record_stream_done(sid, agent):
 @app.route("/")
 def index():
     return render_template("index.html", status=_status())
+
+
+@app.route("/gatekeeper/lockscreen.css")
+def gatekeeper_lockscreen_css():
+    """STEP 1: lock-screen overlay stylesheet (served early, cacheable)."""
+    resp = _webui_static("gatekeeper_lockscreen.css")
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
+
+@app.route("/gatekeeper/lockscreen.js")
+def gatekeeper_lockscreen_js():
+    """STEP 1: lock-screen overlay behaviour."""
+    resp = _webui_static("gatekeeper_lockscreen.js")
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
 
 
 # --------------------------------------------------------------------------

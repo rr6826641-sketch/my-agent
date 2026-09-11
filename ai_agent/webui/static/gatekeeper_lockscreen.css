@@ -1,0 +1,239 @@
+/* =====================================================================
+   Gatekeeper Lock Screen Overlay (STEP 1)
+   Full-screen blurred modal that renders on page load and blocks
+   every element behind it. z-index 9999 keeps it above the entire
+   WebUI so nothing behind is reachable before unlock.
+   ===================================================================== */
+
+.gatekeeper-lockscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;                 /* above every WebUI layer */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 6, 12, 0.55);
+  transition: opacity 0.28s ease;
+}
+
+/* Blurred acrylic backdrop between the page and the panel. */
+.gk-blur-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  background: inherit;
+  -webkit-backdrop-filter: blur(18px) saturate(1.15);
+  backdrop-filter: blur(18px) saturate(1.15);
+  pointer-events: none;
+  animation: gk-blur-in 0.4s ease both;
+}
+
+@keyframes gk-blur-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Hidden state: overlay disappears only after successful unlock */
+.gatekeeper-lockscreen.gk-hidden {
+  display: none;
+}
+
+/* Visually hides the app behind the overlay while it is mounted */
+html.has-gatekeeper .app,
+html.has-gatekeeper .bg {
+  visibility: hidden;
+}
+
+/* ---------------------------- panel ---------------------------- */
+.gk-panel {
+  width: min(460px, calc(100vw - 48px));
+  padding: 34px 34px 28px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #0a0f18 0%, #070b12 100%);
+  border: 1px solid rgba(255, 39, 64, 0.28);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 39, 64, 0.08);
+  color: #e8eaf2;
+  text-align: center;
+  animation: gk-panel-in 0.32s cubic-bezier(0.2, 0.8, 0.25, 1) both;
+}
+
+@keyframes gk-panel-in {
+  from { transform: translateY(14px) scale(0.97); opacity: 0; }
+  to   { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+.gk-lock-badge {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 14px;
+}
+
+.gk-title {
+  margin: 0 0 6px;
+  font-size: 23px;
+  font-weight: 800;
+  letter-spacing: 1.1px;
+  background: linear-gradient(90deg, #ff2740, #ff5c3d);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.gk-sub {
+  margin: 0 0 22px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #93a0b8;
+}
+
+.gk-form {
+  width: 100%;
+  text-align: left;
+}
+
+.gk-label {
+  display: block;
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  color: #7f8ba3;
+  text-transform: uppercase;
+}
+
+.gk-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.gk-input {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  padding: 0 14px;
+  font-size: 15px;
+  letter-spacing: 2.5px;
+  color: #e8eaf2;
+  background: #0d1420;
+  border: 1px solid #26324a;
+  border-radius: 12px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.gk-input:focus {
+  outline: none;
+  border-color: #ff2740;
+  box-shadow: 0 0 0 3px rgba(255, 39, 64, 0.22);
+}
+
+.gk-submit {
+  height: 44px;
+  padding: 0 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  color: #fff;
+  background: linear-gradient(180deg, #ff2740, #c2162a);
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+
+.gk-submit:hover {
+  filter: brightness(1.12);
+}
+
+.gk-submit:active {
+  transform: scale(0.96);
+}
+
+.gk-submit svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+}
+
+/* ------------------------- fingerprint ------------------------- */
+.gk-bio-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.gk-fingerprint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 16px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #cfe0ff;
+  background: #0d1322;
+  border: 1px solid #2b3a5c;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.12s ease;
+}
+
+.gk-fingerprint:hover {
+  border-color: #4d8bff;
+  transform: translateY(-1px);
+}
+
+.gk-fingerprint svg {
+  width: 18px;
+  height: 18px;
+}
+
+.gk-hint {
+  font-size: 12px;
+  color: #6f7c93;
+  white-space: nowrap;
+}
+
+/* Skip (feature not set up yet) — WebUI behaves exactly as before */
+.gk-skip {
+  display: block;
+  margin: 14px auto 0;
+  padding: 9px 22px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #cfd6e4;
+  background: transparent;
+  border: 1px solid #2b3a5c;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.gk-skip:hover 
+  border-color: #ff2740;
+  color: #ff6b80;
+}
+
+.gk-error {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  color: #ff6b80;
+  text-align: center;
+}
+
+/* Disabled state while a ceremony is in flight */
+.gatekeeper-lockscreen.gk-busy .gk-input,
+.gatekeeper-lockscreen.gk-busy .gk-submit,
+.gatekeeper-lockscreen.gk-busy .gk-fingerprint {
+  opacity: 0.55;
+  cursor: wait;
+  pointer-events: none;
+}

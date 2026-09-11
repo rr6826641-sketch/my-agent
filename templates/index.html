@@ -11,6 +11,10 @@
 </head>
 <body>
 
+<!-- STEP 1: gatekeeper full-screen lockscreen (blocks WebUI until unlock) -->
+{% include 'gatekeeper_lockscreen.html' %}
+<link rel="stylesheet" href="/gatekeeper/lockscreen.css">
+
 <!-- ============ ambient background (pure CSS) ============ -->
 <div class="bg" aria-hidden="true">
   <i class="bg-orb o1"></i><i class="bg-orb o2"></i><i class="bg-orb o3"></i>
@@ -468,5 +472,6 @@
 </script>
 <script src="/static/marked.min.js"></script>
 <script src="/static/app.js"></script>
+<script src="/gatekeeper/lockscreen.js" defer></script>
 </body>
 </html>
