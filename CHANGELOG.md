@@ -205,4 +205,16 @@ Sare notable changes is project ke. Format: `[Semantic Versioning](https://semve
   None when unreachable). routes_configured booleans kept for back-compat.
 - test: live-verified on this host - all four routes report positive latency
   values (hf ~2.7s / notrack ~3.1s / openrouter ~3.3s / venice ~4.2s from
-  this host network), release v0.8.1, HTTP 200.
+  this host network), release v0.8.1, HTTP 200.## [2026-09-11] v0.8.2 - uptime history API + built-in /health dashboard
+
+- feat(webui): /api/health now records every probe into an in-memory ring
+  buffer (max 400 samples, thread-safe); new GET /api/health/history returns
+  the last 60 samples plus computed uptime_pct - ready to feed any uptime
+  monitor (Uptime Kuma HTTP(s) monitor, cron+curl, dashboard widgets).
+- feat(webui): new GET /health renders a self-contained dark dashboard page
+  (no external JS/CDN) that polls /api/health every 5s - live OK/ERROR chip,
+  release/version/uptime/active-runs, per-route configured + latency table,
+  and a sampled sparkline of the history with uptime %.
+- test: live-verified on this host - /api/health 200 (release v0.8.2, all 4
+  routes configured), /health 200 (dashboard HTML served), history accumulates
+  samples with uptime_pct 100.0.

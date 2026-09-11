@@ -2819,7 +2819,80 @@ def _probe_latency_ms(base_url, timeout=2.5):
         pass
     return None
 
+# --- v0.8.2: in-memory uptime history + dashboard ---------------------------
+_HEALTH_HISTORY = []
+_HEALTH_HISTORY_MAX = 400
+_HEALTH_HISTORY_LOCK = None
+try:
+    import threading as _TH
+    _HEALTH_HISTORY_LOCK = _TH.Lock()
+except Exception:
+    _HEALTH_HISTORY_LOCK = None
+
+
+def _health_record(providers, active):
+    try:
+        import threading as _TH2
+        snap = {
+            "ts": int(time.time()),
+            "ok": True,
+            "active_runs": active,
+            "booted_s": max(0, int(time.time() - _WEBUI_BOOT_TS)),
+            "routes_configured": dict(providers),
+        }
+        lock = _HEALTH_HISTORY_LOCK or _TH2.Lock()
+        with lock:
+            _HEALTH_HISTORY.append(snap)
+            if len(_HEALTH_HISTORY) > _HEALTH_HISTORY_MAX:
+                del _HEALTH_HISTORY[: len(_HEALTH_HISTORY) - _HEALTH_HISTORY_MAX]
+    except Exception:
+        pass
+
+
+_HEALTH_DASH_HTML = """<!doctype html><html><head>
+<meta charset="utf-8"><title>my-agent · Uptime</title>
+<style>
+body{background:#0d1117;color:#e6edf3;font-family:ui-monospace,Consolas,monospace;margin:24px}
+h1{font-size:18px;color:#58a6ff}
+.card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px;margin:10px 0}
+.big{font-size:32px}
+.ok{color:#3fb950}.err{color:#f85149}
+table{border-collapse:collapse;width:100%}
+th,td{text-align:left;padding:6px 12px;border-bottom:1px solid #21262d}
+.spark{display:flex;gap:2px;align-items:flex-end;height:44px}
+.spark div{width:6px;background:#3fb950}
+.spark div.err{background:#f85149}
+</style></head><body>
+<h1>my-agent · /api/health dashboard</h1>
+<div class="card" id="status">loading…</div>
+<div class="card" id="routes">routes…</div>
+<div class="card" id="history">history…</div>
+<script>
+async function j(u){const r=await fetch(u);return r.json();}
+function tsx(s){return new Date(s*1000).toLocaleTimeString();}
+async function tick(){
+ try{
+  const h=await j('/api/health');
+  let c=h.ok?'<span class="ok">● OK</span>':'<span class="err">● ERROR</span>';
+  document.getElementById('status').innerHTML='<div class="big">'+c+'</div>'+
+    'release '+h.release+' · version '+(h.version||'?')+' · up '+h.booted_s+'s · runs '+h.active_runs;
+  const rt=h.routes_configured||{}, lm=h.routes_latency_ms||{};
+  let rows='';for(const g of Object.keys(rt)){rows+='<tr><td>'+g+'</td><td>'+(rt[g]?'<span class="ok">configured</span>':'<span class="err">no key</span>')+'</td><td>'+(lm[g]?lm[g]+' ms':'–')+'</td></tr>';}
+  document.getElementById('routes').innerHTML='<table><tr><th>route</th><th>status</th><th>latency</th></tr>'+rows+'</table>';
+ }catch(e){document.getElementById('status').innerHTML='<span class="err">● OFFLINE ('+e+')</span>';}
+ try{
+  const h=await j('/api/health/history');const s=h.history||[];
+  let bars='';
+  for(let i=Math.max(0,s.length-48);i<s.length;i++){const b=s[i];bars+='<div class="'+(b.ok?'':'err')+'" style="height:'+Math.max(3,b.ok?26:10)+'px" title="'+tsx(b.ts)+'"></div>';}
+  document.getElementById('history').innerHTML='samples '+s.length+' · uptime '+h.uptime_pct+'%<div class="spark">'+bars+'</div>';
+ }catch(e){}
+}
+tick();setInterval(tick,5000);
+</script></body></html>"""
+
+
 @app.route("/api/health")
+
 def api_health():
     """v0.8.0 - lightweight liveness + route-readiness probe.
     Reports process health, active run count and which model route
@@ -2860,16 +2933,49 @@ def api_health():
         active = len(_active_runs)
     except Exception:
         pass
+    _health_record(providers, active)
     return jsonify({
         "ok": True,
         "service": "my-agent",
-        "release": "v0.8.1",
+        "release": "v0.8.2",
         "version": _hver,
         "routes_configured": providers,
         "routes_latency_ms": latency,
         "active_runs": active,
         "booted_s": max(0, int(time.time() - _WEBUI_BOOT_TS)),
     })
+
+
+@app.route("/api/health/history")
+def api_health_history():
+    samples = []
+    try:
+        lock = _HEALTH_HISTORY_LOCK
+        if lock:
+            with lock:
+                samples = list(_HEALTH_HISTORY)
+        else:
+            samples = list(_HEALTH_HISTORY)
+    except Exception:
+        samples = []
+    ups = sum(1 for h in samples if h.get("ok"))
+    uptime_pct = round(100.0 * ups / len(samples), 2) if samples else None
+    return jsonify({
+        "ok": True,
+        "service": "my-agent",
+        "samples": len(samples),
+        "uptime_pct": uptime_pct,
+        "history": samples[-60:],
+    })
+
+
+@app.route("/health")
+def api_health_dashboard():
+    try:
+        from flask import Response as _Resp
+    except Exception:
+        from flask import Response as _Resp
+    return _Resp(_HEALTH_DASH_HTML, mimetype="text/html")
 
 
 def main():
