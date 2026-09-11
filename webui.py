@@ -787,6 +787,17 @@ except Exception:  # pragma: no cover - optional security layer
     traceback.print_exc()
 
 
+def _login_notify(method):
+    """STEP 3/4: fire an OS desktop notification for a successful login.
+    Lazy import so webui.py still boots if the notifier is unavailable;
+    never raises - auth success must not be blocked by a toast error."""
+    try:
+        from ai_agent.core.notifier import notify_login
+        notify_login(method)
+    except Exception:
+        pass
+
+
 def _gatekeeper():
     global _gk
     if _gk is None:
@@ -824,6 +835,7 @@ def api_gatekeeper_unlock():
         token = _gatekeeper().unlock(password)
     except Exception:
         return jsonify({"ok": False, "error": "invalid password or not set up"}), 401
+    _login_notify("Password")
     return jsonify({"ok": True, "token": token})
 
 
@@ -847,6 +859,7 @@ def api_gatekeeper_webauthn_assert():
                 data.get("auth_data", ""),
                 data.get("signature", ""),
             )
+            _login_notify("Fingerprint")
             return jsonify(result)
         challenge = gk.webauthn_begin_assert()
         return jsonify({"ok": True, "mode": "begin", **challenge})

@@ -131,3 +131,70 @@ def test_gatekeeper_webauthn_assert_not_registered(app_client):
     app_client.post("/api/gatekeeper/setup", json={"password": "Master-Pass-2026"})
     resp = app_client.post("/api/gatekeeper/webauthn/assert", json={})
     assert resp.status_code == 400
+# --------------------------------------------------------------------------
+# STEP 4 integration: Lock Screen UI -> Auth Engine -> OS Notification
+# --------------------------------------------------------------------------
+
+def test_unlock_success_hides_overlay_contract():
+    """Unlock ceremony must hide `.gatekeeper-lockscreen` (gk-hidden)."""
+    js = JS.read_text(encoding="utf-8")
+    css = CSS.read_text(encoding="utf-8")
+    # success path of the password ceremony calls hideOverlay()
+    assert "function hideOverlay()" in js
+    assert 'root.classList.add("gk-hidden")' in js
+    # ...and hideOverlay is invoked on the unlock success chain
+    assert ".then(function () { hideOverlay(); })" in js
+    # CSS: gk-hidden state makes the overlay disappear
+    assert ".gatekeeper-lockscreen.gk-hidden" in css
+    assert "display: none" in css
+
+
+def test_auto_lock_cleanup_contract():
+    """After lock/auto-lock the UI keeps the overlay mounted for re-check."""
+    js = JS.read_text(encoding="utf-8")
+    assert "has-gatekeeper" in js
+    assert 'fetch("/api/gatekeeper/status"' in js
+    assert "markReady" in js and "markNotSetup" in js
+
+
+def test_ui_unlock_fires_desktop_notification(app_client, monkeypatch):
+    """Seamless flow: UI unlock (password) -> auth engine -> OS notification."""
+    import webui
+    calls = []
+    monkeypatch.setattr(webui, "_login_notify", lambda m: calls.append(m))
+    r1 = app_client.post("/api/gatekeeper/setup",
+                         json={"password": "Master-Pass-2026"})
+    assert r1.status_code == 200 and r1.get_json()["ok"] is True
+    r2 = app_client.post("/api/gatekeeper/unlock",
+                         json={"password": "Master-Pass-2026"})
+    assert r2.status_code == 200 and r2.get_json()["ok"] is True
+    assert r2.get_json()["token"]
+    assert calls == ["Password"], "successful unlock must fire the Password notification"
+
+
+def test_failed_ui_unlock_fires_no_notification(app_client, monkeypatch):
+    """Wrong password: 401 and NO desktop notification may be emitted."""
+    import webui
+    calls = []
+    monkeypatch.setattr(webui, "_login_notify", lambda m: calls.append(m))
+    app_client.post("/api/gatekeeper/setup",
+                    json={"password": "Master-Pass-2026"})
+    r3 = app_client.post("/api/gatekeeper/unlock", json={"password": "wrong-pass"})
+    assert r3.status_code == 401
+    assert calls == []
+
+
+def test_ui_webauthn_complete_fires_notification(app_client, monkeypatch):
+    """Seamless flow: fingerprint unlock -> auth engine -> OS notification."""
+    import webui
+    from ai_agent.webui.gatekeeper import Gatekeeper
+    calls = []
+    monkeypatch.setattr(webui, "_login_notify", lambda m: calls.append(m))
+    monkeypatch.setattr(
+        Gatekeeper, "webauthn_complete_assert",
+        lambda self, *a, **k: {"ok": True, "token": "tok-bio"})
+    r = app_client.post("/api/gatekeeper/webauthn/assert",
+                        json={"credential_id": "c", "client_data": "x",
+                              "auth_data": "y", "signature": "z"})
+    assert r.status_code == 200 and r.get_json()["ok"] is True
+    assert calls == ["Fingerprint"]

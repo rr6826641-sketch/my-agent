@@ -1,5 +1,20 @@
 # Changelog
 
+## [2026-09-11] step 4 - end-to-end gatekeeper auth + notification integration
+
+- feat(integration): the Lock Screen UI -> Auth Engine -> OS Notification
+  flow is now seamless - `webui.py` fires `_login_notify("Password")` on
+  `/api/gatekeeper/unlock` success and `_login_notify("Fingerprint")` on
+  `/api/gatekeeper/webauthn/assert` completion (the exact endpoints the
+  lockscreen JS calls), so a real browser unlock pops the desktop alert.
+- feat(cleanup): unlock reverts the overlay via `hideOverlay()`
+  (`gk-hidden` + `display:none` removes `.gatekeeper-lockscreen`); auto-lock
+  re-mounts the overlay on the next status poll (has-gatekeeper class).
+- test: `tests/test_webui_lockscreen.py` extended - overlay-hide contract,
+  auto-lock cleanup contract, password-unlock + fingerprint-unlock
+  notification wiring (via the real Flask routes), and wrong-password
+  never-notify guard. Full suite now 390/390 green.
+
 ## [2026-09-11] step 3 - cross-platform OS notification engine on authentication
 
 - feat(security): new `ai_agent/core/notifier.py` raises a native desktop
