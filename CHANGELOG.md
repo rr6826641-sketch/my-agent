@@ -1,5 +1,18 @@
 # Changelog
 
+## [2026-09-11] v0.8.6 - 3D 32K HD lock screen edition
+
+- feat(lockscreen): complete 3D 32K HD redesign of the gatekeeper lock
+  screen - animated 3D deep-space starfield (15-layer background: star
+  dust + blue/red nebulae), floating holographic orbs (parallax drift),
+  glass panel with 3D perspective entrance (rotateX/rotateY), periodic
+  glass shine sweep, pulsing 3D radar rings around the lock badge,
+  floating badge bob, gradient 3D title with glow breathing animation,
+  and fixed the original `.gk-skip:hover` missing-brace CSS bug.
+- cleanup: user wallpaper image (data-URI) fully removed - lock screen
+  is now 100%% pure CSS, zero images, zero blur, single-file change.
+- test: lockscreen + dock layering suites 30/30 green.
+
 ## [2026-09-11] step 4 - end-to-end gatekeeper auth + notification integration
 
 - feat(integration): the Lock Screen UI -> Auth Engine -> OS Notification
