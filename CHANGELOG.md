@@ -281,3 +281,13 @@ Sare notable changes is project ke. Format: `[Semantic Versioning](https://semve
 - test: live-verified on this host - /api/health 200 (release v0.8.2, all 4
   routes configured), /health 200 (dashboard HTML served), history accumulates
   samples with uptime_pct 100.0.
+## [2026-09-11] v0.8.3 - HD TURBO lock screen (crystal clear 32K-style)
+
+- fix(webui): gatekeeper lock screen de-blurred - removed backdrop-filter blur(18px)
+  acrylic from .gk-blur-layer; replaced with razor-sharp CSS radial glow (zero blur).
+- feat(webui): clean deep-space gradient background (no translucent red bleed),
+  larger HD panel (480px), crisp 1px highlight borders, anti-aliased text
+  rendering (text-rendering:optimizeLegibility, no shadows), bigger sharper
+  title (26px/900) and password input (16px, 46px tall, letter-spacing 3px).
+- fix(css): repaired .gk-skip:hover rule that was missing its opening brace.
+- test: braces balanced, zero blur()/backdrop-filter left in lock screen stylesheet.
