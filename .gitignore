@@ -60,3 +60,9 @@ api_models.json
 personas_custom.txt
 # Refusal Intelligence Engine runtime memory
 refusal_intel.json
+# local scratch / test artifacts (keep on disk, keep out of git)
+_activity_panel.png
+_layout_test.html
+_meta_extract.txt
+extract_meta.py
+fix_comment.py
