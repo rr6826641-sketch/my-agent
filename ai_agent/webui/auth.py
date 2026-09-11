@@ -25,6 +25,7 @@ import threading
 
 from flask import Blueprint, current_app, jsonify, request
 
+from ai_agent.core.notifier import notify_login as _notify_login
 from ai_agent.webui.gatekeeper import DEFAULT_AUTO_LOCK_S, Gatekeeper, GatekeeperError
 
 __all__ = ["auth_bp", "get_gatekeeper"]
@@ -122,6 +123,7 @@ def auth_unlock():
         token = gk.unlock(password)
     except GatekeeperError as exc:
         return _err(str(exc), 401)
+    _notify_login("Password")
     return jsonify({"ok": True, "token": token})
 
 
@@ -222,4 +224,5 @@ def auth_webauthn_assert_complete():
         token = gk._mint_token()
     except GatekeeperError as exc:
         return _err(str(exc), 401)
+    _notify_login("Fingerprint")
     return jsonify({"ok": True, "token": token, "credential_id": result["credential_id"]})

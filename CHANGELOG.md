@@ -1,5 +1,21 @@
 # Changelog
 
+## [2026-09-11] step 3 - cross-platform OS notification engine on authentication
+
+- feat(security): new `ai_agent/core/notifier.py` raises a native desktop
+  notification on every successful login; payload contract
+  `🚨 [HACKERAI SECURITY ALERT] Agent session opened via {method} at {ts}`.
+  Windows -> powershell.exe WScript popup, macOS -> osascript, Linux ->
+  notify-send; zero-dependency (plyer optional), degrades to a console line
+  on headless/CI hosts and never raises (auth flow can never fail on a toast).
+- feat(auth): `/api/auth/unlock` fires `Password`, `/api/auth/webauthn/assert/complete`
+  fires `Fingerprint`; notifications run on a daemon thread (non-blocking) and
+  short-circuit under pytest so suites never pop OS dialogs.
+- test: `tests/test_notifier.py` (16 cases) - exact payload contract,
+  method-label normalization, ISO timestamps, dry-run, graceful degradation,
+  per-backend command shape, async thread fire, and auth-route wiring.
+  Full suite now 385/385 green.
+
 ## [2026-09-11] upgrade - /pool command, live model pool visibility & 100% green suite
 
 - feat(cli): new `/pool` command prints the live model pool - primary model,
