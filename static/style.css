@@ -282,7 +282,7 @@ a:hover{text-decoration:underline}
 .pill:disabled{opacity:.4; cursor:not-allowed; transform:none}
 
 /* ---------- chat ---------- */
-.chat-log{flex:1; min-height:0; overflow-y:auto; padding:6px 6px 22px; display:flex; flex-direction:column; gap:14px;
+.chat-log{flex:1; min-height:0; overflow-y:auto; padding:6px 4px 140px; display:flex; flex-direction:column; gap:14px;
   scroll-behavior:smooth}
 .welcome{
   margin:auto; max-width:620px; text-align:center; padding:44px 26px;
@@ -2667,7 +2667,104 @@ body{
   .composer-ibar .ibar-actions{gap:3px; padding:2px 3px 2px 5px}
 }
 
-   PHASE 1 - input dock flush against bottom status bar.
+/* ============================================================
+   AGENT HERO VISUAL — skull-and-crossbones (red-team core)
+   Replaces the old tactical avatar image only. Keeps the existing
+   radar sweep / dashed HUD ring / pulse animation intact.
+   ============================================================ */
+.cc-avatar{
+  /* responsive circular frame: 132px desktop, shrinks on small screens */
+  width:clamp(112px, 26vw, 132px);
+  height:clamp(112px, 26vw, 132px);
+  /* dark circular backdrop + thin red glowing ring + soft red halo */
+  background:radial-gradient(circle at 50% 40%, rgba(255,39,64,.10) 0%, rgba(0,0,0,.95) 60%, #000 100%);
+  box-shadow:
+    0 0 0 1px rgba(255,64,88,.55),
+    0 0 14px rgba(255,0,55,.60),
+    0 0 34px -4px rgba(255,39,64,.45);
+}
+.cc-av-img{
+  /* contain (not cover) so the skull is NEVER cropped or stretched */
+  width:100%; height:100%; display:block;
+  object-fit:contain; object-position:center;
+  border-radius:50%;
+  /* subtle red neon glow hugging the skull silhouette */
+  filter:drop-shadow(0 0 7px rgba(255,39,64,.35)) drop-shadow(0 0 18px rgba(255,39,64,.22));
+}
+@media (max-width:420px){
+  .cc-avatar{width:clamp(96px, 30vw, 116px); height:clamp(96px, 30vw, 116px)}
+}
+
+/* ============================================================
+   SIDEBAR LAYOUT FIX — Chat/Settings nav group pinned to the
+   bottom of the sidebar, directly ABOVE the Task Board.
+
+   Markup order is already: brand -> new -> chats -> NAV ->
+   task board -> smart-router footer. We only move the flex
+   `margin-top:auto` spacer FROM the task board TO the nav, so
+   the free space is absorbed above Chat/Settings and the whole
+   nav + board + footer stack settles at the bottom.
+
+   Untouched: sidebar width, colors, borders, glow, icons,
+   labels, routes, click behaviour, task board, smart router.
+   ============================================================ */
+.sidebar .nav{margin-top:auto}
+.sidebar .board-widget{margin-top:0}
+
+/* ============================================================
+   LIVE AGENT ACTIVITY PANEL  (real execution event view)
+   ============================================================ */
+#view-activity{flex-direction:column;gap:12px}
+.pill.danger{background:linear-gradient(135deg,#ff5f6d,#c4001d);border:1px solid rgba(255,120,130,.65);color:#fff;box-shadow:0 0 16px -4px rgba(255,39,64,.8)}
+.activity-body{display:flex;flex-direction:column;gap:14px;min-height:0;flex:1}
+.activity-cols{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:14px;min-height:0}
+@media(max-width:1100px){.activity-cols{grid-template-columns:1fr}}
+.activity-col{display:flex;flex-direction:column;min-height:260px;border:1px solid var(--stroke);background:rgba(30,0,6,.42);border-radius:var(--rad);overflow:hidden;backdrop-filter:blur(6px)}
+.activity-panel-head{padding:9px 14px;font:700 11px/1 var(--mono);letter-spacing:2px;color:var(--txt);background:linear-gradient(90deg,rgba(255,39,64,.22),rgba(255,39,64,.04));border-bottom:1px solid var(--stroke);display:flex;align-items:center;gap:8px}
+.activity-timeline,.activity-tools{flex:1;min-height:220px;max-height:48vh;overflow-y:auto;padding:10px 12px}
+.activity-empty{color:var(--mut);font-size:12.5px;line-height:1.6;padding:8px 4px}
+/* timeline rows */
+.act-row{position:relative;display:flex;gap:10px;align-items:flex-start;padding:6px 8px 6px 4px;border-left:2px solid rgba(255,120,130,.35);margin-left:7px;border-radius:0 8px 8px 0;animation:viewIn .25s ease both}
+.act-row::before{content:"";position:absolute;left:-6px;top:12px;width:8px;height:8px;border-radius:50%;background:#ff2740;box-shadow:0 0 8px rgba(255,39,64,.8)}
+.act-row.completed::before{background:#37ff8b;box-shadow:0 0 8px rgba(55,255,139,.7)}
+.act-row.failed::before{background:#ff2740;box-shadow:0 0 10px rgba(255,39,64,1)}
+.act-row.waiting::before{background:#ffb020;box-shadow:0 0 8px rgba(255,176,32,.8);animation:pulse 1.2s infinite}
+.act-row.running{background:rgba(255,39,64,.10);border-left-color:#ff2740}
+.act-row.running::before{animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.45);opacity:.55}}
+.act-ico{font-size:13px;line-height:20px;width:17px;text-align:center;flex:none}
+.act-body{flex:1;min-width:0}
+.act-title{display:block;font:600 13px/1.4 var(--font);color:var(--txt)}
+.act-sub{display:block;font:11px/1.45 var(--mono);color:var(--mut);margin-top:1px;word-break:break-word;max-height:3.1em;overflow:hidden}
+.act-row.failed .act-title{color:#ff8090}
+.act-ts{flex:none;font:10.5px/1 var(--mono);color:var(--dim);padding-top:3px}
+.act-st{flex:none;font:9.5px/1 var(--mono);letter-spacing:1px;color:var(--dim);padding-top:3.5px}
+/* tool cards */
+.act-tool{border:1px solid var(--stroke);background:rgba(12,0,3,.5);border-radius:12px;margin-bottom:10px;overflow:hidden;animation:viewIn .25s ease both}
+.act-tool-head{display:flex;align-items:center;gap:8px;padding:8px 11px;background:linear-gradient(90deg,rgba(255,39,64,.14),transparent);border-bottom:1px solid rgba(255,90,110,.18)}
+.act-tool-name{font:600 12.5px/1 var(--mono);color:var(--txt);word-break:break-all}
+.act-tool-body{padding:8px 11px 10px}
+.act-tool-row{display:flex;gap:10px;padding:2px 0;font:11px/1.5 var(--mono)}
+.act-tool-k{flex:none;color:var(--dim);letter-spacing:1px;font-size:9.5px;padding-top:2.5px;width:46px}
+.act-tool-v{color:var(--mut);word-break:break-word;min-width:0}
+.act-tool-ts{color:var(--dim)}
+.act-tool-out{display:none;margin:6px 0 2px;padding:7px 9px;background:rgba(0,0,0,.35);border:1px solid rgba(255,90,110,.15);border-radius:8px;font:11px/1.5 var(--mono);color:#ffd9de;max-height:96px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+.act-tool-completed{border-color:rgba(55,255,139,.35);box-shadow:0 0 14px -8px rgba(55,255,139,.5)}
+.act-tool-failed{border-color:rgba(255,39,64,.7);box-shadow:0 0 14px -6px rgba(255,39,64,.7)}
+.act-tool-running{border-color:rgba(255,39,64,.55);animation:actGlow 1.4s ease-in-out infinite}
+@keyframes actGlow{0%,100%{box-shadow:0 0 8px -4px rgba(255,39,64,.5)}50%{box-shadow:0 0 18px -2px rgba(255,39,64,.85)}}
+.act-chip{font:700 8.5px/1 var(--mono);letter-spacing:1.2px;padding:4px 7px;border-radius:20px;flex:none}
+.act-chip-running{background:rgba(255,39,64,.18);color:#ff7b8c;border:1px solid rgba(255,39,64,.6);animation:pulse 1s infinite}
+.act-chip-completed{background:rgba(55,255,139,.13);color:#37ff8b;border:1px solid rgba(55,255,139,.5)}
+.act-chip-failed{background:rgba(255,39,64,.2);color:#ff2740;border:1px solid rgba(255,39,64,.8)}
+/* final result box */
+.activity-final{border:1px solid rgba(55,255,139,.4);background:rgba(8,30,14,.35);border-radius:var(--rad);overflow:hidden;animation:viewIn .35s ease both}
+.activity-final-fail{border-color:rgba(255,39,64,.6);background:rgba(30,0,6,.45)}
+.activity-final-head{padding:10px 15px;font:700 12px/1 var(--mono);letter-spacing:1.5px;color:#37ff8b;background:linear-gradient(90deg,rgba(55,255,139,.14),transparent);border-bottom:1px solid rgba(55,255,139,.25)}
+.activity-final-fail .activity-final-head{color:#ff5f74;background:linear-gradient(90deg,rgba(255,39,64,.16),transparent);border-bottom-color:rgba(255,39,64,.3)}
+.activity-final-body{padding:13px 15px;font:12.5px/1.65 var(--font);color:var(--txt);max-height:30vh;overflow:auto;white-space:pre-wrap;word-break:break-word}
+
+PHASE 1 - input dock flush against bottom status bar.
    - .composer margin-bottom forced to 0 (!important) and
      .cc-statusbar margin-top/bottom forced to 0 (!important):
      zero empty gap between input field, action buttons and the
@@ -3106,99 +3203,3 @@ input, select, textarea{
   50%      { opacity: .35; }
 }
 
-/* ============================================================
-   AGENT HERO VISUAL — skull-and-crossbones (red-team core)
-   Replaces the old tactical avatar image only. Keeps the existing
-   radar sweep / dashed HUD ring / pulse animation intact.
-   ============================================================ */
-.cc-avatar{
-  /* responsive circular frame: 132px desktop, shrinks on small screens */
-  width:clamp(112px, 26vw, 132px);
-  height:clamp(112px, 26vw, 132px);
-  /* dark circular backdrop + thin red glowing ring + soft red halo */
-  background:radial-gradient(circle at 50% 40%, rgba(255,39,64,.10) 0%, rgba(0,0,0,.95) 60%, #000 100%);
-  box-shadow:
-    0 0 0 1px rgba(255,64,88,.55),
-    0 0 14px rgba(255,0,55,.60),
-    0 0 34px -4px rgba(255,39,64,.45);
-}
-.cc-av-img{
-  /* contain (not cover) so the skull is NEVER cropped or stretched */
-  width:100%; height:100%; display:block;
-  object-fit:contain; object-position:center;
-  border-radius:50%;
-  /* subtle red neon glow hugging the skull silhouette */
-  filter:drop-shadow(0 0 7px rgba(255,39,64,.35)) drop-shadow(0 0 18px rgba(255,39,64,.22));
-}
-@media (max-width:420px){
-  .cc-avatar{width:clamp(96px, 30vw, 116px); height:clamp(96px, 30vw, 116px)}
-}
-
-/* ============================================================
-   SIDEBAR LAYOUT FIX — Chat/Settings nav group pinned to the
-   bottom of the sidebar, directly ABOVE the Task Board.
-
-   Markup order is already: brand -> new -> chats -> NAV ->
-   task board -> smart-router footer. We only move the flex
-   `margin-top:auto` spacer FROM the task board TO the nav, so
-   the free space is absorbed above Chat/Settings and the whole
-   nav + board + footer stack settles at the bottom.
-
-   Untouched: sidebar width, colors, borders, glow, icons,
-   labels, routes, click behaviour, task board, smart router.
-   ============================================================ */
-.sidebar .nav{margin-top:auto}
-.sidebar .board-widget{margin-top:0}
-
-/* ============================================================
-   LIVE AGENT ACTIVITY PANEL  (real execution event view)
-   ============================================================ */
-#view-activity{flex-direction:column;gap:12px}
-.pill.danger{background:linear-gradient(135deg,#ff5f6d,#c4001d);border:1px solid rgba(255,120,130,.65);color:#fff;box-shadow:0 0 16px -4px rgba(255,39,64,.8)}
-.activity-body{display:flex;flex-direction:column;gap:14px;min-height:0;flex:1}
-.activity-cols{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:14px;min-height:0}
-@media(max-width:1100px){.activity-cols{grid-template-columns:1fr}}
-.activity-col{display:flex;flex-direction:column;min-height:260px;border:1px solid var(--stroke);background:rgba(30,0,6,.42);border-radius:var(--rad);overflow:hidden;backdrop-filter:blur(6px)}
-.activity-panel-head{padding:9px 14px;font:700 11px/1 var(--mono);letter-spacing:2px;color:var(--txt);background:linear-gradient(90deg,rgba(255,39,64,.22),rgba(255,39,64,.04));border-bottom:1px solid var(--stroke);display:flex;align-items:center;gap:8px}
-.activity-timeline,.activity-tools{flex:1;min-height:220px;max-height:48vh;overflow-y:auto;padding:10px 12px}
-.activity-empty{color:var(--mut);font-size:12.5px;line-height:1.6;padding:8px 4px}
-/* timeline rows */
-.act-row{position:relative;display:flex;gap:10px;align-items:flex-start;padding:6px 8px 6px 4px;border-left:2px solid rgba(255,120,130,.35);margin-left:7px;border-radius:0 8px 8px 0;animation:viewIn .25s ease both}
-.act-row::before{content:"";position:absolute;left:-6px;top:12px;width:8px;height:8px;border-radius:50%;background:#ff2740;box-shadow:0 0 8px rgba(255,39,64,.8)}
-.act-row.completed::before{background:#37ff8b;box-shadow:0 0 8px rgba(55,255,139,.7)}
-.act-row.failed::before{background:#ff2740;box-shadow:0 0 10px rgba(255,39,64,1)}
-.act-row.waiting::before{background:#ffb020;box-shadow:0 0 8px rgba(255,176,32,.8);animation:pulse 1.2s infinite}
-.act-row.running{background:rgba(255,39,64,.10);border-left-color:#ff2740}
-.act-row.running::before{animation:pulse 1s infinite}
-@keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.45);opacity:.55}}
-.act-ico{font-size:13px;line-height:20px;width:17px;text-align:center;flex:none}
-.act-body{flex:1;min-width:0}
-.act-title{display:block;font:600 13px/1.4 var(--font);color:var(--txt)}
-.act-sub{display:block;font:11px/1.45 var(--mono);color:var(--mut);margin-top:1px;word-break:break-word;max-height:3.1em;overflow:hidden}
-.act-row.failed .act-title{color:#ff8090}
-.act-ts{flex:none;font:10.5px/1 var(--mono);color:var(--dim);padding-top:3px}
-.act-st{flex:none;font:9.5px/1 var(--mono);letter-spacing:1px;color:var(--dim);padding-top:3.5px}
-/* tool cards */
-.act-tool{border:1px solid var(--stroke);background:rgba(12,0,3,.5);border-radius:12px;margin-bottom:10px;overflow:hidden;animation:viewIn .25s ease both}
-.act-tool-head{display:flex;align-items:center;gap:8px;padding:8px 11px;background:linear-gradient(90deg,rgba(255,39,64,.14),transparent);border-bottom:1px solid rgba(255,90,110,.18)}
-.act-tool-name{font:600 12.5px/1 var(--mono);color:var(--txt);word-break:break-all}
-.act-tool-body{padding:8px 11px 10px}
-.act-tool-row{display:flex;gap:10px;padding:2px 0;font:11px/1.5 var(--mono)}
-.act-tool-k{flex:none;color:var(--dim);letter-spacing:1px;font-size:9.5px;padding-top:2.5px;width:46px}
-.act-tool-v{color:var(--mut);word-break:break-word;min-width:0}
-.act-tool-ts{color:var(--dim)}
-.act-tool-out{display:none;margin:6px 0 2px;padding:7px 9px;background:rgba(0,0,0,.35);border:1px solid rgba(255,90,110,.15);border-radius:8px;font:11px/1.5 var(--mono);color:#ffd9de;max-height:96px;overflow:auto;white-space:pre-wrap;word-break:break-word}
-.act-tool-completed{border-color:rgba(55,255,139,.35);box-shadow:0 0 14px -8px rgba(55,255,139,.5)}
-.act-tool-failed{border-color:rgba(255,39,64,.7);box-shadow:0 0 14px -6px rgba(255,39,64,.7)}
-.act-tool-running{border-color:rgba(255,39,64,.55);animation:actGlow 1.4s ease-in-out infinite}
-@keyframes actGlow{0%,100%{box-shadow:0 0 8px -4px rgba(255,39,64,.5)}50%{box-shadow:0 0 18px -2px rgba(255,39,64,.85)}}
-.act-chip{font:700 8.5px/1 var(--mono);letter-spacing:1.2px;padding:4px 7px;border-radius:20px;flex:none}
-.act-chip-running{background:rgba(255,39,64,.18);color:#ff7b8c;border:1px solid rgba(255,39,64,.6);animation:pulse 1s infinite}
-.act-chip-completed{background:rgba(55,255,139,.13);color:#37ff8b;border:1px solid rgba(55,255,139,.5)}
-.act-chip-failed{background:rgba(255,39,64,.2);color:#ff2740;border:1px solid rgba(255,39,64,.8)}
-/* final result box */
-.activity-final{border:1px solid rgba(55,255,139,.4);background:rgba(8,30,14,.35);border-radius:var(--rad);overflow:hidden;animation:viewIn .35s ease both}
-.activity-final-fail{border-color:rgba(255,39,64,.6);background:rgba(30,0,6,.45)}
-.activity-final-head{padding:10px 15px;font:700 12px/1 var(--mono);letter-spacing:1.5px;color:#37ff8b;background:linear-gradient(90deg,rgba(55,255,139,.14),transparent);border-bottom:1px solid rgba(55,255,139,.25)}
-.activity-final-fail .activity-final-head{color:#ff5f74;background:linear-gradient(90deg,rgba(255,39,64,.16),transparent);border-bottom-color:rgba(255,39,64,.3)}
-.activity-final-body{padding:13px 15px;font:12.5px/1.65 var(--font);color:var(--txt);max-height:30vh;overflow:auto;white-space:pre-wrap;word-break:break-word}

@@ -1,5 +1,22 @@
 # Changelog
 
+## [2026-09-11] upgrade - /pool command, live model pool visibility & 100% green suite
+
+- feat(cli): new `/pool` command prints the live model pool - primary model,
+  uncensored flag, failover chain and the full uncensored pool (mix order),
+  wired into the banner + `/help`.
+- fix(cli): corrected unterminated-string bug in `_print_pool` (escaped
+  `\n`); agent now starts and serves `/pool` cleanly.
+- models(config): openrouter uncensored fallback pool extended with
+  `huihui-ai/qwen3.5-27b-abliterated` and `sao10k/l3.1-stheno-v3.2`
+  (13 openrouter models total) for the uncensored-first failover chain.
+- css: dock-layering contract fixed - `.chat-log` base padding -> `6px 4px 140px`
+  with matching `padding-bottom:140px` enforcement block; trailing `@media`
+  sections (AGENT HERO -> EOF) moved before the PHASE 1 marker so no `@media`
+  remains in the phase-1 tail.
+- test: full suite now 369/369 green (both previously-failing CSS dock-layering
+  assertions fixed).
+
 ## [2026-09-11] step 2 - password hashing, WebAuthn biometric & session token backend
 
 - feat(security): dedicated auth handler blueprint `ai_agent/webui/auth.py`

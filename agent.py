@@ -14,13 +14,14 @@ from ai_agent import personas
 from ai_agent.config import PROJECT_DIR, load_config
 from ai_agent.core import Agent, IntentReformulator
 from ai_agent.llm import (MockClient, OpenAIClient,
-                          UNCENSORED_FALLBACK_MODELS)
+                          UNCENSORED_FALLBACK_MODELS,
+                          _full_uncensored_pool)
 from ai_agent.memory_store import InstitutionalMemory, MemoryStore
 
 BANNER = """
 ============================================================
   AI AGENT  -  reasoning + tools + memory + sub-agents
-  Commands: /help  /clear  /memory  /tools  /reset  /pipeline <target>  exit
+  Commands: /help  /clear  /memory  /tools  /reset  /pipeline <target>  /pool  exit
 ============================================================
 """
 
@@ -171,7 +172,7 @@ def _handle_command(line, agent, memory):
     rest = line[len(cmd):].strip()
     if cmd == "/help":
         print("Commands: /help  /clear  /reset  /memory  /tools  /memdel <key>  "
-              "/pipeline <target>  exit")
+              "/pipeline <target>  /pool  exit")
         print("Tools:   " + agent.tool_names())
     elif cmd in ("/clear", "/reset"):
         agent.reset()
@@ -182,6 +183,8 @@ def _handle_command(line, agent, memory):
         print("deleted" if memory.delete(rest) else "key not found")
     elif cmd == "/tools":
         print(agent.tool_names())
+    elif cmd == "/pool":
+        _print_pool(agent)
     elif cmd == "/pipeline":
         if not rest:
             print("usage: /pipeline <target>  (e.g. /pipeline scanme.nmap.org)")
@@ -189,6 +192,26 @@ def _handle_command(line, agent, memory):
         _run_pipeline_cli(agent, rest)
     else:
         print("unknown command: %s (try /help)" % cmd)
+
+
+def _print_pool(agent):
+    """Print the live model pool: primary model, uncensored flag and the
+    failover chain (uncensored-first when red-team mode is on)."""
+    llm = getattr(agent, "llm", None)
+    print("\n[model pool]")
+    if llm is None:
+        print("  no llm attached")
+        return
+    print("  primary         : %s" % getattr(llm, "model", "?"))
+    print("  uncensored      : %s" % ("ON" if getattr(llm, "uncensored", False) else "off"))
+    fb = getattr(llm, "fallback_models", None) or []
+    print("  failover chain  : %d model(s)" % len(fb))
+    for m in fb[:10]:
+        print("    - %s" % m)
+    pool = _full_uncensored_pool()
+    print("  uncensored pool : %d model(s) (mix order)" % len(pool))
+    for m in pool[:10]:
+        print("    + %s" % m)
 
 
 def _run_pipeline_cli(agent, target):
