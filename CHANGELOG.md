@@ -1,5 +1,20 @@
 # Changelog
 
+## [2026-09-11] step 2 - password hashing, WebAuthn biometric & session token backend
+
+- feat(security): dedicated auth handler blueprint `ai_agent/webui/auth.py`
+  mounted at `/api/auth` - bcrypt master-password verify (`/api/auth/unlock`),
+  WebAuthn challenge/response ceremonies for Fingerprint / Touch ID /
+  Windows Hello (`/api/auth/webauthn/register/*`, `/api/auth/webauthn/assert/*`),
+  encrypted-LocalStorage JWT session tokens with idle auto-lock timeout
+  (`/api/auth/session`, `/api/auth/touch`), plus `/setup` and `/lock`.
+- test: `tests/test_auth_handler.py` (9 cases) - correct/wrong password paths,
+  forged-token rejection, lock revocation, WebAuthn ceremony guards. Full
+  auth suite (handler + gatekeeper + lockscreen) 66/66 green; whole suite
+  367/369 (two pre-existing CSS dock-layering assertions, unrelated).
+- changed: `webui.py` registers the auth blueprint (same shared gatekeeper
+  store as the STEP 1 `/api/gatekeeper/*` routes).
+
 ## [2026-09-09] step 5 - notrack-uncensored live path hardened (Cloudflare 1010)
 
 - fix(llm): api.notrack.ai is Cloudflare-fronted and rejects the default
