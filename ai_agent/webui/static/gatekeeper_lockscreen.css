@@ -1,7 +1,7 @@
 /* =====================================================================
-   Gatekeeper Lock Screen Overlay (STEP 1)
-   Full-screen blurred modal that renders on page load and blocks
-   every element behind it. z-index 9999 keeps it above the entire
+   Gatekeeper Lock Screen Overlay (HD TURBO . v0.8.3)
+   Crystal-clear full-screen modal. NO blur / NO blurry acrylic -
+   razor-sharp HD rendering. z-index 9999 keeps it above the entire
    WebUI so nothing behind is reachable before unlock.
    ===================================================================== */
 
@@ -12,18 +12,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(5, 6, 12, 0.55);
+  background: linear-gradient(168deg, #0b1120 0%, #080d16 48%, #05070c 100%);
   transition: opacity 0.28s ease;
 }
 
-/* Blurred acrylic backdrop between the page and the panel. */
+/* Sharp HD ambient layer - pure CSS radial glow, ZERO blur. */
 .gk-blur-layer {
   position: fixed;
   inset: 0;
   z-index: 9998;
-  background: inherit;
-  -webkit-backdrop-filter: blur(18px) saturate(1.15);
-  backdrop-filter: blur(18px) saturate(1.15);
+  background: radial-gradient(140% 140% at 50% 8%, rgba(24, 32, 58, 0.55) 0%, transparent 58%);
   pointer-events: none;
   animation: gk-blur-in 0.4s ease both;
 }
@@ -46,15 +44,22 @@ html.has-gatekeeper .bg {
 
 /* ---------------------------- panel ---------------------------- */
 .gk-panel {
-  width: min(460px, calc(100vw - 48px));
-  padding: 34px 34px 28px;
-  border-radius: 20px;
-  background: linear-gradient(180deg, #0a0f18 0%, #070b12 100%);
-  border: 1px solid rgba(255, 39, 64, 0.28);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 39, 64, 0.08);
-  color: #e8eaf2;
+  width: min(480px, calc(100vw - 48px));
+  padding: 36px 36px 30px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, #0d1424 0%, #090d18 100%);
+  border: 1px solid rgba(255, 39, 64, 0.34);
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.82), 0 0 0 1px rgba(255, 39, 64, 0.10), 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  color: #eef1f7;
   text-align: center;
   animation: gk-panel-in 0.32s cubic-bezier(0.2, 0.8, 0.25, 1) both;
+}
+
+/* Razor-sharp HD text rendering */
+.gk-title, .gk-sub, .gk-label, .gk-input, .gk-hint, .gk-error, .gk-skip, .gk-fingerprint {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  text-shadow: none;
 }
 
 @keyframes gk-panel-in {
@@ -73,9 +78,9 @@ html.has-gatekeeper .bg {
 
 .gk-title {
   margin: 0 0 6px;
-  font-size: 23px;
-  font-weight: 800;
-  letter-spacing: 1.1px;
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: 1.2px;
   background: linear-gradient(90deg, #ff2740, #ff5c3d);
   -webkit-background-clip: text;
   background-clip: text;
@@ -113,13 +118,13 @@ html.has-gatekeeper .bg {
 .gk-input {
   flex: 1;
   min-width: 0;
-  height: 44px;
-  padding: 0 14px;
-  font-size: 15px;
-  letter-spacing: 2.5px;
-  color: #e8eaf2;
+  height: 46px;
+  padding: 0 16px;
+  font-size: 16px;
+  letter-spacing: 3px;
+  color: #eef1f7;
   background: #0d1420;
-  border: 1px solid #26324a;
+  border: 1px solid #2c3a55;
   border-radius: 12px;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -217,7 +222,7 @@ html.has-gatekeeper .bg {
   transition: border-color 0.15s ease;
 }
 
-.gk-skip:hover 
+.gk-skip:hover {
   border-color: #ff2740;
   color: #ff6b80;
 }
