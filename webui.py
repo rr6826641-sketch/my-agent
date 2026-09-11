@@ -752,7 +752,7 @@ def index():
 def gatekeeper_lockscreen_css():
     """STEP 1: lock-screen overlay stylesheet (served early, cacheable)."""
     resp = _webui_static("gatekeeper_lockscreen.css")
-    resp.headers["Cache-Control"] = "public, max-age=3600"
+    resp.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
     resp.headers["X-Content-Type-Options"] = "nosniff"
     return resp
 
@@ -761,7 +761,7 @@ def gatekeeper_lockscreen_css():
 def gatekeeper_lockscreen_js():
     """STEP 1: lock-screen overlay behaviour."""
     resp = _webui_static("gatekeeper_lockscreen.js")
-    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
     resp.headers["X-Content-Type-Options"] = "nosniff"
     return resp
 

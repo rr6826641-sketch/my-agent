@@ -115,4 +115,29 @@
       else markNotSetup();
     })
     .catch(function () { markNotSetup(); });
+
+
+  // ULTRA 3D (v0.8.8): mouse-parallax tilt - the panel lives in 3D space
+  // and leans toward the cursor. CSS vars drive the final keyframe of
+  // gk-panel-in so the entrance animation and the live tilt coexist.
+  var reduceMotion = false;
+  try { reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
+  catch (e) { reduceMotion = false; }
+  if (!reduceMotion && !("ontouchstart" in window)) {
+    var _lastTilt = 0;
+    root.addEventListener("mousemove", function (ev) {
+      var _now = Date.now();
+      if (_now - _lastTilt < 30) return;
+      _lastTilt = _now;
+      var _r = root.getBoundingClientRect();
+      var _nx = (ev.clientX - _r.left) / _r.width - 0.5;
+      var _ny = (ev.clientY - _r.top) / _r.height - 0.5;
+      root.style.setProperty("--gk-tilt-x", (_ny * -7).toFixed(2) + "deg");
+      root.style.setProperty("--gk-tilt-y", (_nx * 9).toFixed(2) + "deg");
+    });
+    root.addEventListener("mouseleave", function () {
+      root.style.setProperty("--gk-tilt-x", "0deg");
+      root.style.setProperty("--gk-tilt-y", "0deg");
+    });
+  }
 })();

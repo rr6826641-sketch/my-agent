@@ -1,9 +1,11 @@
 /* =====================================================================
-   Gatekeeper Lock Screen Overlay (STEP 1) - 3D 32K HD EDITION (v0.8.6)
-   Full-screen 3D starfield lockscreen that renders on page load and
-   blocks every element behind it. z-index 9999 keeps it above the
-   entire WebUI so nothing behind is reachable before unlock.
-   Blur-free by design - pure crystal-clear 32K-grade rendering.
+   Gatekeeper Lock Screen Overlay - ULTRA 3D 32K HD EDITION (v0.8.8)
+   Full-screen deep-space lockscreen. ZERO images, ZERO blur, 100% pure
+   CSS: 3-layer shimmer starfield, aurora nebulae, 2 shooting stars,
+   3 holographic orbs, interactive 3D mouse-parallax tilt (JS drives
+   --gk-tilt-x/--gk-tilt-y), glass panel with 3D entrance + shine sweep,
+   radar rings + rotating scanner arc on the lock badge, breathing
+   golden-red 3D title. Crystal-clear 32K-grade rendering throughout.
    ===================================================================== */
 
 /* ------------------------- 3D deep-space stage ------------------------- */
@@ -20,7 +22,7 @@
   text-rendering: optimizeLegibility;
 }
 
-/* ------------------- 3D nebula + starfield layer ------------------- */
+/* ------------------- ULTRA nebula + starfield layer ------------------- */
 .gk-blur-layer {
   position: fixed;
   inset: 0;
@@ -28,7 +30,7 @@
   pointer-events: none;
   overflow: hidden;
   background:
-    /* star dust */
+    /* far star dust - layer 1 */
     radial-gradient(1px 1px at 8% 12%,    rgba(255,255,255,0.90) 0%, transparent 100%),
     radial-gradient(1.2px 1.2px at 17% 34%, rgba(255,255,255,0.70) 0%, transparent 100%),
     radial-gradient(1px 1px at 26% 61%,    rgba(200,215,255,0.80) 0%, transparent 100%),
@@ -41,12 +43,60 @@
     radial-gradient(1.2px 1.2px at 83% 91%, rgba(255,230,240,0.80) 0%, transparent 100%),
     radial-gradient(1px 1px at 91% 29%,    rgba(255,255,255,0.70) 0%, transparent 100%),
     radial-gradient(1.1px 1.1px at 96% 68%, rgba(200,220,255,0.60) 0%, transparent 100%),
-    /* nebulae */
+    /* mid star field - layer 2 (slightly larger) */
+    radial-gradient(1.6px 1.6px at 5% 47%,    rgba(255,255,255,0.85) 0%, transparent 100%),
+    radial-gradient(1.9px 1.9px at 21% 71%,   rgba(255,214,170,0.80) 0%, transparent 100%),
+    radial-gradient(1.7px 1.7px at 37% 22%,   rgba(160,200,255,0.85) 0%, transparent 100%),
+    radial-gradient(1.8px 1.8px at 49% 89%,   rgba(255,255,255,0.75) 0%, transparent 100%),
+    radial-gradient(1.6px 1.6px at 62% 33%,   rgba(255,120,160,0.70) 0%, transparent 100%),
+    radial-gradient(1.9px 1.9px at 77% 78%,   rgba(255,255,255,0.80) 0%, transparent 100%),
+    radial-gradient(1.7px 1.7px at 88% 16%,   rgba(180,215,255,0.75) 0%, transparent 100%),
+    /* bright near stars - layer 3 (4-point cross glints) */
+    radial-gradient(2.2px 2.2px at 13% 52%,  rgba(255,255,255,0.98) 0%, transparent 100%),
+    radial-gradient(2.4px 2.4px at 45% 13%,  rgba(160,205,255,0.95) 0%, transparent 100%),
+    radial-gradient(2.1px 2.1px at 71% 65%,  rgba(255,255,255,0.92) 0%, transparent 100%),
+    radial-gradient(2.3px 2.3px at 93% 46%,  rgba(255,225,190,0.95) 0%, transparent 100%),
+    /* aurora nebula sheets */
     radial-gradient(135% 135% at 18% 12%, rgba(52, 74, 168, 0.42), rgba(8, 10, 22, 0.18) 42%, transparent 64%),
     radial-gradient(115% 115% at 86% 82%, rgba(186, 36, 92, 0.30), rgba(8, 10, 22, 0.14) 46%, transparent 68%),
+    radial-gradient(160% 90% at 62% 30%, rgba(30, 200, 160, 0.10), transparent 55%),
     /* deep core */
     linear-gradient(180deg, #0a0e1e 0%, #06070f 55%, #04050c 100%);
-  animation: gk-blur-in 0.45s ease both;
+  animation: gk-starfield-in 0.45s ease both, gk-shimmer 6.8s ease-in-out infinite;
+}
+
+/* starfield shimmer - whole-dome brightness pulse (twinkle feel) */
+@keyframes gk-shimmer {
+  0%, 100% { filter: brightness(0.97) saturate(1.02); }
+  50%      { filter: brightness(1.07) saturate(1.1); }
+}
+
+/* shooting stars (pure CSS meteors) */
+.gk-meteor {
+  position: absolute;
+  width: 150px;
+  height: 2.2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent 0%, rgba(150,190,255,0.0) 55%, rgba(170,210,255,0.95) 88%, #ffffff 100%);
+  box-shadow: 0 0 8px 1px rgba(180,215,255,0.6);
+  filter: drop-shadow(0 0 12px rgba(150,190,255,0.9));
+  opacity: 0;
+  transform: rotate(-32deg);
+}
+.gk-meteor-1 { left: -12%; top: 7%; animation: gk-meteor-a 9s linear infinite; }
+.gk-meteor-2 { left: 38%; top: -14%; animation: gk-meteor-b 14s linear infinite; }
+
+@keyframes gk-meteor-a {
+  0%         { transform: translate3d(0, 0, 0) rotate(-32deg) scale(1); opacity: 0; }
+  1.5%       { opacity: 1; }
+  10%        { transform: translate3d(78vw, 46vh, 0) rotate(-32deg) scale(0.85); opacity: 1; }
+  12%, 100%  { opacity: 0; }
+}
+@keyframes gk-meteor-b {
+  0%         { transform: translate3d(0, 0, 0) rotate(-32deg) scale(0.9); opacity: 0; }
+  1.2%       { opacity: 1; }
+  7.5%       { transform: translate3d(-62vw, 62vh, 0) rotate(-32deg) scale(0.95); opacity: 1; }
+  9%, 100%   { opacity: 0; }
 }
 
 /* floating holographic orbs (3D depth parallax feel) */
@@ -61,7 +111,6 @@
   background: radial-gradient(circle, rgba(110, 150, 255, 0.20) 0%, rgba(110, 150, 255, 0.05) 55%, transparent 72%);
   animation: gk-orb-a 11s ease-in-out infinite;
 }
-
 .gk-blur-layer::after {
   content: "";
   position: absolute;
@@ -73,18 +122,32 @@
   background: radial-gradient(circle, rgba(255, 66, 100, 0.16) 0%, rgba(255, 66, 100, 0.04) 55%, transparent 72%);
   animation: gk-orb-b 14s ease-in-out infinite;
 }
-
+/* third small cyan orb via extra meteor slot styling on the stage */
+.gk-meteor-2::after {
+  content: "";
+  position: fixed;
+  right: 22%;
+  top: 18%;
+  width: 260px;
+  height: 260px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(40, 220, 190, 0.13) 0%, rgba(40, 220, 190, 0.03) 55%, transparent 74%);
+  animation: gk-orb-c 18s ease-in-out infinite;
+}
 @keyframes gk-orb-a {
   0%, 100% { transform: translate(0, 0) scale(1); }
   50%      { transform: translate(42px, -30px) scale(1.1); }
 }
-
 @keyframes gk-orb-b {
   0%, 100% { transform: translate(0, 0) scale(1); }
   50%      { transform: translate(-36px, 24px) scale(1.12); }
 }
-
-@keyframes gk-blur-in {
+@keyframes gk-orb-c {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.7; }
+  50%      { transform: translate(30px, 34px) scale(1.18); opacity: 1; }
+}
+@keyframes gk-starfield-in {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
@@ -100,22 +163,41 @@ html.has-gatekeeper .bg {
   visibility: hidden;
 }
 
-/* ------------------------- 3D glass panel ------------------------- */
+/* ----------------------- ULTRA 3D glass panel ----------------------- */
 .gk-panel {
   position: relative;
-  width: min(460px, calc(100vw - 48px));
-  padding: 34px 34px 28px;
-  border-radius: 22px;
+  width: min(476px, calc(100vw - 48px));
+  padding: 36px 36px 30px;
+  border-radius: 24px;
   background: linear-gradient(180deg, rgba(17, 24, 44, 0.96) 0%, rgba(9, 12, 24, 0.97) 100%);
   border: 1px solid rgba(255, 39, 64, 0.30);
   box-shadow:
-    0 34px 90px rgba(0, 0, 0, 0.78),
-    0 0 24px rgba(120, 150, 255, 0.10),
+    0 40px 100px rgba(0, 0, 0, 0.80),
+    0 0 30px rgba(80, 120, 255, 0.09),
+    0 0 18px rgba(255, 39, 64, 0.06),
     inset 0 2px 0 rgba(255, 255, 255, 0.05),
     inset 0 -12px 0 rgba(0, 0, 0, 0.45);
   color: #e8eaf2;
   text-align: center;
-  animation: gk-panel-in 0.52s cubic-bezier(0.16, 1.02, 0.3, 1.1) both;
+  transform-style: preserve-3d;
+  animation: gk-panel-in 0.6s cubic-bezier(0.16, 1.02, 0.3, 1.1) both,
+             gk-panel-glow 5.5s ease-in-out infinite;
+}
+
+/* breathing depth glow on the panel frame */
+@keyframes gk-panel-glow {
+  0%, 100% { box-shadow:
+      0 40px 100px rgba(0, 0, 0, 0.80),
+      0 0 22px rgba(80, 120, 255, 0.07),
+      0 0 14px rgba(255, 39, 64, 0.05),
+      inset 0 2px 0 rgba(255, 255, 255, 0.05),
+      inset 0 -12px 0 rgba(0, 0, 0, 0.45); }
+  50%      { box-shadow:
+      0 44px 110px rgba(0, 0, 0, 0.82),
+      0 0 42px rgba(80, 120, 255, 0.16),
+      0 0 26px rgba(255, 39, 64, 0.10),
+      inset 0 2px 0 rgba(255, 255, 255, 0.06),
+      inset 0 -12px 0 rgba(0, 0, 0, 0.45); }
 }
 
 /* periodic glass shine sweep across the panel (3D light) */
@@ -123,26 +205,26 @@ html.has-gatekeeper .bg {
   content: "";
   position: absolute;
   inset: 0;
-  border-radius: 22px;
+  border-radius: 24px;
   pointer-events: none;
   background: linear-gradient(120deg, transparent 34%, rgba(255, 255, 255, 0.09) 50%, transparent 66%);
   background-size: 240% 100%;
   animation: gk-shine 7s linear infinite;
 }
-
 @keyframes gk-shine {
   0%   { background-position: 130% 0; }
   55%  { background-position: -30% 0; }
   100% { background-position: -30% 0; }
 }
 
+/* 3D cinematic entrance; final keyframe drives the live tilt vars */
 @keyframes gk-panel-in {
-  from { transform: perspective(1100px) rotateX(26deg) rotateY(20deg) translateY(30px) scale(0.9); opacity: 0; }
-  60%  { transform: perspective(1100px) rotateX(7deg) rotateY(-4deg) translateY(-5px) scale(1.02); opacity: 1; }
-  to   { transform: perspective(1100px) rotateX(0deg) rotateY(0deg) translateY(0px) scale(1); opacity: 1; }
+  from { transform: perspective(1400px) rotateX(28deg) rotateY(22deg) translateY(38px) scale(0.88); opacity: 0; }
+  55%  { transform: perspective(1400px) rotateX(6deg) rotateY(-6deg) translateY(-6px) scale(1.04); opacity: 1; }
+  to   { transform: perspective(1400px) rotateX(var(--gk-tilt-x, 0deg)) rotateY(var(--gk-tilt-y, 0deg)) translateY(0px) scale(1); opacity: 1; }
 }
 
-/* ------------------------- 3D lock badge ------------------------- */
+/* ------------------------- ULTRA 3D lock badge ------------------------- */
 .gk-lock-badge {
   position: relative;
   width: 64px;
@@ -151,10 +233,12 @@ html.has-gatekeeper .bg {
   align-items: center;
   justify-content: center;
   margin: 0 auto 16px;
-  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.55));
+  filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.55));
   animation: gk-badge-bob 2.8s ease-in-out infinite;
+  transform-style: preserve-3d;
 }
 
+/* pulsing radar rings */
 .gk-lock-badge::before,
 .gk-lock-badge::after {
   content: "";
@@ -168,36 +252,57 @@ html.has-gatekeeper .bg {
   border-radius: 50%;
   border: 2px solid rgba(255, 39, 64, 0.45);
 }
-
 .gk-lock-badge::before { animation: gk-ring 2.4s ease-out infinite; }
 .gk-lock-badge::after  { animation: gk-ring 2.4s ease-out infinite 1.2s; }
+
+/* rotating scanner arc (security sweep) */
+.gk-scanner {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 98px;
+  height: 98px;
+  margin-left: -49px;
+  margin-top: -49px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: conic-gradient(from 0deg at 50% 50%,
+    rgba(255, 60, 90, 0) 0%, rgba(255, 60, 90, 0.75) 14%,
+    rgba(255, 60, 90, 0) 28%, rgba(110, 150, 255, 0.6) 44%,
+    rgba(110, 150, 255, 0) 60%);
+  -webkit-mask-image: radial-gradient(circle, transparent 52%, #000 100%);
+  mask-image: radial-gradient(circle, transparent 52%, #000 100%);
+  animation: gk-scanner-spin 3.4s linear infinite;
+}
+@keyframes gk-scanner-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
 
 @keyframes gk-ring {
   0%   { transform: scale(0.5) rotate(0deg); opacity: 0.9; }
   100% { transform: scale(1.65) rotate(45deg); opacity: 0; }
 }
-
 @keyframes gk-badge-bob {
   0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(-6px); }
+  50%      { transform: translateY(-7px); }
 }
 
-/* ------------------------- 3D title text ------------------------- */
+/* ------------------------- ULTRA 3D title text ------------------------- */
 .gk-title {
   margin: 0 0 6px;
-  font-size: 24px;
+  font-size: 26px;
   font-weight: 900;
-  letter-spacing: 1.2px;
+  letter-spacing: 1.4px;
   background: linear-gradient(115deg, #ffd166 0%, #ff5c3d 30%, #ff2740 55%, #ff5c3d 80%, #ffd166 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
   animation: gk-title-glow 3.4s ease-in-out infinite;
 }
-
 @keyframes gk-title-glow {
   0%, 100% { filter: drop-shadow(0 3px 5px rgba(150, 22, 40, 0.30)); }
-  50%      { filter: drop-shadow(0 4px 12px rgba(255, 92, 61, 0.55)); }
+  50%      { filter: drop-shadow(0 5px 16px rgba(255, 92, 61, 0.60)); }
 }
 
 .gk-sub {
@@ -212,7 +317,6 @@ html.has-gatekeeper .bg {
   width: 100%;
   text-align: left;
 }
-
 .gk-label {
   display: block;
   margin: 0 0 8px;
@@ -222,13 +326,11 @@ html.has-gatekeeper .bg {
   color: #8b98ae;
   text-transform: uppercase;
 }
-
 .gk-input-row {
   display: flex;
   align-items: center;
   gap: 10px;
 }
-
 .gk-input {
   flex: 1;
   min-width: 0;
@@ -246,7 +348,6 @@ html.has-gatekeeper .bg {
     0 4px 10px rgba(0, 0, 0, 0.35);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-
 .gk-input:focus {
   outline: none;
   border-color: #ff2740;
@@ -255,7 +356,6 @@ html.has-gatekeeper .bg {
     0 0 14px rgba(255, 39, 64, 0.22),
     inset 0 1px 2px rgba(255, 255, 255, 0.07);
 }
-
 .gk-submit {
   height: 46px;
   padding: 0 18px;
@@ -276,19 +376,16 @@ html.has-gatekeeper .bg {
   cursor: pointer;
   transition: transform 0.12s ease, filter 0.12s ease;
 }
-
 .gk-submit:hover {
   filter: brightness(1.14);
   transform: translateY(-1px);
 }
-
 .gk-submit:active {
   transform: translateY(1px) scale(0.97);
   box-shadow:
     0 1px 3px rgba(120, 14, 30, 0.5),
     inset 0 2px 6px rgba(0, 0, 0, 0.25);
 }
-
 .gk-submit svg {
   width: 15px;
   height: 15px;
@@ -303,7 +400,6 @@ html.has-gatekeeper .bg {
   gap: 12px;
   margin-top: 18px;
 }
-
 .gk-fingerprint {
   display: inline-flex;
   align-items: center;
@@ -322,17 +418,14 @@ html.has-gatekeeper .bg {
   cursor: pointer;
   transition: border-color 0.15s ease, transform 0.12s ease;
 }
-
 .gk-fingerprint:hover {
   border-color: #4d8bff;
   transform: translateY(-1px);
 }
-
 .gk-fingerprint svg {
   width: 18px;
   height: 18px;
 }
-
 .gk-hint {
   font-size: 12px;
   color: #74829a;
@@ -353,12 +446,10 @@ html.has-gatekeeper .bg {
   cursor: pointer;
   transition: border-color 0.15s ease, color 0.15s ease;
 }
-
 .gk-skip:hover {
   border-color: #ff2740;
   color: #ff6b80;
 }
-
 .gk-error {
   margin: 12px 0 0;
   font-size: 12.5px;
@@ -366,7 +457,6 @@ html.has-gatekeeper .bg {
   text-align: center;
   animation: gk-error-pop 0.24s ease both;
 }
-
 @keyframes gk-error-pop {
   from { transform: translateY(2px); opacity: 0; }
   to   { transform: translateY(0); opacity: 1; }
@@ -379,4 +469,16 @@ html.has-gatekeeper .bg {
   opacity: 0.55;
   cursor: wait;
   pointer-events: none;
+}
+
+/* Accessibility: honour reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+  .gk-blur-layer,
+  .gk-meteor,
+  .gk-panel::after,
+  .gk-lock-badge,
+  .gk-scanner,
+  .gk-title {
+    animation: none !important;
+  }
 }

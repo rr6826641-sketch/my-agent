@@ -1,3 +1,16 @@
+## [2026-09-11] v0.8.8 - ULTRA 3D 32K HD lock screen (image fully replaced)
+
+- feat(lockscreen): ULTRA 3D 32K HD redesign - 3-layer shimmer starfield (far dust /
+  mid field / bright 4-point glint stars), 2 pure-CSS shooting stars, aurora nebula
+  sheets + third cyan orb, interactive mouse-parallax 3D tilt on the glass panel
+  (JS drives --gk-tilt-x/--gk-tilt-y CSS vars through the entrance keyframe),
+  breathing depth glow, rotating scanner arc around the lock badge, upgraded
+  golden-red 3D title. Still 100%% pure CSS - zero images, zero blur.
+- fix(cache): /gatekeeper/lockscreen.css and .js now served with
+  Cache-Control: no-store + ?v=0.8.8 cache-bust link in index.html - the stale
+  1-hour cached stylesheet that kept showing the old wallpaper image is gone.
+- a11y: prefers-reduced-motion support added.
+
 ## [2026-09-11] v0.8.7 - ULTRA POWER MODE (uncensored max-capability profile)
 
 - feat(prompt): permanent ULTRA POWER MODE directive block added to system_prompt.txt -
