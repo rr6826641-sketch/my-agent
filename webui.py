@@ -775,6 +775,18 @@ def gatekeeper_lockscreen_js():
 _gk = None
 
 
+# STEP 2: dedicated auth handler blueprint (bcrypt + WebAuthn + session
+# tokens). Shares the same default gatekeeper store as the routes above.
+try:
+    from ai_agent.webui.auth import auth_bp
+
+    app.register_blueprint(auth_bp)
+except Exception:  # pragma: no cover - optional security layer
+    import traceback
+
+    traceback.print_exc()
+
+
 def _gatekeeper():
     global _gk
     if _gk is None:
