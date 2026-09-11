@@ -2795,6 +2795,52 @@ def api_subagents_continue(aid):
     return jsonify({"ok": True, **body})
 
 
+@app.route("/api/health")
+def api_health():
+    """v0.8.0 - lightweight liveness + route-readiness probe.
+    Reports process health, active run count and which model route
+    groups are configured - never leaks key material."""
+    try:
+        from ai_agent import __version__ as _hver
+    except Exception:
+        _hver = None
+    cfg = {}
+    try:
+        cfg = load_config() or {}
+    except Exception:
+        pass
+    providers = {}
+    eps = cfg.get("local_endpoints") or []
+    for grp in ("notrack", "openrouter", "venice", "huggingface"):
+        blk = None
+        for ep in eps:
+            if isinstance(ep, dict) and ep.get("name") == grp:
+                blk = ep
+                break
+        try:
+            envk = blk.get("api_key_env") if blk else None
+            providers[grp] = bool(
+                (envk and os.environ.get(envk))
+                or (blk and (blk.get("api_key") or blk.get("key") or blk.get("url")))
+            )
+        except Exception:
+            providers[grp] = False
+    active = 0
+    try:
+        active = len(_active_runs)
+    except Exception:
+        pass
+    return jsonify({
+        "ok": True,
+        "service": "my-agent",
+        "release": "v0.8.0",
+        "version": _hver,
+        "routes_configured": providers,
+        "active_runs": active,
+        "booted_s": max(0, int(time.time() - _WEBUI_BOOT_TS)),
+    })
+
+
 def main():
     ap = argparse.ArgumentParser(description="AI Agent Web UI")
     ap.add_argument("--port", type=int, default=8080)

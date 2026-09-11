@@ -187,3 +187,14 @@ Sare notable changes is project ke. Format: `[Semantic Versioning](https://semve
   printing only the final answer - full screen visibility of agent work.
 - feat(config): pin_uncensored + pin_strict enabled - uncensored model chain
   (notrack/venice/openrouter/hf-abliterated) locked as primary routing.
+## [2026-09-11] v0.8.0 - /api/health observability endpoint
+
+- feat(webui): new GET /api/health probe on the Flask app (port 9000) reporting
+  service name, release v0.8.0 + package version, routes_configured readiness
+  per provider slot (notrack/openrouter/venice/huggingface - true when the
+  matching api_key_env is set in the environment), active_runs count and
+  booted_s uptime. Lightweight liveness/route-readiness check for monitors and
+  uptime dashboards - never exposes key material, only boolean readiness.
+- test: live-verified on this host - HTTP 200 with all four uncensored route
+  slots reporting true (NOTRACK_API_KEY/OPENROUTER_API_KEY/VENICE_API_KEY/
+  HUGGINGFACE_API_KEY present), release v0.8.0, booted_s monotonic.
