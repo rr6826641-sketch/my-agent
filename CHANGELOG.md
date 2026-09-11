@@ -197,4 +197,12 @@ Sare notable changes is project ke. Format: `[Semantic Versioning](https://semve
   uptime dashboards - never exposes key material, only boolean readiness.
 - test: live-verified on this host - HTTP 200 with all four uncensored route
   slots reporting true (NOTRACK_API_KEY/OPENROUTER_API_KEY/VENICE_API_KEY/
-  HUGGINGFACE_API_KEY present), release v0.8.0, booted_s monotonic.
+  HUGGINGFACE_API_KEY present), release v0.8.0, booted_s monotonic.## [2026-09-11] v0.8.1 - /api/health per-route response-latency
+
+- feat(webui): /api/health now reports routes_latency_ms - real measured
+  round-trip latency per provider route (notrack/openrouter/venice/huggingface),
+  probed live from the server process via stdlib HEAD/TCP fallback (2.5s cap,
+  None when unreachable). routes_configured booleans kept for back-compat.
+- test: live-verified on this host - all four routes report positive latency
+  values (hf ~2.7s / notrack ~3.1s / openrouter ~3.3s / venice ~4.2s from
+  this host network), release v0.8.1, HTTP 200.

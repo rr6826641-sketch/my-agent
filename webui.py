@@ -2795,6 +2795,30 @@ def api_subagents_continue(aid):
     return jsonify({"ok": True, **body})
 
 
+
+def _probe_latency_ms(base_url, timeout=2.5):
+    """Cheap end-to-end latency probe (round-trip ms) for a route base_url.
+    Returns None when unreachable. Stdlib only: HTTP HEAD, TCP fallback."""
+    import socket
+    from urllib.parse import urlparse
+    t0 = time.time()
+    try:
+        from urllib.request import urlopen, Request
+        req = Request(base_url, method="HEAD", headers={"User-Agent": "my-agent-health/1.0"})
+        urlopen(req, timeout=timeout)
+        return max(1, int((time.time() - t0) * 1000))
+    except Exception:
+        pass
+    try:
+        u = urlparse(base_url)
+        host, port = u.hostname or "", (u.port or (443 if u.scheme == "https" else 80))
+        if host:
+            with socket.create_connection((host, port), timeout=1.5) as _s:
+                return max(1, int((time.time() - t0) * 1000))
+    except Exception:
+        pass
+    return None
+
 @app.route("/api/health")
 def api_health():
     """v0.8.0 - lightweight liveness + route-readiness probe.
@@ -2825,6 +2849,12 @@ def api_health():
             )
         except Exception:
             providers[grp] = False
+    latency = {}
+    for grp, blk in ((g, next((e for e in eps if isinstance(e, dict) and e.get("name") == g), None)) for g in ("notrack", "openrouter", "venice", "huggingface")):
+        if providers.get(grp) and blk:
+            latency[grp] = _probe_latency_ms(blk.get("base_url"))
+        else:
+            latency[grp] = None
     active = 0
     try:
         active = len(_active_runs)
@@ -2833,9 +2863,10 @@ def api_health():
     return jsonify({
         "ok": True,
         "service": "my-agent",
-        "release": "v0.8.0",
+        "release": "v0.8.1",
         "version": _hver,
         "routes_configured": providers,
+        "routes_latency_ms": latency,
         "active_runs": active,
         "booted_s": max(0, int(time.time() - _WEBUI_BOOT_TS)),
     })
