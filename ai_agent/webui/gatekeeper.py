@@ -368,6 +368,11 @@ class PasswordHasher:
 # TokenManager (stdlib HS256 JWT)
 # ---------------------------------------------------------------------------
 
+# Token lifetime when auto-lock is disabled (auto_lock_s == 0):
+# 30 days so the session does not silently die during long use.
+NO_AUTO_LOCK_TOKEN_TTL_S = 30 * 86400
+
+
 class TokenManager:
     """Minimal HS256 JWT manager (no external JWT library).
 
@@ -380,10 +385,8 @@ class TokenManager:
     GRACE_SECONDS = 300  # tokens stay valid up to 5 minutes past auto-lock
 
 
-# Token lifetime when auto-lock is disabled (auto_lock_s == 0):
-# 30 days so the session does not silently die during long use.
-NO_AUTO_LOCK_TOKEN_TTL_S = 30 * 86400
     SUBJECT = "gatekeeper"
+
 
     def __init__(self, device_key: bytes, master_hash: str):
         self._secret = TokenManager._derive_secret(device_key, master_hash)
