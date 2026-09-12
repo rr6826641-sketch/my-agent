@@ -1,0 +1,4 @@
+open 192.168.10.1
+anonymous
+anonymous
+quit
