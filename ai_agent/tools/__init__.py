@@ -55,6 +55,9 @@ from .auto_pilot import (
     tool_mission_vuln, tool_mission_report, tool_mission_resume,
     tool_mission_status, tool_mission_reset, tool_mission_payloads,
 )
+from .swarm_campaign import (
+    tool_swarm_campaign, tool_swarm_status,
+)
 from .web_fetch import fetch_url
 from .reasoning import tool_plan_task, tool_reason, tool_reflect
 from .search import (
@@ -1780,6 +1783,28 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                              "top_k": _str_prop("how many to show, default 10")},
               "required": ["target"]},
              lambda target="", top_k="": tool_mission_payloads(target, top_k)),
+        Tool("swarm_campaign",
+             "SWARM WAR-ROOM: parallel attack over MANY targets in one command. Fan out recon workers per host (port/SSL), then exploit workers per open service (CVE lookup + optional nuclei), merge everything into one markdown report and persist campaign state. Usage: swarm_campaign(targets='10.0.0.0/24') or swarm_campaign(targets='a.com,b.com', mode='recon'). Optional: mode='recon'|'exploit'|'full', max_workers (default 8), run_nuclei='true' adds nuclei template runs, budget_sec caps seconds, campaign_dir sets state dir.\n",
+             {"type": "object",
+              "properties": {
+                  "targets": _str_prop("hosts, IPs, CIDR subnet or octet range"),
+                  "mode": _str_prop("recon|exploit|full", "full"),
+                  "max_workers": _str_prop("parallel workers per phase", "8"),
+                  "run_nuclei": _str_prop("true/false - include nuclei runs"),
+                  "campaign_dir": _str_prop("state dir, default ./campaigns"),
+                  "budget_sec": _str_prop("max seconds for this call")},
+              "required": ["targets"]},
+             lambda targets="", mode="", max_workers="", run_nuclei="", campaign_dir="", budget_sec="": tool_swarm_campaign(
+                 targets, mode or "full", max_workers or "8",
+                 str(run_nuclei).lower() in ("1", "true", "yes"),
+                 campaign_dir, int(budget_sec or 280))),
+        Tool("swarm_status",
+             "SWARM WAR-ROOM: list all war-room campaign states, or inspect one by token. Usage: swarm_status(token='10.0.0.0_24') or swarm_status() to list all.",
+             {"type": "object",
+              "properties": {"token": _str_prop("campaign token (optional)"),
+                             "campaign_dir": _str_prop("state dir")},
+              "required": []},
+             lambda token="", campaign_dir="": tool_swarm_status(token, campaign_dir)),
 
 
         Tool("ffuf_fuzz", "Fast web fuzzing with ffuf (dir or vhost mode).",

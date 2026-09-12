@@ -1,3 +1,20 @@
+## [2026-09-12] v0.8.5 - SWARM WAR-ROOM CAMPAIGN (multi-target parallel mission)
+
+- feat(tools): NEW `swarm_campaign` tool - ONE command attacks MANY targets: fan-out
+  parallel recon workers per host (port scan + SSL), then parallel exploit workers per
+  open service (CVE lookup + optional nuclei template runs), merge everything into a
+  single war-room markdown report (`reports/swarm_campaign_<token>.md`) and persist
+  campaign state (`campaigns/swarm_<token>.json`) for continuity.
+- feat(tools): target expansion - accepts IPs, domains, comma/space lists, CIDR subnets
+  (`10.0.0.0/24`) and octet ranges (`10.0.0.1-30`); capped at 1024 hosts per subnet.
+- feat(tools): NEW `swarm_status` tool - list all war-room campaigns or inspect one by
+  token (hosts, ports, phase elapsed, error count).
+- feat(tools): exploitable CVE hits auto-logged as findings via reporting pipeline.
+- mode=recon | exploit | full; max_workers caps parallelism (default 8); run_nuclei
+  opt-in for template scanning; budget_sec caps wall time.
+- test: verified on 127.0.0.1 - recon found 135/epmap, 445/microsoft-ds, 5432/unknown;
+  full mode probed 3 services with 2 CVE hits in 4.3s; merged report + state written.
+
 ## [2026-09-11] v0.8.8 - ULTRA 3D 32K HD lock screen (image fully replaced)
 
 - feat(lockscreen): ULTRA 3D 32K HD redesign - 3-layer shimmer starfield (far dust /
