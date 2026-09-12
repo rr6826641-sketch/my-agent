@@ -873,6 +873,9 @@ const ActivityPanel = (() => {
   let thinkingRow = null;    // "Generating response" row
   let execSource = null;
   let execLine = 1;          // unique id for exec rows
+  let userScrolled = false;  // user scrolled up -> pause auto-scroll
+  let execLog = [];          // chronological execution log (EXECUTION LOG)
+  const LOG_MAX = 600;
 
   const byId = (id) => document.getElementById(id);
 
@@ -891,6 +894,25 @@ const ActivityPanel = (() => {
     return out;
   }
   const sanitize = sanitizeRaw;
+
+  // EXECUTION LOG: chronological, user-safe history of REAL events.
+  function logLine(type, tool, detail) {
+    const line = { ts: tsNow(), type: String(type || "").toUpperCase(), tool: tool || "", detail: sanitize(String(detail || "")) };
+    execLog.push(line);
+    if (execLog.length > LOG_MAX) execLog.shift();
+    const pre = byId("activity-log");
+    if (!pre) return;
+    pre.textContent = execLog.map((l) => l.ts + "  " + l.type.padEnd(20, " ") + (l.tool ? "[" + l.tool + "] " : "") + l.detail).join("\n");
+    const cnt = byId("activity-log-count");
+    if (cnt) cnt.textContent = execLog.length + " event" + (execLog.length === 1 ? "" : "s");
+    const body = byId("activity-log-body");
+    if (body && !body.hidden) body.scrollTop = body.scrollHeight;
+  }
+
+  // Auto-scroll helper: paused while the user browses history.
+  function autoScrollToBottom(box) {
+    if (!userScrolled && box) box.scrollTop = box.scrollHeight;
+  }
 
   function tsNow() {
     return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -976,7 +998,7 @@ const ActivityPanel = (() => {
       const old = rows.shift();
       if (old && old.parentNode) old.parentNode.removeChild(old);
     }
-    box.scrollTop = box.scrollHeight; // auto-scroll to newest
+    autoScrollToBottom(box); // auto-scroll to newest (paused after manual scroll-up)
     try { mirror(ico, title, sub, status); } catch (e) {}
     return {
       row, id,
@@ -1090,10 +1112,12 @@ const ActivityPanel = (() => {
         const cmd = sanitize(String(evt.command || evt.detail || evt.name || ""));
         const out = sanitize(String(evt.stdout || evt.stderr || ""));
         if (evt.status === "running") {
+          logLine("EXEC_STARTED", evt.step_type || "exec", cmd.slice(0, 120));
           const r = addRow("⚙", (evt.step_type || "tool").toUpperCase() + " — running", cmd, "running");
           if (r) r.row.dataset.eid = "exec" + evt.ts;
         } else {
           const ok = evt.status !== "failed" && evt.status !== "cancelled";
+          logLine("EXEC_" + (ok ? "COMPLETED" : "FAILED"), evt.step_type || "exec", (cmd + (out ? " — " + out.slice(0, 60) : "")).slice(0, 220));
           const rowsAll = byId("activity-timeline").querySelectorAll(".act-row");
           const last = rowsAll[rowsAll.length - 1];
           const r = addRow(ok ? "✓" : "✗", (evt.step_type || "tool").toUpperCase() + " — " + (ok ? "completed" : evt.status), cmd, ok ? "completed" : "failed");
@@ -1118,6 +1142,9 @@ const ActivityPanel = (() => {
     const tw = byId("activity-tools"); if (tw) tw.innerHTML = "";
     const fin = byId("activity-final"); if (fin) { fin.hidden = true; }
     rows = []; tools = []; openTools = [];
+  execLog = [];
+  const logPre = byId("activity-log"); if (logPre) logPre.textContent = "";
+  const logCnt = byId("activity-log-count"); if (logCnt) logCnt.textContent = "0 events";
     stepCounter = 0; processingRow = null; thinkingRow = null;
     clearMirror();
     emptyHint(true);
@@ -1126,9 +1153,22 @@ const ActivityPanel = (() => {
 
   // Mapper: one REAL chat-SSE event -> panel updates. Called once per
   // event, from the existing stream handler. Pure real events only.
+  const LOG_LBL = {
+    task_started: "TASK_STARTED", planning: "PLANNING", route: "MODEL_ROUTED",
+    pipeline_start: "PIPELINE_STARTED", stage_start: "STEP_STARTED",
+    stage_complete: "STEP_COMPLETED", pipeline_done: "TASK_COMPLETED",
+    final: "TASK_COMPLETED", llm: "GENERATING", delta: "PROCESSING",
+    tool_call: "TOOL_STARTED", tool_result: "TOOL_COMPLETED",
+    step_approval: "WAITING_APPROVAL", error: "TASK_FAILED",
+    artifacts: "ARTIFACTS_SAVED", notice: "RETRY",
+    task_completed: "TASK_COMPLETED", task_failed: "TASK_FAILED"
+  };
   function onLifecycle(e) {
     const type = e.type;
     try {
+      logLine(LOG_LBL[type] || type || "EVENT",
+        (String(type).indexOf("tool") >= 0 ? String(e.name || "tool") : String(e.scope || "")),
+        String(e.detail || e.reason || e.content || "").slice(0, 90));
       if (type === "task_started") {
         setStatus("RUNNING", "RUNNING", "smart");
         addRow("●", "Task started", "", "running");
@@ -1278,6 +1318,42 @@ const ActivityPanel = (() => {
 
   const clearBtn = byId("activity-clear");
   if (clearBtn) clearBtn.addEventListener("click", reset);
+
+  // ▼ LIVE scroll-jump: appears after a manual scroll-up; clicking it
+  // jumps back to the newest event and resumes auto-scroll.
+  const actBox = byId("activity-timeline");
+  const liveBtn = byId("act-live-btn");
+  if (actBox && liveBtn) {
+    actBox.addEventListener("scroll", () => {
+      const dist = actBox.scrollHeight - actBox.scrollTop - actBox.clientHeight;
+      if (dist > 80) {
+        userScrolled = true;
+        if (liveBtn.hidden) liveBtn.hidden = false;
+      } else if (userScrolled) {
+        userScrolled = false;
+        liveBtn.hidden = true;
+      }
+    });
+    liveBtn.addEventListener("click", () => {
+      userScrolled = false;
+      actBox.scrollTop = actBox.scrollHeight;
+      liveBtn.hidden = true;
+    });
+  }
+
+  // EXECUTION LOG: collapsible chronological log of real events.
+  const logToggle = byId("activity-log-toggle");
+  const logBody = byId("activity-log-body");
+  if (logToggle && logBody) {
+    logToggle.addEventListener("click", () => {
+      const wasCollapsed = logBody.hidden;
+      logBody.hidden = !wasCollapsed;
+      logToggle.setAttribute("aria-expanded", String(wasCollapsed));
+      const lc = byId("activity-log-caret");
+      if (lc) lc.textContent = wasCollapsed ? "▴" : "▾";
+      if (wasCollapsed) logBody.scrollTop = logBody.scrollHeight;
+    });
+  }
 
   const lfToggle = byId("lf-toggle");
   if (lfToggle) lfToggle.addEventListener("click", function () {

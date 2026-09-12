@@ -420,7 +420,7 @@
       <div class="activity-body">
         <div class="activity-cols">
           <div class="activity-col activity-col-main">
-            <div class="activity-panel-head">⚡ PROGRESS TIMELINE</div>
+            <div class="activity-panel-head">⚡ PROGRESS TIMELINE<button type="button" class="act-live-btn" id="act-live-btn" hidden title="Jump back to the latest event">⬇ LIVE</button></div>
             <div class="activity-timeline" id="activity-timeline">
               <p class="activity-empty" id="activity-empty">No active run — send a message in Chat and every real Agent action (planning, tool calls, terminal commands, sub-agents, final result) will appear here live.</p>
             </div>
@@ -435,6 +435,17 @@
         <div class="activity-final" id="activity-final" hidden>
           <div class="activity-final-head">✓ TASK COMPLETED — FINAL RESULT</div>
           <div class="activity-final-body" id="activity-final-body"></div>
+        </div>
+        <div class="activity-log-wrap" id="activity-log-wrap">
+          <button type="button" class="activity-log-toggle" id="activity-log-toggle" aria-expanded="false" title="Expand / collapse the EXECUTION LOG">
+            <span class="activity-log-gear" aria-hidden="true">⚤</span>
+            EXECUTION LOG
+            <span class="activity-log-count" id="activity-log-count">0 events</span>
+            <span class="activity-log-caret" id="activity-log-caret" aria-hidden="true">▾</span>
+          </button>
+          <div class="activity-log-body" id="activity-log-body" hidden>
+            <pre class="activity-log-pre" id="activity-log"></pre>
+          </div>
         </div>
       </div>
     </section>

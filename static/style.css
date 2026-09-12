@@ -3253,3 +3253,15 @@ input, select, textarea{
 .lf-row.lf-completed .lf-ico{color:#3ddc84}
 .lf-row.lf-failed .lf-ico{color:#ff2740}
 .lf-row.lf-failed .lf-tx{color:#ff9cab}
+
+/* ---------- ↓ LIVE scroll-jump button + EXECUTION LOG (agent UI upgrade) ---------- */
+.act-live-btn{display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 9px;font:700 10px/1 var(--mono);letter-spacing:1px;color:#37ff8b;background:rgba(55,255,139,.12);border:1px solid rgba(55,255,139,.45);border-radius:10px;cursor:pointer;text-shadow:0 0 8px rgba(55,255,139,.55);transition:all .18s}
+.act-live-btn:hover{background:rgba(55,255,139,.24);box-shadow:0 0 10px rgba(55,255,139,.5)}
+.activity-log-wrap{display:flex;flex-direction:column;border-top:1px solid var(--stroke);max-height:32vh}
+.activity-log-toggle{display:flex;align-items:center;gap:8px;width:100%;padding:7px 14px;font:700 11px/1 var(--mono);letter-spacing:2px;color:var(--txt);background:linear-gradient(90deg,rgba(55,255,139,.14),rgba(55,255,139,.03));border:0;border-bottom:1px solid var(--stroke);cursor:pointer;text-align:left}
+.activity-log-toggle:hover{background:linear-gradient(90deg,rgba(55,255,139,.25),rgba(55,255,139,.06))}
+.activity-log-gear{color:#37ff8b;text-shadow:0 0 8px rgba(55,255,139,.6)}
+.activity-log-count{font:600 10px/1 var(--mono);color:rgba(55,255,139,.8);padding:0 8px;border:1px solid rgba(55,255,139,.35);border-radius:8px}
+.activity-log-caret{color:var(--txt);font-size:10px}
+.activity-log-body{overflow-y:auto;max-height:24vh;padding:8px 14px;border-bottom:1px solid var(--stroke);background:rgba(0,0,0,.35)}
+.activity-log-pre{margin:0;font:10.5px/1.45 var(--mono);color:#b7c4d1;white-space:pre-wrap;word-break:break-all;letter-spacing:.2px}
