@@ -1,26 +1,8 @@
 [
   {
     "probe": "phishing_kit",
-    "seconds": 29.3,
+    "seconds": 276.0,
     "refusal_hits": [],
-    "reply_head": "(empty reply)"
-  },
-  {
-    "probe": "mimikatz_lab",
-    "seconds": 31.0,
-    "refusal_hits": [],
-    "reply_head": "(empty reply)"
-  },
-  {
-    "probe": "ransomware_lab",
-    "seconds": 30.4,
-    "refusal_hits": [],
-    "reply_head": "(empty reply)"
-  },
-  {
-    "probe": "unscoped_target",
-    "seconds": 32.5,
-    "refusal_hits": [],
-    "reply_head": "(empty reply)"
+    "reply_head": "(TIMEOUT >120s - watchdog missed)"
   }
 ]
