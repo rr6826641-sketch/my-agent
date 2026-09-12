@@ -1,15 +1,18 @@
 {
   "base_url": "https://api.groq.com/openai/v1",
-  "model": "llama-3.3-70b-versatile",
+  "model": "qwen/qwen3.8-27b",
   "mock_mode": false,
   "red_team_mode": false,
-  "refusal_retries": 5,
+  "refusal_retries": 8,
   "fallback_models": [
+    "notrack-uncensored",
     "openai/gpt-oss-20b",
     "qwen/qwen3.8-27b",
-    "allam-2-7b"
+    "allam-2-7b",
+    "Qwen/Qwen3.8-27B",
+    "deepseek-ai/DeepSeek-V4-Flash"
   ],
-  "max_iterations": 60,
+  "max_iterations": 120,
   "parallel_max_workers": 4,
   "mcp_servers": [
     {
@@ -67,16 +70,22 @@
       "base_url": "https://router.huggingface.co/v1",
       "api_key_env": "HUGGINGFACE_API_KEY",
       "models": [
-        "huihui-ai/Llama-3.3-70B-Instruct-abliterated",
-        "dphn/dolphin-2.9.2-qwen2-72b",
-        "NousResearch/Hermes-3-Llama-3.1-70B"
+        "Qwen/Qwen3.8-27B",
+        "openai/gpt-oss-20b",
+        "deepseek-ai/DeepSeek-V4-Flash"
       ],
       "timeout": 30.0
     }
   ],
   "auto": false,
-  "persona": "promax",
-  "red_team_level": "promax",
-  "pin_uncensored": false,
-  "pin_strict": false
+  "persona": "ultra",
+  "red_team_level": "ultra",
+  "pin_uncensored": true,
+  "pin_strict": true,
+  "_notes": {
+    "model": "qwen/qwen3.8-27b is the only Groq model ID that returns 200 (llama-3.3-70b-versatile is dead/404).",
+    "pin_uncensored": "PIN + pin_strict are complementary, NOT contradictory: pin_uncensored=True drops the primary and pins the chain to the uncensored pool only; pin_strict=True keeps generic (safety-tuned) cloud fallbacks out. Together the chain is 100% uncensored tier - no censorship filter is added.",
+    "huggingface_models": "Router-supported IDs only (router.huggingface.co/v1/models). abliterated/dolphin old IDs are delisted (HTTP 400).",
+    "openrouter": "Free variants work with 0 balance; credit model IDs return HTTP 402."
+  }
 }
