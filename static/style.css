@@ -3265,3 +3265,65 @@ input, select, textarea{
 .activity-log-caret{color:var(--txt);font-size:10px}
 .activity-log-body{overflow-y:auto;max-height:24vh;padding:8px 14px;border-bottom:1px solid var(--stroke);background:rgba(0,0,0,.35)}
 .activity-log-pre{margin:0;font:10.5px/1.45 var(--mono);color:#b7c4d1;white-space:pre-wrap;word-break:break-all;letter-spacing:.2px}
+
+/* ============================================================
+   COMMAND CENTER — live execution upgrade (append-only, PHASE 1)
+   Premium dark/red cybersecurity status bar: blinking system
+   LED, state text, real step counter, LIVE badge, scanline
+   overlay while the Agent executes + terminal block cursor on
+   running timeline rows. Pure additive CSS, no existing
+   selectors touched.
+   ============================================================ */
+.cc-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.cc-status{
+  display:flex;align-items:center;gap:9px;
+  padding:5px 12px 5px 10px;
+  border:1px solid rgba(255,39,64,.45);
+  border-radius:24px;
+  background:linear-gradient(135deg,rgba(30,0,8,.92),rgba(8,0,3,.96));
+  box-shadow:0 0 18px -6px rgba(255,39,64,.7), inset 0 1px 0 rgba(255,255,255,.07);
+  font:700 10px var(--mono);letter-spacing:1.6px;color:var(--txt);
+  white-space:nowrap;
+}
+.cc-led{width:10px;height:10px;border-radius:50%;background:#3a3f4b;flex:none;position:relative;transition:background .25s ease, box-shadow .25s ease}
+.cc-led::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1px solid currentColor;opacity:.3;transition:opacity .25s ease}
+.cc-status[data-state="RUNNING"] .cc-led{background:#ff2740;box-shadow:0 0 10px 2px rgba(255,39,64,.95);animation:ccLedPulse 1s ease-in-out infinite}
+.cc-status[data-state="RUNNING"] .cc-led::after{border-color:#ff2740;animation:ccLedRing 1s ease-out infinite}
+.cc-status[data-state="PLANNING"] .cc-led{background:#ffb020;box-shadow:0 0 10px 2px rgba(255,176,32,.9);animation:ccLedPulse 1.2s ease-in-out infinite}
+.cc-status[data-state="PLANNING"] .cc-led::after{border-color:#ffb020;animation:ccLedRing 1.2s ease-out infinite}
+.cc-status[data-state="VERIFYING"] .cc-led{background:#7c5cff;box-shadow:0 0 10px 2px rgba(124,92,255,.85);animation:ccLedPulse 1.1s ease-in-out infinite}
+.cc-status[data-state="VERIFYING"] .cc-led::after{border-color:#7c5cff;animation:ccLedRing 1.1s ease-out infinite}
+.cc-status[data-state="WAITING"] .cc-led{background:#ffb020;box-shadow:0 0 6px 1px rgba(255,176,32,.5);animation:ccBlinkTxt 2s ease-in-out infinite}
+.cc-status[data-state="COMPLETED"] .cc-led{background:#37ff8b;box-shadow:0 0 10px 2px rgba(55,255,139,.85)}
+.cc-status[data-state="COMPLETED"] .cc-led::after{border-color:#37ff8b}
+.cc-status[data-state="FAILED"] .cc-led{background:#ff2740;box-shadow:0 0 12px 3px rgba(255,39,64,1);animation:ccErrBlink .5s steps(2) infinite}
+.cc-status[data-state="FAILED"] .cc-led::after{border-color:#ff2740;border-width:2px}
+.cc-mode{color:#ff7b8c;text-shadow:0 0 8px rgba(255,39,64,.65);letter-spacing:2.2px}
+.cc-div{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.28);flex:none}
+.cc-state{color:#fff;min-width:66px;text-align:center}
+.cc-status[data-state="RUNNING"] .cc-state,.cc-status[data-state="VERIFYING"] .cc-state{animation:ccBlinkTxt 1.1s ease-in-out infinite;text-shadow:0 0 10px rgba(255,39,64,.8)}
+.cc-status[data-state="FAILED"] .cc-state{color:#ff5f74}
+.cc-status[data-state="COMPLETED"] .cc-state{color:#37ff8b}
+.cc-step{color:#ffb9c4;border:1px solid rgba(255,90,110,.35);border-radius:20px;padding:3px 8px;background:rgba(255,39,64,.08);letter-spacing:1.4px}
+.cc-live{color:#37ff8b;border:1px solid rgba(55,255,139,.5);border-radius:20px;padding:3px 8px;background:rgba(55,255,139,.08);animation:ccBlinkTxt 1.4s ease-in-out infinite;text-shadow:0 0 8px rgba(55,255,139,.7)}
+@keyframes ccBlinkTxt{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes ccLedPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.72;transform:scale(1.25)}}
+@keyframes ccLedRing{0%{transform:scale(.55);opacity:.9}100%{transform:scale(1.7);opacity:0}}
+@keyframes ccErrBlink{0%,100%{opacity:1}50%{opacity:.2}}
+
+/* CRT scanline overlay while the Agent executes (purely visual) */
+.activity-body.cc-live-body{position:relative}
+.activity-body.cc-live-body::before{
+  content:"";position:absolute;inset:0;pointer-events:none;z-index:1;border-radius:var(--rad);
+  background:repeating-linear-gradient(0deg,rgba(255,39,64,.045) 0 1px,transparent 1px 3px);
+  animation:ccScan 9s linear infinite;
+}
+@keyframes ccScan{0%{background-position:0 0}100%{background-position:0 12px}}
+
+/* terminal block cursor on the currently-running timeline row */
+.act-row.running .act-title::after{
+  content:"\258A";display:inline-block;margin-left:4px;vertical-align:-1px;
+  color:#ff2740;font-size:11px;line-height:1;
+  animation:ccBlinkTxt .9s steps(2) infinite;
+  text-shadow:0 0 8px rgba(255,39,64,.95);
+}

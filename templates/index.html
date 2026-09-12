@@ -411,13 +411,20 @@
             <p>The panel shows REAL execution events streamed live from the running Agent — nothing is fabricated.</p>
           </div>
         </div>
-        <div class="header-actions">
-          <span class="pill smart" id="activity-status-pill" title="Execution stream state"><i class="led amber" id="activity-led"></i><span id="activity-status-text">WAITING</span></span>
+        <div class="header-actions cc-actions">
+          <div class="cc-status" id="cc-status" data-state="IDLE" title="Real-time Agent execution state">
+            <span class="cc-led" id="cc-led" aria-hidden="true"></span>
+            <span class="cc-mode" id="cc-mode">COMMAND CENTER</span>
+            <span class="cc-div" aria-hidden="true"></span>
+            <span class="cc-state" id="cc-state">IDLE</span>
+            <span class="cc-step" id="cc-step">STEP 0</span>
+            <span class="cc-live" id="cc-live" hidden>&#9679; LIVE</span>
+          </div>
           <button class="pill export" id="activity-clear" title="Clear the activity log">🗑 CLEAR</button>
         </div>
       </header>
 
-      <div class="activity-body">
+      <div class="activity-body" id="activity-body">
         <div class="activity-cols">
           <div class="activity-col activity-col-main">
             <div class="activity-panel-head">⚡ PROGRESS TIMELINE<button type="button" class="act-live-btn" id="act-live-btn" hidden title="Jump back to the latest event">⬇ LIVE</button></div>

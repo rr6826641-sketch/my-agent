@@ -1031,6 +1031,12 @@ def api_chat():
                 q.put_nowait(evt)
             except queue.Full:
                 return False
+            # PHASE 1 - also fan lifecycle onto the LIVE exec stream so the
+            # activity panel shows task_started/planning immediately.
+            try:
+                hub.emit(evt)
+            except Exception:
+                pass
             return True
 
         _push_lifecycle({"type": "task_started", "run_id": run_id,
@@ -1123,6 +1129,20 @@ def api_chat():
                     stop_event.set()
                     run_iter.close()
                     break
+                # PHASE 2 - publish REAL execution events onto the shared hub
+                # so /api/exec/stream fans them to the LIVE execution panel.
+                # Delta/thinking chunks are skipped: they are already on the
+                # chat SSE and would flood the replay history. Never raises.
+                if etype in ("tool_call", "tool_result", "stage_start",
+                             "stage_complete", "pipeline_start",
+                             "pipeline_done", "final", "error",
+                             "planning", "route", "task_started",
+                             "task_completed", "task_failed",
+                             "terminal", "command"):
+                    try:
+                        hub.emit(event)
+                    except Exception:
+                        pass
         except RunCancelled:
             pass  # user pressed Stop; clean shutdown below
             _mark_task_failed("cancelled by user (Stop pressed)")

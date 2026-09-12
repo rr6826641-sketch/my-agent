@@ -869,6 +869,7 @@ const ActivityPanel = (() => {
   let openTools = [];   // stack of started-but-unfinished tool cards
   let runState = "WAITING";
   let stepCounter = 0;
+  let totalSteps = 0;          // announced stage count (0 = unknown)
   let processingRow = null;  // "Processing result" row
   let thinkingRow = null;    // "Generating response" row
   let execSource = null;
@@ -930,13 +931,30 @@ const ActivityPanel = (() => {
 
   function setStatus(state, text, cls) {
     runState = state;
+    // legacy markup fallback (kept for compatibility)
     const pill = byId("activity-status-pill");
     const led = byId("activity-led");
     const txt = byId("activity-status-text");
-    if (!pill) return;
-    pill.className = "pill " + (cls || "smart");
+    if (pill) pill.className = "pill " + (cls || "smart");
     if (led) led.className = "led " + (state === "RUNNING" ? "green" : state === "FAILED" ? "red" : state === "COMPLETED" ? "green" : "amber");
     if (txt) txt.textContent = text || state;
+    // COMMAND CENTER status bar — LED, state text, LIVE badge, scanlines
+    const st = byId("cc-status");
+    const stx = byId("cc-state");
+    const live = byId("cc-live");
+    if (st) st.dataset.state = state || "IDLE";
+    if (stx) stx.textContent = text || state || "IDLE";
+    if (live) live.hidden = !(state === "RUNNING" || state === "PLANNING" || state === "WAITING" || state === "VERIFYING");
+    const body = byId("activity-body");
+    if (body) body.classList.toggle("cc-live-body", state === "RUNNING" || state === "PLANNING" || state === "VERIFYING");
+  }
+
+  // STEP COUNTER — real progress only: "STEP 3 / 7" when the run
+  // announced a stage count, otherwise just "STEP 3". Never fabricates.
+  function updateStepCounter() {
+    const el = byId("cc-step");
+    if (!el) return;
+    el.textContent = totalSteps > 0 ? ("STEP " + stepCounter + " / " + totalSteps) : ("STEP " + stepCounter);
   }
 
   function emptyHint(on) {
@@ -1145,10 +1163,11 @@ const ActivityPanel = (() => {
   execLog = [];
   const logPre = byId("activity-log"); if (logPre) logPre.textContent = "";
   const logCnt = byId("activity-log-count"); if (logCnt) logCnt.textContent = "0 events";
-    stepCounter = 0; processingRow = null; thinkingRow = null;
+    stepCounter = 0; totalSteps = 0; processingRow = null; thinkingRow = null;
     clearMirror();
     emptyHint(true);
-    setStatus("WAITING", "WAITING", "smart");
+    updateStepCounter();
+    setStatus("IDLE", "IDLE", "smart");
   }
 
   // Mapper: one REAL chat-SSE event -> panel updates. Called once per
@@ -1175,6 +1194,7 @@ const ActivityPanel = (() => {
         return;
       }
       if (type === "planning") {
+        setStatus("PLANNING", "PLANNING", "smart");
         addRow("→", "Analyzing request — building execution plan", e.detail || "", "running");
         return;
       }
@@ -1184,12 +1204,16 @@ const ActivityPanel = (() => {
       }
       if (type === "pipeline_start") {
         stepCounter = 0;
+        totalSteps = (e.stages || []).length || 0;
+        updateStepCounter();
         pipeStep = 0;
         addRow("●", "Autonomous pipeline started", (e.target || "") + " · " + ((e.stages || []).length || 4) + " stages", "running");
         return;
       }
       if (type === "stage_start") {
         pipeStep = (e.num != null ? e.num : (pipeStep + 1));
+        stepCounter = pipeStep;
+        updateStepCounter();
         pipeRows[pipeStep] = addRow("→", "Stage " + pipeStep + ": " + (e.title || ""), "", "running");
         return;
       }
@@ -1216,6 +1240,7 @@ const ActivityPanel = (() => {
         if (processingRow) { processingRow.set("completed", "✓ Result obtained"); processingRow = null; }
         if (thinkingRow) { thinkingRow.set("completed", "✓ Reasoning complete"); thinkingRow = null; }
         stepCounter += 1;
+        updateStepCounter();
         const t = addRow("●", "Executing tool: " + (e.name || "tool"), "Step " + stepCounter + " — " + shortArgs(e.arguments), "running");
         const rec = addToolCard(e.name || "tool", e.arguments, e.id, "running");
         if (t && rec) rec.toolRow = t;
