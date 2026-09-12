@@ -100,6 +100,9 @@ MODEL_CATALOG = [
     {"id": "cognitivecomputations/dolphin-mistral-24b-venice-edition",
      "label": "Dolphin Mistral 24B", "tag": "uncensored", "uncensored": True,
      "desc": "Top uncensored — cyber security / recon / red-team tasks"},
+    {"id": "notrack-uncensored",
+     "label": "NoTrack Uncensored (35B MoE)", "tag": "uncensored", "uncensored": True,
+     "desc": "Private zero-filter uncensored — no system prompt, no topic filter, no logs (api.notrack.ai)"},
     {"id": "thinkingmachines/inkling:free",
      "label": "Inkling (Free)", "tag": "free", "uncensored": True,
      "desc": "Free uncensored model"},
@@ -265,8 +268,8 @@ def _kw_res(words):
 
 
 MODEL_ROUTES = {
-    "cyber": "cognitivecomputations/dolphin-mistral-24b-venice-edition",
-    "uncensored": "thinkingmachines/inkling:free",
+    "cyber": "notrack-uncensored",
+    "uncensored": "notrack-uncensored",
     "coding": "deepseek/deepseek-r1",
     # flagship reasoning: complex logic / architecture / code analysis
     "reasoning": "deepseek/deepseek-r1",
@@ -282,9 +285,9 @@ MODEL_ROUTES = {
 # cfg["red_team_mode"] is true; the stock routes above stay untouched
 # otherwise (existing router regression tests keep passing).
 REDTEAM_ROUTE_LOCK = {
-    "uncensored": "thinkingmachines/inkling:free",
+    "uncensored": "notrack-uncensored",
     "reasoning": "nousresearch/hermes-4-405b",
-    "cyber": "nousresearch/hermes-4-405b",
+    "cyber": "notrack-uncensored",
     "coding": "qwen/qwen3-coder",
     "general": "cognitivecomputations/dolphin-mistral-24b-venice-edition",
 }
