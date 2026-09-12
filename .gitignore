@@ -76,3 +76,6 @@ observations/
 # Scratch / temp patch files
 _gk_semantic_test.py
 _patch_gk_tmp.py
+
+# AUTO-PILOT campaign state (per-target runtime data)
+campaigns/
