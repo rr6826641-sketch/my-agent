@@ -72,6 +72,51 @@ _NGRAM_RANGE = (2, 5)
 
 MAX_TEXT_CHARS = 8000
 _DEFAULT_PERSIST_FILE = "episodic_vectors.json"
+def _atomic_replace_retry(src, dst, attempts=4, delay=0.2):
+    """Windows file locks (WinError 32) are usually transient: retry
+    os.replace with backoff before giving up to the sidecar fallback.
+    Raises the last OSError when all attempts fail."""
+    attempts = max(1, int(attempts))
+    last = None
+    for i in range(attempts):
+        try:
+            os.replace(src, dst)
+            return True
+        except OSError as exc:
+            last = exc
+            if i < attempts - 1:
+                logger.warning(
+                    "episodic store save locked (%s); retry %d/%d",
+                    exc, i + 1, attempts)
+                time.sleep(delay * 2 ** i)
+    raise last if last is not None else OSError("replace failed")
+
+
+def _sidecar_fallback(store, exc):
+    """Reliability net for a permanently locked main file: write the
+    full vector state to a timestamped sidecar so ZERO memory is
+    lost.  The lock usually belongs to a running webui instance that
+    holds memory/episodic_vectors.json open; once it closes, the
+    sidecar merges automatically on next load."""
+    try:
+        os.makedirs(store._persist_dir, exist_ok=True)
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        base = str(store._local_path)
+        if base.endswith(".json"):
+            base = base[:-5]
+        side = "%s.locked-%s.json" % (base, ts)
+        with open(side, "w", encoding="utf-8") as fh:
+            json.dump(store._snapshot_docs(), fh, ensure_ascii=False,
+                      separators=(",", ":"))
+        logger.warning(
+            "episodic store save failed (%s); state backed up to %s - "
+            "close the locking process (agent webui) to unlock the "
+            "main file; sidecar merges automatically on next load",
+            exc, side)
+    except Exception as e2:
+        logger.warning("episodic store sidecar fallback failed too: %s",
+                       e2)
+
 
 # Bump whenever the numeric embedding scheme changes so persisted dense
 # vectors are transparently re-embedded on next load (v1/v2 = old).
@@ -744,20 +789,59 @@ class EpisodicVectorMemory:
             logger.warning("episodic store load failed: %s", exc)
             self._embed_version = _EMBED_VERSION
             self._docs = []
+        self._merge_sidecars()
+
+    def _snapshot_docs(self):
+        return {"version": 2, "backend": self._backend,
+                "engine": self._engine,
+                "embed_version": _EMBED_VERSION,
+                "docs": self._docs}
 
     def _save_local(self):
         try:
             os.makedirs(self._persist_dir, exist_ok=True)
             tmp = self._local_path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump({"version": 2, "backend": self._backend,
-                           "engine": self._engine,
-                           "embed_version": _EMBED_VERSION,
-                           "docs": self._docs}, fh,
-                          ensure_ascii=False, separators=(",", ":"))
-            os.replace(tmp, self._local_path)
+                json.dump(self._snapshot_docs(), fh, ensure_ascii=False,
+                          separators=(",", ":"))
+            _atomic_replace_retry(tmp, self._local_path)
         except Exception as exc:
-            logger.warning("episodic store save failed: %s", exc)
+            _sidecar_fallback(self, exc)
+
+    def _merge_sidecars(self):
+        """Bring records that were parked in a locked-sidecar backup
+        (WinError 32 from a process holding the main file open) back into
+        the in-memory index.  Hash-deduped, so no record is ever doubled
+        and none is ever lost across sessions."""
+        merged = 0
+        try:
+            files = sorted(
+                f for f in os.listdir(self._persist_dir)
+                if f.startswith("episodic_vectors.locked-")
+                and f.endswith(".json"))
+        except OSError:
+            return 0
+        for fn in files:
+            try:
+                with open(os.path.join(self._persist_dir, fn),
+                          "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+            except Exception:
+                continue
+            for rec in (data.get("docs") if isinstance(data, dict)
+                        else data) or []:
+                digest = _sha(rec.get("text", ""), rec.get("meta") or {})
+                if digest in self._known_hashes:
+                    continue
+                self._known_hashes.add(digest)
+                self._docs.append(rec)
+                merged += 1
+        if merged:
+            logger.warning(
+                "episodic store: merged %d record(s) from locked sidecar "
+                "backup(s) - main file was locked (WinError 32) the last "
+                "time it was written", merged)
+        return merged
 
 
 # ---------------------------------------------------------------------------

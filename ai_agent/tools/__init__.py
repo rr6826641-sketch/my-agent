@@ -53,7 +53,7 @@ from .web_search import search_web
 from .auto_pilot import (
     tool_attack_mission, tool_mission_recon, tool_mission_scan,
     tool_mission_vuln, tool_mission_report, tool_mission_resume,
-    tool_mission_status, tool_mission_reset,
+    tool_mission_status, tool_mission_reset, tool_mission_payloads,
 )
 from .web_fetch import fetch_url
 from .reasoning import tool_plan_task, tool_reason, tool_reflect
@@ -1773,6 +1773,14 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                              "campaign_dir": _str_prop("state dir")},
               "required": ["target"]},
              lambda target="", campaign_dir="": tool_mission_reset(target, campaign_dir)),
+        Tool("mission_payloads",
+             "AUTO-PILOT campaign continuity: ranked payload-effectiveness memory for a target - whatever worked on this host before. Mission scans seed dir hits here; exploit payloads also get recorded per host.",
+             {"type": "object",
+              "properties": {"target": _str_prop("IP or domain"),
+                             "top_k": _str_prop("how many to show, default 10")},
+              "required": ["target"]},
+             lambda target="", top_k="": tool_mission_payloads(target, top_k)),
+
 
         Tool("ffuf_fuzz", "Fast web fuzzing with ffuf (dir or vhost mode).",
              {"type": "object",

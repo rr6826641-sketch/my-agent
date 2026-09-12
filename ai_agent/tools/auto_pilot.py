@@ -40,6 +40,9 @@ from .recon import tool_subdomain_enum, tool_dir_fuzz, tool_cve_lookup
 from .web import tool_http_request, tool_tech_detect, tool_check_headers
 from .pentest import tool_nuclei_scan
 from .reporting import tool_add_finding
+from .payload_memory import (
+    tool_payload_memory_record, tool_payload_memory_top,
+)
 
 PHASE_ORDER = ("recon", "scan", "vuln", "report")
 
@@ -52,6 +55,7 @@ _PORT_RE = re.compile(r"^\s*(\d{1,5})\s+([A-Za-z0-9][A-Za-z0-9\-\_\.]*)\s*$",
                       re.MULTILINE)
 _STATUS_RE = re.compile(r"STATUS:\s*(\d+)")
 _CVE_RE = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
+_DIR_HIT_RE = re.compile(r"^\s*(\d{3})\s+(\S+)\s+\d+\s+bytes", re.MULTILINE)
 
 
 class _BudgetExceeded(Exception):
@@ -277,6 +281,14 @@ def _phase_scan(state, ctx):
         try:
             df = tool_dir_fuzz(url, max_results=10)
             entry["dirs"][url] = _trunc(df, 1500)
+            for dm in _DIR_HIT_RE.finditer(df):
+                try:
+                    tool_payload_memory_record(
+                        host, payload="dir:%s" % dm.group(2).strip(),
+                        signal="dir_" + dm.group(1),
+                        vuln_class="web:dir")
+                except Exception:
+                    pass
         except Exception as exc:
             state["errors"].append(
                 {"phase": "scan", "step": "dir_fuzz %s" % url,
@@ -425,6 +437,16 @@ def _phase_report(state, ctx):
             for url, out in vuln["nuclei"].items():
                 lines.append("- `%s`" % url)
                 lines.append("  %s" % str(out)[:400].replace("\n", " | "))
+    try:
+        pbits = tool_payload_memory_top(host, top_k=8)
+    except Exception:
+        pbits = ""
+    if pbits and "no payload memory yet" not in pbits:
+        lines.append("")
+        lines.append("### Payload memory (campaign continuity)")
+        lines.append("```")
+        lines.append(pbits[:900])
+        lines.append("```")
     for err in state.get("errors", [])[-10:]:
         lines.append("")
         lines.append("> phase-error: %s / %s — %s" % (
@@ -612,3 +634,16 @@ def tool_mission_reset(target="", campaign_dir=""):
         except Exception as exc:
             return "mission_reset: FAILED: %r" % (exc,)
     return "mission_reset: no campaign file for %r" % (target,)
+
+
+def tool_mission_payloads(target="", top_k=10):
+    """Campaign continuity: ranked payload-effectiveness memory for a
+    target - whatever worked on this host before, auto-refreshed by
+    mission scans. Use with top_k to limit rows."""
+    try:
+        top_k = int(top_k or 10)
+    except (TypeError, ValueError):
+        top_k = 10
+    return tool_payload_memory_top((target or "").strip(),
+                                   top_k=top_k)
+
