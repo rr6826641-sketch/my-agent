@@ -39,8 +39,9 @@ import os
 import re
 import time
 
-from .network import tool_port_scan, tool_ssl_info
-from .recon import tool_subdomain_enum, tool_dir_fuzz, tool_cve_lookup
+from .network import tool_port_scan, tool_ssl_info, DEEP_PORTS
+from .recon import (tool_subdomain_enum, tool_dir_fuzz, tool_cve_lookup,
+                    DEEP_WORDLIST)
 from .web import tool_http_request, tool_tech_detect, tool_check_headers
 from .pentest import tool_nuclei_scan
 from .cpe_match import tool_cpe_scan, tool_cpe_nuclei_scan
@@ -83,10 +84,11 @@ class _Budget(object):
 class _Ctx(object):
     """Per-run context passed to every phase."""
 
-    def __init__(self, campaign_dir, reports_dir, run_nuclei, budget):
+    def __init__(self, campaign_dir, reports_dir, run_nuclei, budget, deep=False):
         self.campaign_dir = campaign_dir
         self.reports_dir = reports_dir
         self.run_nuclei = bool(run_nuclei)
+        self.deep = bool(deep)
         self.budget = budget
 
 
@@ -143,6 +145,7 @@ def _load(target, campaign_dir=""):
         "phases": {},
         "errors": [],
         "findings_logged": 0,
+        "posture": "standard",
     }
     if os.path.exists(path):
         try:
@@ -150,6 +153,7 @@ def _load(target, campaign_dir=""):
                 state.update(json.load(fh))
         except Exception:
             pass
+    state.setdefault("posture", "standard")
     state["campaign_file"] = path
     try:
         os.makedirs(cdir, exist_ok=True)
@@ -215,23 +219,44 @@ def _phase_recon(state, ctx):
             state["errors"].append(
                 {"phase": "recon", "step": "subdomain_enum",
                  "error": repr(exc)})
-    try:
-        txt = tool_port_scan(host)
+    if ctx.deep:
+        # DEEP-SCAN POSTURE: full well-known range (1-1024) + high-value
+        # services, faster per-port timeout with wider concurrency.
+        try:
+            txt = tool_port_scan(host, ports=DEEP_PORTS, timeout=1.0,
+                                 concurrency=220)
+        except Exception as exc:
+            state["errors"].append(
+                {"phase": "recon", "step": "port_scan_deep",
+                 "error": repr(exc)})
+            txt = ""
+    else:
+        try:
+            txt = tool_port_scan(host)
+        except Exception as exc:
+            state["errors"].append(
+                {"phase": "recon", "step": "port_scan", "error": repr(exc)})
+            txt = ""
+    if txt:
         entry["port_raw"] = _trunc(txt, 2000)
         for m in _PORT_RE.finditer(txt):
             entry["ports"].append({
                 "port": int(m.group(1)),
                 "service": (m.group(2) or "").strip().lower(),
             })
-    except Exception as exc:
-        state["errors"].append(
-            {"phase": "recon", "step": "port_scan", "error": repr(exc)})
-    if 443 in [p["port"] for p in entry["ports"]]:
-        try:
-            entry["ssl"] = _trunc(tool_ssl_info(host, 443), 1200)
-        except Exception as exc:
-            state["errors"].append(
-                {"phase": "recon", "step": "ssl_info", "error": repr(exc)})
+    open_set = set(p["port"] for p in entry["ports"])
+    ssl_ports = [443, 8443, 9443] if ctx.deep else [443]
+    ssl_bits = []
+    for sp in ssl_ports:
+        if sp in open_set:
+            try:
+                ssl_bits.append("%s:%s" % (sp, _trunc(
+                    tool_ssl_info(host, sp), 400)))
+            except Exception as exc:
+                state["errors"].append(
+                    {"phase": "recon", "step": "ssl_info %d" % sp,
+                     "error": repr(exc)})
+    entry["ssl"] = "\n".join(ssl_bits)
     entry["elapsed_s"] = round(time.time() - started, 1)
     state["phases"]["recon"] = entry
     _save(state, ctx.campaign_dir)
@@ -262,8 +287,8 @@ def _phase_scan(state, ctx):
     if not web_targets and ports:
         first = ports[0]
         web_targets.append(("http", int(first.get("port", 80))))
-    for scheme, port in web_targets[:6]:
-        ctx.budget.check(8.0)
+    for scheme, port in web_targets[:12 if ctx.deep else 6]:
+        ctx.budget.check(10.0 if ctx.deep else 8.0)
         url = "%s://%s:%d/" % (scheme, host, port)
         info = {}
         try:
@@ -287,10 +312,15 @@ def _phase_scan(state, ctx):
         entry["web"][url] = info
     live = [u for u, v in entry["web"].items()
             if isinstance(v.get("status"), int) and 200 <= v["status"] < 500]
-    for url in live[:2]:
-        ctx.budget.check(15.0)
+    for url in live[:4 if ctx.deep else 2]:
+        ctx.budget.check(30.0 if ctx.deep else 15.0)
         try:
-            df = tool_dir_fuzz(url, max_results=10)
+            if ctx.deep:
+                # DEEP-SCAN POSTURE: bigger wordlist + wider results
+                df = tool_dir_fuzz(url, wordlist=DEEP_WORDLIST,
+                                   max_results=25, threads=16, timeout=6)
+            else:
+                df = tool_dir_fuzz(url, max_results=10)
             entry["dirs"][url] = _trunc(df, 1500)
             for dm in _DIR_HIT_RE.finditer(df):
                 try:
@@ -348,7 +378,7 @@ def _phase_vuln(state, ctx):
                 "open", "unknown", "tcpwrapped", "filtered", "closed"):
             queries.add(svc)
     queries = queries - {"server", "http", "https", "redirected"}
-    entry["queries"] = sorted(queries)[:12]
+    entry["queries"] = sorted(queries)[:20 if ctx.deep else 12]
     for q in entry["queries"]:
         ctx.budget.check(6.0)
         try:
@@ -383,7 +413,9 @@ def _phase_vuln(state, ctx):
             except Exception:
                 pass
     entry["findings_logged"] = findings
-    if ctx.run_nuclei:
+    if ctx.run_nuclei or ctx.deep:
+        # run_nuclei opt-in OR deep posture: auto nuclei sniper on live
+        # web targets (deep caps at 3 urls with tighter per-url budget).
         entry["nuclei"] = {}
         entry["cpe_banner"] = ""
         cpe_banner = ""
@@ -394,8 +426,9 @@ def _phase_vuln(state, ctx):
                 cpe_banner or cpe_out, 1500)
         except Exception as exc:
             entry["cpe_banner"] = "cpe_scan FAILED: %r" % (exc,)
-        for url in scan.get("web", {}):
-            ctx.budget.check(60.0)
+        nuc_urls = list(scan.get("web", {}))[:3 if ctx.deep else None]
+        for url in nuc_urls:
+            ctx.budget.check(45.0 if ctx.deep else 60.0)
             res = ""
             try:
                 if cpe_banner:
@@ -689,6 +722,8 @@ def _run_one(state, phase, ctx):
     """Run a single phase; save state; return summary line."""
     if _phase_done(state, phase):
         return "- %s: already done" % phase
+    if ctx.deep:
+        state["posture"] = "deep"   # campaign spawned under deep-scan posture
     state["phases"].setdefault(phase, {})["status"] = "running"
     _save(state, ctx.campaign_dir)
     try:
@@ -709,14 +744,15 @@ def _run_one(state, phase, ctx):
         return "- %s: FAILED: %r" % (phase, exc)
 
 
-def _make_ctx(campaign_dir="", run_nuclei=False, budget_sec=100):
+def _make_ctx(campaign_dir="", run_nuclei=False, budget_sec=100,
+              deep=False):
     cdir = _campaign_dir(campaign_dir)
     rdir = _reports_dir(campaign_dir, os.getcwd())
-    return _Ctx(cdir, rdir, bool(run_nuclei), _Budget(budget_sec))
+    return _Ctx(cdir, rdir, bool(run_nuclei), _Budget(budget_sec), deep=deep)
 
 
 def _run_phase(target, phase, campaign_dir="", run_nuclei=False,
-               budget_sec=100):
+               budget_sec=100, deep=False):
     target = (target or "").strip()
     if not target:
         return "mission %s: provide a target (IP or domain)" % phase
@@ -724,7 +760,7 @@ def _run_phase(target, phase, campaign_dir="", run_nuclei=False,
         return ("mission %s: phase must be one of recon|scan|vuln|"
                 "exploit|report" % phase)
     state = _load(target, campaign_dir)
-    ctx = _make_ctx(campaign_dir, run_nuclei, budget_sec)
+    ctx = _make_ctx(campaign_dir, run_nuclei, budget_sec, deep=deep)
     return _run_one(state, phase, ctx)
 
 
@@ -733,12 +769,14 @@ def _run_phase(target, phase, campaign_dir="", run_nuclei=False,
 # ---------------------------------------------------------------------------
 
 def tool_attack_mission(target="", phase="", campaign_dir="",
-                        run_nuclei=False, budget_sec=100):
+                        run_nuclei=False, budget_sec=100, deep=False):
     """AUTO-PILOT: run every unfinished attack-mission phase in order.
 
     phase=''  -> auto: recon -> scan -> vuln -> exploit -> report
     (skips done ones)
     phase=X   -> run only that one phase
+    deep=True -> DEEP-SCAN POSTURE: wider port range + wordlist,
+                 more web targets, auto nuclei sniper on live roots.
     """
     target = (target or "").strip()
     if not target:
@@ -746,9 +784,9 @@ def tool_attack_mission(target="", phase="", campaign_dir="",
                "Example: attack_mission(target='10.0.0.7')"
     if phase:
         return _run_phase(target, phase, campaign_dir, run_nuclei,
-                          budget_sec)
+                          budget_sec, deep=deep)
     state = _load(target, campaign_dir)
-    ctx = _make_ctx(campaign_dir, run_nuclei, budget_sec)
+    ctx = _make_ctx(campaign_dir, run_nuclei, budget_sec, deep=deep)
     out = ["AUTO-PILOT mission: %s" % target]
     for ph in PHASE_ORDER:
         out.append(_run_one(state, ph, ctx))
@@ -761,33 +799,55 @@ def tool_attack_mission(target="", phase="", campaign_dir="",
     return "\n".join(out)
 
 
-def tool_mission_recon(target="", campaign_dir=""):
-    return _run_phase(target, "recon", campaign_dir, False, 110)
+def tool_mission_recon(target="", campaign_dir="", deep=False):
+    return _run_phase(target, "recon", campaign_dir, False, 110, deep=deep)
 
 
-def tool_mission_scan(target="", campaign_dir=""):
-    return _run_phase(target, "scan", campaign_dir, False, 110)
+def tool_mission_scan(target="", campaign_dir="", deep=False):
+    return _run_phase(target, "scan", campaign_dir, False, 110, deep=deep)
 
 
-def tool_mission_vuln(target="", campaign_dir="", run_nuclei=False):
-    return _run_phase(target, "vuln", campaign_dir, run_nuclei, 110)
+def tool_mission_vuln(target="", campaign_dir="", run_nuclei=False,
+                      deep=False):
+    return _run_phase(target, "vuln", campaign_dir, run_nuclei, 110,
+                      deep=deep)
 
 
-def tool_mission_exploit(target="", campaign_dir=""):
+def tool_mission_exploit(target="", campaign_dir="", deep=False):
     """EXPLOIT AUTO-RUN CHAIN phase: CVE hits from the vuln phase are
     actively chased - targeted nuclei verification on live web targets,
     ready-to-run PoC probes saved under artifacts/exploit_<target>/, and
     exploit-chain signals recorded into payload memory."""
-    return _run_phase(target, "exploit", campaign_dir, False, 110)
+    return _run_phase(target, "exploit", campaign_dir, False, 110,
+                      deep=deep)
 
 
-def tool_mission_report(target="", campaign_dir=""):
-    return _run_phase(target, "report", campaign_dir, False, 110)
+def tool_mission_report(target="", campaign_dir="", deep=False):
+    return _run_phase(target, "report", campaign_dir, False, 110, deep=deep)
 
 
-def tool_mission_resume(target="", campaign_dir="", run_nuclei=False):
+def tool_mission_resume(target="", campaign_dir="", run_nuclei=False,
+                        deep=False):
     """Resume a mission from its saved campaign state (auto mode)."""
-    return tool_attack_mission(target, "", campaign_dir, run_nuclei, 110)
+    return tool_attack_mission(target, "", campaign_dir, run_nuclei, 110,
+                               deep=deep)
+
+
+def tool_mission_deep(target="", campaign_dir="", run_nuclei=False,
+                      budget_sec=115):
+    """DEEP-SCAN POSTURE: full auto-pilot with a wider attack surface.
+
+    Same pipeline as attack_mission but oriented toward depth:
+      - recon   : scans ports 1-1024 + high-value services (~1535 ports),
+                  SSL grabbed on 443/8443/9443 when open
+      - scan    : up to 12 web targets / 4 live roots dir-fuzzed with the
+                  deep wordlist (250 entries)
+      - vuln    : up to 20 CVE queries + AUTO nuclei sniper on up to 3
+                  live web targets (no run_nuclei opt-in needed)
+    Progress persists under campaigns/<target>.json with posture=deep.
+    """
+    return tool_attack_mission(target, "", campaign_dir, run_nuclei,
+                               budget_sec, deep=True)
 
 
 def tool_mission_status(target="", campaign_dir=""):
@@ -798,6 +858,10 @@ def tool_mission_status(target="", campaign_dir=""):
         lines = ["mission status: %s" % state["target"],
                  "  created: %s | updated: %s" % (
                      state.get("created", "?"), state.get("updated", "?"))]
+        posture = state.get("posture", "standard")
+        lines.append(
+            "  posture: %s%s" % (
+                posture, "  [DEEP-SCAN]" if posture == "deep" else ""))
         for ph in PHASE_ORDER:
             lines.append("  %s: %s" % (
                 ph, state.get("phases", {}).get(ph, {}).get(
@@ -820,8 +884,10 @@ def tool_mission_status(target="", campaign_dir=""):
                 st = json.load(fh)
             done = [p for p in PHASE_ORDER
                     if st.get("phases", {}).get(p, {}).get("status") == "done"]
-            rows.append("- %s [%s] file=%s" % (
-                st.get("target", fn[:-5]), ",".join(done) or "new", fn))
+            tag = " [deep]" if st.get("posture") == "deep" else ""
+            rows.append("- %s%s [%s] file=%s" % (
+                st.get("target", fn[:-5]), tag,
+                ",".join(done) or "new", fn))
         except Exception:
             rows.append("- %s (unreadable)" % fn)
     return "campaigns (%d):\n%s" % (len(rows), "\n".join(rows)) if rows \

@@ -20,6 +20,59 @@ DEFAULT_WORDLIST = [
     "cmd", "console", "manage", "panel", "cpanel", "webmail", "mail", "ftp",
 ]
 
+# DEEP-SCAN POSTURE: DEFAULT_WORDLIST + admin/dev/backup/config paths the
+# shallow fuzz skips.  Passed to tool_dir_fuzz(wordlist=DEEP_WORDLIST, ...)
+# by the deep-scan mission so high-value endpoints (panels, backups, git,
+# SCM, broker UIs, actuator/env) get probed too.
+_DEEP_WORDLIST_EXTRA = [
+    # admin panels / auth
+    "admin.php", "admin/", "administrator", "controlpanel", "manage/",
+    "useradmin", "superadmin", "sysadmin", "root/", "panel/", "webadmin",
+    "dashboard", "console/", "shell/", "terminal", "exec", "eval.php",
+    "login2", "signin", "signup", "register", "forgot", "reset",
+    "password", "oauth", "oauth/token", "sso", "cas", "keycloak",
+    # backups / dumps / source exposure
+    "backup.zip", "backup.tar.gz", "backup.sql", "db.sql", "dump.sql",
+    "database.sql", "db.sqlite", "db.sqlite3", "bkp/", "old/", "bak/",
+    "site.zip", "www.zip", "wwwroot.zip", "web.zip", "private/",
+    "secret/", "hidden/", "internal/", "temp/", "tmp/", "~root", "~admin",
+    # SCM / config leak
+    ".git/config", ".git/HEAD", ".git/objects/", ".svn/entries",
+    ".hg/store", ".DS_Store", ".htaccess", ".htpasswd", "web.config",
+    "httpd.conf", "nginx.conf", "phpinfo.php", "server-status/",
+    "server-info/", "WEB-INF/web.xml", "META-INF/MANIFEST.MF",
+    "config.php~", "config.php.bak", "config.json.bak", ".env.bak",
+    ".env.local", ".env.production", "credentials", "id_rsa", "wp-config.php",
+    # CMS / framework extras
+    "wp-admin/", "wp-login.php", "wp-content/", "wp-includes/",
+    "wp-json/", "wp-json/wp/v2/users", "xmlrpc.php", "wp-cron.php",
+    "phpmyadmin/", "phpMyAdmin/", "pma/", "adminer.php", "dbadmin/",
+    "mysql/", "sql/", "h2-console", "console", "jolokia", "actuator",
+    "actuator/health", "actuator/env", "metrics", "trace", "heapdump",
+    # API / dev tooling
+    "api/v1", "api/v2", "api/admin", "api/user", "api/users", "api/login",
+    "api/config", "api/health", "swagger", "swagger-ui.html", "swagger/v1",
+    "api-docs", "openapi.json", "graphiql", "graphql", "graphql/",
+    "v2/api-docs", "webhook", "hooks", "callback", "ws", "websocket",
+    "socket.io/", "sockjs/", "grpc", "protobuf", "monitoring", "status/",
+    # CI/CD / SCM UIs / ops dashboards
+    "jenkins", "hudson", "sonar", "sonarqube", "nexus", "artifactory",
+    "gitlab", "gitlab/-/settings/application", "gitea", "bitbucket",
+    "confluence", "jira", "kibana", "grafana", "prometheus", "zabbix",
+    "nagios", "cacti", "munin", "puppet", "chef", "ansible", "salt",
+    "rundeck", "airflow", "kafka", "zookeeper", "rabbitmq", "activemq",
+    "solr", "solr/admin/", "elasticsearch", "elastic/", "_search",
+    "_cat/indices", "_nodes", "cassandra", "redis", "memcached",
+    "mongo", "mongo-express", "rockmongo", "minio", "s3", "storage",
+    # misc / misc dev
+    "test/", "tests/", "testing", "demo", "example", "examples",
+    "sample", "samples", "staging", "development", "qa", "uat", "prod",
+    "error", "debug/", "debug", "trace/", "__debug__", "captcha", "bots",
+]
+
+DEEP_WORDLIST = DEFAULT_WORDLIST + _DEEP_WORDLIST_EXTRA
+DEEP_WORDLIST = list(dict.fromkeys(DEEP_WORDLIST))  # dedupe, keep order
+
 
 def tool_subdomain_enum(domain, max_results=80):
     """Enumerate subdomains via Certificate Transparency (crt.sh) with a

@@ -1,3 +1,27 @@
+## [2026-09-13] v0.8.13 - DEEP-SCAN POSTURE (roadmap #9)
+
+- feat(auto_pilot): naya `mission_deep` tool + `deep=True` flag across mission
+  pipeline. Deep posture attack surface widening:
+  - recon: `DEEP_PORTS` = full well-known range 1-1024 + default set + ~500
+    high-value service ports (admin UIs, DBs, caches, CI/CD, IoT, backdoors)
+    = 1535 unique ports (tool_port_scan 2000-cap ke andar), timeout 1.0s,
+    concurrency 220. SSL grab 443/8443/9443 par jab open.
+  - scan: 12 web targets (standard 6), live roots 4 dir-fuzz with
+    `DEEP_WORDLIST` (~250 entries, DEFAULT_WORDLIST superset) - panels,
+    backups, .git config leaks, actuator/env, swagger, CI/CD UIs.
+  - vuln: 20 CVE queries (standard 12) + AUTO nuclei sniper on up to 3 live
+    web targets (ab run_nuclei opt-in ki zaroorat nahi deep mode mein).
+  - campaign state `posture=standard|deep`; `mission_status` posture badge
+    ([DEEP-SCAN]) + campaign list `[deep]` tag; WebUI `_mission_summary`
+    posture field.
+- fix(deep): sotto-recon/JIT edge cases; deep ctx budget granularity bumped
+  per-phase (scan 10s/target, dir-fuzz 30s, nuclei 45s/url).
+- test: naya `test_deep_scan.py` (4 tests): DEEP_PORTS superset+cap,
+  DEEP_WORDLIST superset+unique, _make_ctx deep flag, full deep mission on
+  127.0.0.2 -> ALL PHASES COMPLETE + posture=deep + [deep] campaign tag.
+  Suite: 391 passed / 3 env-only MCP failures (machine config.json local-fs
+  server - CI mein clean)
+
 ## [2026-09-13] v0.8.12 - campaign findings aggregate sync (cosmetic fix)
 
 - fix(auto_pilot): campaign top-level `findings_logged` ab hamesha phases ke

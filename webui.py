@@ -3195,6 +3195,7 @@ def _mission_summary(path):
         "phases": {k: (v.get("status") if isinstance(v, dict) else None)
                    for k, v in phases.items()},
         "findings": d.get("findings_logged", 0),
+        "posture": d.get("posture", "standard"),
         "errors": d.get("errors", []),
     }
     if d.get("kind") == "swarm_campaign":
