@@ -13,6 +13,8 @@ from ai_agent.tools.auto_pilot import (
     tool_attack_mission,
     tool_mission_reset,
     tool_mission_status,
+    _load,
+    _save,
 )
 
 
@@ -26,6 +28,15 @@ def test_mission_chain_runs_on_localhost():
     assert "scan: done" in st, st
     assert "vuln: done" in st, st
     assert "report: done" in st, st
+
+
+def test_save_aggregates_findings_logged():
+    st = _load("127.0.0.1")
+    st["phases"].setdefault("vuln", {})["findings_logged"] = 2
+    st["phases"].setdefault("exploit", {})["findings_logged"] = 2
+    _save(st)
+    st2 = _load("127.0.0.1")
+    assert st2["findings_logged"] == 4, st2["findings_logged"]
 
 
 def test_mission_reset_starts_clean():

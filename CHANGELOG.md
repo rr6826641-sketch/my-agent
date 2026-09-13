@@ -1,3 +1,16 @@
+## [2026-09-13] v0.8.12 - campaign findings aggregate sync (cosmetic fix)
+
+- fix(auto_pilot): campaign top-level `findings_logged` ab hamesha phases ke
+  aggregated count ke saath sync rehta hai. Pehle `_save` sirf `updated`
+  timestamp update karta tha aur top-level `findings_logged` 0 par stuck rahta
+  tha jabke per-phase entries (vuln/exploit) sahi counts rakhti thin. Ab har
+  save par `sum(phase.findings_logged)` recompute hokar top-level par likha
+  jata hai - WebUI missions panel / report summaries ke liye consistent
+  aggregate count.
+- test: naya regression test `test_save_aggregates_findings_logged`
+  (phase counts 2+2 -> top-level 4). Full suite ab 15/15 pass
+  (auto_pilot + campaign_continuity + phase3).
+
 ## [2026-09-13] v0.8.11 - EXPLOIT AUTO-RUN CHAIN + SWARM LIVE-MAP + CROSS-CAMPAIGN RANKING
 
 - feat(auto_pilot): roadmap #6 done - ATTACK MISSION ab 5-phase hai

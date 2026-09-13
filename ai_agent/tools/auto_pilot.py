@@ -160,6 +160,11 @@ def _load(target, campaign_dir=""):
 
 def _save(state, campaign_dir=""):
     state["updated"] = _now()
+    # keep the top-level aggregate in sync with per-phase findings counts
+    # (cosmetic-fix: top-level stayed 0 while phases carried the real counts)
+    state["findings_logged"] = sum(
+        state.get("phases", {}).get(p, {}).get("findings_logged", 0)
+        for p in PHASE_ORDER)
     try:
         os.makedirs(os.path.dirname(state["campaign_file"]), exist_ok=True)
         with io.open(state["campaign_file"], "w", encoding="utf-8",
