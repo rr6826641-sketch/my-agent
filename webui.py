@@ -3185,7 +3185,7 @@ def _mission_summary(path):
     except Exception as exc:
         return {"key": os.path.basename(path), "error": str(exc)}
     phases = d.get("phases", {})
-    return {
+    out = {
         "key": None,
         "name": d.get("target", os.path.basename(path)),
         "target": d.get("target"),
@@ -3197,6 +3197,33 @@ def _mission_summary(path):
         "findings": d.get("findings_logged", 0),
         "errors": d.get("errors", []),
     }
+    if d.get("kind") == "swarm_campaign":
+        # SWARM LIVE-MAP payload: per-host nodes with open ports + CVEs
+        nodes, hostmap = [], {}
+        for h in (phases.get("recon") or {}).get("hosts", []) or []:
+            hostmap[h.get("host")] = h
+        for host, h in hostmap.items():
+            nodes.append({
+                "host": host,
+                "live": bool(h.get("ports")),
+                "ports": [str(p.get("port")) for p in (h.get("ports") or [])
+                           if p.get("port")][:12],
+                "ssl": bool(h.get("ssl")),
+                "cves": [],
+            })
+        for e in ((phases.get("exploit") or {}).get("targets", []) or []):
+            for n in nodes:
+                if n["host"] == e.get("host"):
+                    n["cves"] = (e.get("cves") or [])[:4]
+                    break
+        out["swarm"] = {
+            "mode": d.get("mode"),
+            "nodes": nodes,
+            "total": len(nodes),
+            "live": sum(1 for n in nodes if n["live"]),
+        }
+        out["kind"] = "swarm_campaign"
+    return out
 
 
 def _find_campaign(key):
@@ -3215,6 +3242,27 @@ def api_missions_list():
         out.append(s)
     out.sort(key=lambda r: str(r.get("updated") or r.get("created") or ""), reverse=True)
     return jsonify({"missions": out, "count": len(out)})
+
+
+@app.route("/api/swarm")
+def api_swarm():
+    """Swarm live-map feed: every war-room campaign reduced to per-host
+    nodes (live / open ports / CVEs) for the WebUI live-map panel."""
+    out = []
+    for key, path in _iter_campaigns():
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                kind = json.load(fh).get("kind")
+        except Exception:
+            continue
+        if kind != "swarm_campaign":
+            continue
+        s = _mission_summary(path)
+        s["key"] = key
+        out.append(s)
+    out.sort(key=lambda r: str(r.get("updated") or r.get("created") or ""),
+             reverse=True)
+    return jsonify({"swarms": out, "count": len(out)})
 
 
 @app.route("/api/missions/<path:key>")

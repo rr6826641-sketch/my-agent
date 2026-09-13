@@ -52,8 +52,9 @@ from .websearch import (
 from .web_search import search_web
 from .auto_pilot import (
     tool_attack_mission, tool_mission_recon, tool_mission_scan,
-    tool_mission_vuln, tool_mission_report, tool_mission_resume,
-    tool_mission_status, tool_mission_reset, tool_mission_payloads,
+    tool_mission_vuln, tool_mission_exploit, tool_mission_report,
+    tool_mission_resume, tool_mission_status, tool_mission_reset,
+    tool_mission_payloads,
 )
 from .swarm_campaign import (
     tool_swarm_campaign, tool_swarm_status,
@@ -81,7 +82,8 @@ from .poc_templates import generate_poc, poc_classes
 from .payload_memory import (PAYLOAD_MEMORY,
                              tool_payload_memory_top,
                              tool_payload_memory_record,
-                             tool_payload_memory_reset)
+                             tool_payload_memory_reset,
+                             tool_payload_memory_ranking)
 from .cloud_sec import (
     aws_s3_enum,
     cloud_misconfig_scan,
@@ -1127,6 +1129,24 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                   "host to forget (omit to reset everything)", "")},
               "required": []},
              lambda host="": tool_payload_memory_reset(host or "")),
+        Tool("payload_memory_ranking",
+             "CROSS-CAMPAIGN payload leaderboard: payloads that produced "
+             "signals across MULTIPLE hosts/campaigns, ranked by global "
+             "effectiveness. min_samples=minimum distinct hosts a payload "
+             "must have hit before ranking (default 1). Use to pick ammo "
+             "for a NEW target from everything learned in past missions.",
+             {"type": "object",
+              "properties": {
+                  "vuln_class": _str_prop(
+                      "signal filter: sql_error | waf_block | reflection | "
+                      "stack_trace | time_delay | server_error", ""),
+                  "top_k": {"type": "integer", "default": 10},
+                  "min_samples": {"type": "integer", "default": 1}},
+              "required": []},
+             lambda vuln_class="", top_k=10, min_samples=1:
+                 tool_payload_memory_ranking(vuln_class or "",
+                                             int(top_k or 10),
+                                             int(min_samples or 1))),
 
         # ---- auto-PoC template generator ----
         Tool("gen_poc",
@@ -1716,11 +1736,11 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
              lambda url="", templates="", severity="":
                  tool_nuclei_scan(url, templates or "", severity or "low,medium,high,critical")),
         Tool("attack_mission",
-             "AUTO-PILOT attack mission: run every unfinished phase (recon -> scan -> vuln -> report) against one target in order, persisting state to campaigns/<target>.json for resume. Usage: attack_mission(target='10.0.0.7'). Optional: phase='recon'|'scan'|'vuln'|'report' runs one phase only, run_nuclei='true' adds nuclei runs, budget_sec caps seconds.\n",
+             "AUTO-PILOT attack mission: run every unfinished phase (recon -> scan -> vuln -> exploit -> report) against one target in order, persisting state to campaigns/<target>.json for resume. The exploit phase AUTO-CHAINS CVE hits: targeted nuclei verification + ready-to-run PoC probes + payload-memory signals. Usage: attack_mission(target='10.0.0.7'). Optional: phase='recon'|'scan'|'vuln'|'exploit'|'report' runs one phase only, run_nuclei='true' adds nuclei runs, budget_sec caps seconds.\n",
              {"type": "object",
               "properties": {
                   "target": _str_prop("IP or domain to mission"),
-                  "phase": _str_prop("recon|scan|vuln|report (empty = auto all unfinished)"),
+                  "phase": _str_prop("recon|scan|vuln|exploit|report (empty = auto all unfinished)"),
                   "campaign_dir": _str_prop("state dir, default ./campaigns"),
                   "run_nuclei": _str_prop("true/false - include nuclei runs"),
                   "budget_sec": _str_prop("max seconds for this call")},
@@ -1751,8 +1771,15 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                              "run_nuclei": _str_prop("true/false")},
               "required": ["target"]},
              lambda target="", campaign_dir="", run_nuclei="": tool_mission_vuln(target, campaign_dir, str(run_nuclei).lower() in ("1", "true", "yes"))),
+        Tool("mission_exploit",
+             "AUTO-PILOT phase 4 (EXPLOIT AUTO-RUN CHAIN): every CVE hit from the vuln phase is actively chased - targeted nuclei verification against live web targets, a ready-to-run NON-DESTRUCTIVE PoC probe saved under artifacts/exploit_<target>/, and exploit-chain signals recorded in payload memory. Usage: mission_exploit(target='10.0.0.7').",
+             {"type": "object",
+              "properties": {"target": _str_prop("IP or domain"),
+                             "campaign_dir": _str_prop("state dir")},
+              "required": ["target"]},
+             lambda target="", campaign_dir="": tool_mission_exploit(target, campaign_dir)),
         Tool("mission_report",
-             "AUTO-PILOT phase 4: write markdown attack-mission report to reports/attack_mission_<target>.md.",
+             "AUTO-PILOT phase 5: write markdown attack-mission report (incl. Exploitation chain section) to reports/attack_mission_<target>.md.",
              {"type": "object",
               "properties": {"target": _str_prop("IP or domain"),
                              "campaign_dir": _str_prop("state dir")},
@@ -1781,12 +1808,14 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
               "required": ["target"]},
              lambda target="", campaign_dir="": tool_mission_reset(target, campaign_dir)),
         Tool("mission_payloads",
-             "AUTO-PILOT campaign continuity: ranked payload-effectiveness memory for a target - whatever worked on this host before. Mission scans seed dir hits here; exploit payloads also get recorded per host.",
+             "AUTO-PILOT campaign continuity: ranked payload-effectiveness memory. Per-target: whatever worked on this host before. global_rank='true' (target can be empty): CROSS-CAMPAIGN leaderboard - payloads that produced signals across MANY hosts, ranked.",
              {"type": "object",
-              "properties": {"target": _str_prop("IP or domain"),
-                             "top_k": _str_prop("how many to show, default 10")},
-              "required": ["target"]},
-             lambda target="", top_k="": tool_mission_payloads(target, top_k)),
+              "properties": {"target": _str_prop("IP or domain (empty ok with global_rank)"),
+                             "top_k": _str_prop("how many to show, default 10"),
+                             "global_rank": _str_prop("true/false - cross-campaign leaderboard")},
+              "required": []},
+             lambda target="", top_k="", global_rank="": tool_mission_payloads(
+                 target, top_k, str(global_rank).lower() in ("1", "true", "yes"))),
         Tool("swarm_campaign",
              "SWARM WAR-ROOM: parallel attack over MANY targets in one command. Fan out recon workers per host (port/SSL), then exploit workers per open service (CVE lookup + optional nuclei), merge everything into one markdown report and persist campaign state. Usage: swarm_campaign(targets='10.0.0.0/24') or swarm_campaign(targets='a.com,b.com', mode='recon'). Optional: mode='recon'|'exploit'|'full', max_workers (default 8), run_nuclei='true' adds nuclei template runs, budget_sec caps seconds, campaign_dir sets state dir.\n",
              {"type": "object",

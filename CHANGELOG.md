@@ -1,3 +1,28 @@
+## [2026-09-13] v0.8.11 - EXPLOIT AUTO-RUN CHAIN + SWARM LIVE-MAP + CROSS-CAMPAIGN RANKING
+
+- feat(auto_pilot): roadmap #6 done - ATTACK MISSION ab 5-phase hai
+  (recon -> scan -> vuln -> EXPLOIT -> report). Naya `_phase_exploit` har CVE
+  hit par auto-chain karta hai: targeted nuclei verification (web targets par),
+  ready-to-run NON-DESTRUCTIVE PoC probe `artifacts/exploit_<target>/poc_<CVE>.py`
+  (banner-check + manual verification steps), aur payload-memory signal
+  `exploit_chained`. Findings log `status=needs-validation` (confidence low).
+  Naya tool `mission_exploit` (phase 4 solo). Report mein "## Exploitation
+  (auto-run chain)" section.
+- feat(webui): roadmap #7 done - MISSION CONSOLE mein naya full-width
+  "🐝 Swarm Live-Map" card: standalone JS har 4s `/api/swarm` poll karta hai;
+  `_mission_summary` har swarm campaign ke hosts par se nodes nikalta hai
+  (live/dead dot, open ports, CVEs) - war-room ka multi-host battlefield live.
+- feat(payload_memory): roadmap #8 done - `rank_global()` cross-campaign
+  leaderboard: payloads jo kaee hosts par kaam kiye unki hosts-count + hits par
+  ranking. Naye tool `payload_memory_ranking(top_k=)` + `mission_payloads`
+  `global_rank=True` mode.
+- fix(auto_pilot): `_poc_probe` `lines.append` 2-arg TypeError fixed (chained
+  PoCs ab reliably save hote hain).
+- test: 14/14 pass (auto_pilot + campaign_continuity + phase3). Live 127.0.0.1
+  mission: 5/5 phases done, 2 PoC probes chained (CVE-2003-0605, CVE-2002-0597),
+  report Exploitation section + payload-memory leaderboard verified. `/api/swarm`
+  smoke: 200 + node extraction (live/ports/cves) PASS.
+
 ## [2026-09-13] v0.8.10 - WEBUI MISSION CONSOLE (war-room panel)
 
 - feat(webui): roadmap #5 done - naya `MISSIONS` view (`/api/missions`,

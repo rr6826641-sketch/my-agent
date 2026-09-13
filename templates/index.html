@@ -490,6 +490,12 @@
     .mc-dl{margin-top:6px;background:linear-gradient(135deg,#b5303f,#7d1f2e);color:#fff;border:0;border-radius:9px;padding:10px 18px;font-size:13.5px;font-weight:600;cursor:pointer;}
     .mc-dl:disabled{opacity:.45;cursor:not-allowed;}
     .mc-hint{font-size:12px;color:#73819f;}
+    .mc-swarm-host{display:flex;flex-direction:column;gap:6px;min-width:0;border:1px solid #22304a;border-radius:10px;padding:9px 12px;background:#0c1020;}
+    .mc-swarm-host b{font-size:12.5px;color:#e8edf5;font-family:ui-monospace,Consolas,monospace;}
+    .mc-swarm-live{font-size:11px;font-weight:700;color:#4ade80;}
+    .mc-swarm-dead{font-size:11px;font-weight:700;color:#f47174;}
+    .mc-swarm-ports{font-size:11px;color:#9fc9ff;}
+    .mc-swarm-cve{font-size:11px;color:#f5c542;}
   </style>
   <header class="chat-header">
     <div class="ht">
@@ -526,6 +532,10 @@
       <div class="mc-card">
         <h3>📜 Per-Phase Output</h3>
         <pre class="mc-pre" id="mc-output">—</pre>
+      </div>
+      <div class="mc-card" style="grid-column:1/-1">
+        <h3>🐝 Swarm Live-Map <em id="mc-swarm-count"></em></h3>
+        <div id="mc-swarm-nodes"><span class="mc-hint">— no swarm campaigns yet —</span></div>
       </div>
     </div>
     <button class="mc-dl" id="mc-dl" disabled>⬇ Download Report (Markdown)</button>
@@ -645,6 +655,43 @@
   el("mc-refresh").onclick=refreshList;
   sel.onchange=function(){ if(sel.value){loadMission(sel.value);} else {renderEmpty();} };
   refreshList();
+})();
+</script>
+<script>
+/* SWARM LIVE-MAP (roadmap #7, v0.8.11) — standalone, non-breaking */
+(function(){
+  try{
+    var box=document.querySelector("#mc-swarm-nodes"); if(!box) return;
+    var cnt=document.querySelector("#mc-swarm-count");
+    function render(d){
+      var sw=(d&&Array.isArray(d.swarms))?d.swarms:(Array.isArray(d)?d:[]);
+      if(cnt) cnt.textContent="("+sw.length+")";
+      if(!sw.length){ box.innerHTML='<span class="mc-hint">— no swarm campaigns yet —</span>'; return; }
+      var html="";
+      for(var i=0;i<sw.length;i++){
+        var s=sw[i]||{};
+        var nodes=(s.swarm&&Array.isArray(s.swarm.nodes))?s.swarm.nodes:(Array.isArray(s.nodes)?s.nodes:[]);
+        if(!nodes.length){ html+='<div class="mc-swarm-host"><b>🐝 '+String(s.key||s.name||"swarm")+'</b><span class="mc-hint">no nodes yet</span></div>'; continue; }
+        for(var j=0;j<nodes.length;j++){
+          var n=nodes[j]||{}; if(!n.host) continue;
+          var live=!!n.live;
+          var ports=Array.isArray(n.ports)&&n.ports.length?n.ports.join(", "):"—";
+          var cves=Array.isArray(n.cves)&&n.cves.length?n.cves.join(", "):"";
+          html+='<div class="mc-swarm-host"><b>'+String(n.host)+'</b>'
+            +'<span class="'+(live?"mc-swarm-live":"mc-swarm-dead")+'">'+(live?"● LIVE":"○ DEAD")+'</span>'
+            +'<span class="mc-swarm-ports">ports: '+ports+'</span>'
+            +(cves?'<span class="mc-swarm-cve">cve: '+cves+'</span>':"")
+            +'</div>';
+        }
+      }
+      box.innerHTML=html||'<span class="mc-hint">—</span>';
+    }
+    function poll(){
+      try{ fetch("/api/swarm",{cache:"no-store"}).then(function(r){return r.json();}).then(render).catch(function(){}); }catch(e){}
+    }
+    poll();
+    setInterval(poll,4000);
+  }catch(e){}
 })();
 </script>
 <script src="/gatekeeper/lockscreen.js?v=0.8.8" defer></script>

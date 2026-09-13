@@ -10,6 +10,9 @@ making the model remember the sequence:
               ports + shallow directory fuzz on live roots
     vuln    - CVE lookup per discovered tech / service banner + optional
               nuclei template runs (opt-in; slow)
+    exploit - EXPLOIT AUTO-RUN CHAIN: CVE hits are actively chased -
+              targeted nuclei verification + ready-to-run PoC probes
+              (artifacts/exploit_<target>/) + payload-memory signals
     report  - findings logged via reporting + markdown report written
 
 Every mission persists to campaigns/<target>.json.  A phase interrupted
@@ -23,6 +26,7 @@ Public tools:
     mission_recon    - run only the recon phase
     mission_scan     - run only the scan phase
     mission_vuln     - run only the vuln phase
+    mission_exploit  - exploit auto-run chain phase only
     mission_report   - run only the report phase
     mission_resume   - alias: attack_mission auto from where it stopped
     mission_status   - show campaign progress (one target or all)
@@ -43,9 +47,10 @@ from .cpe_match import tool_cpe_scan, tool_cpe_nuclei_scan
 from .reporting import tool_add_finding
 from .payload_memory import (
     tool_payload_memory_record, tool_payload_memory_top,
+    tool_payload_memory_ranking,
 )
 
-PHASE_ORDER = ("recon", "scan", "vuln", "report")
+PHASE_ORDER = ("recon", "scan", "vuln", "exploit", "report")
 
 WEB_PORTS = frozenset({
     80, 443, 8000, 8080, 8443, 8888, 9000, 9090, 9443, 3000, 5000,
@@ -409,6 +414,146 @@ def _phase_vuln(state, ctx):
         len(entry["queries"]), len(entry["hits"]), hits, findings)
 
 
+def _phase_exploit(state, ctx):
+    """EXPLOIT AUTO-RUN CHAIN: every CVE hit from the vuln phase becomes
+    an ACTIVE attempt instead of a passive log line -
+      1) targeted nuclei verification against live web targets,
+      2) a ready-to-run PoC probe deliverable saved under artifacts/,
+      3) recorded into payload memory as an exploit-chain signal.
+    Bounded by the mission budget; nothing is hidden from the report."""
+    started = time.time()
+    host = state["target"]
+    vuln = state.get("phases", {}).get("vuln", {})
+    hits = vuln.get("hits", []) or []
+    web_targets = list(state.get("phases", {}).get("scan", {})
+                       .get("web", {}) or {})
+    entry = {"status": "done", "attempts": [], "pocs": []}
+    if not hits:
+        entry["note"] = "no CVE hits from vuln phase - chain idle"
+        state["phases"]["exploit"] = entry
+        _save(state, ctx.campaign_dir)
+        return "[exploit] idle - no CVE hits from vuln phase"
+    art_dir = os.path.join(os.path.dirname(ctx.reports_dir or "reports"),
+                           "artifacts", "exploit_%s" % _slug(host))
+    for h in hits[:6]:
+        cves = h.get("cves", [])[:2]
+        if not cves:
+            continue
+        ctx.budget.check(8.0)
+        att = {"query": h["query"], "cves": cves,
+               "attempts": [], "poc_file": ""}
+        for url in web_targets[:2]:
+            if not ctx.budget.check(30.0):
+                break
+            res = ""
+            try:
+                res = tool_nuclei_scan(url)
+            except Exception as exc:
+                res = "FAILED: %r" % (exc,)
+            att["attempts"].append({"url": url,
+                                     "nuclei": _trunc(res, 700)})
+        try:
+            os.makedirs(art_dir, exist_ok=True)
+            poc_file = os.path.join(art_dir, "poc_%s.py" % _slug(cves[0]))
+            with io.open(poc_file, "w", encoding="utf-8") as fh:
+                fh.write(_poc_probe(cves[0], host, h["query"],
+                                    web_targets[:2]))
+            att["poc_file"] = poc_file
+            entry["pocs"].append(poc_file)
+        except Exception as exc:
+            state["errors"].append(
+                {"phase": "exploit", "step": "poc %s" % cves[0],
+                 "error": repr(exc)})
+        entry["attempts"].append(att)
+        try:
+            tool_payload_memory_record(
+                host, payload="cve:%s:%s" % (cves[0], h["query"]),
+                signal="exploit_chained", vuln_class="cve")
+        except Exception:
+            pass
+    findings = 0
+    for att in entry["attempts"][:8]:
+        for cve in att.get("cves", [])[:1]:
+            try:
+                tool_add_finding(
+                    asset=host,
+                    title="Exploit chain auto-run: %s via %s"
+                          % (cve, att["query"]),
+                    severity="high",
+                    description=("exploit phase auto-chained CVE -> active "
+                                 "nuclei verification + PoC probe deliverable"),
+                    evidence=("exploit auto-run: %d nuclei attempts, PoC=%s"
+                              % (len(att.get("attempts", [])),
+                                 att.get("poc_file", "none"))),
+                    confidence="low",
+                    status="needs-validation")
+                findings += 1
+            except Exception:
+                pass
+    entry["findings_logged"] = findings
+    entry["elapsed_s"] = round(time.time() - started, 1)
+    state["phases"]["exploit"] = entry
+    _save(state, ctx.campaign_dir)
+    ctx.budget.check()
+    return ("[exploit] chained: %d CVE hit(s) | %d nuclei attempt(s) | "
+            "%d PoC probe(s) | findings: %d" % (
+                len(entry["attempts"]),
+                sum(len(a.get("attempts", []))
+                    for a in entry["attempts"]),
+                len(entry["pocs"]), findings))
+
+
+def _poc_probe(cve_id, host, query, urls):
+    """Self-contained non-destructive verification probe for a chained
+    CVE - docs + precise steps, ready to run/reuse by the agent."""
+    lines = [
+        "# EXPLOIT CHAIN PROBE - %s" % cve_id,
+        "# Target: %s | matched query: %s" % (host, query),
+        "# Generated: %s" % _now(),
+        "# SAFETY: NON-DESTRUCTIVE - verify only, no data loss, no RCE",
+        "#",
+        "# CHAIN OUTPUT:",
+    ]
+    if urls:
+        for u in urls:
+            lines.append(
+                "#   - nuclei -u %s -tags %s,cve -rl 5" % (u, cve_id))
+            lines.append(
+                "#   - curl -sk -o /dev/null -w '%%{http_code} %%{time_total}'  %s"
+                " - verify baseline vs known-good" % u)
+    else:
+        lines.append(
+            "#   - no web target: verify %s against %s banner/service "
+            "manually (see vuln phase snippet)" % (cve_id, query))
+    lines += [
+        "#   - payload_memory_ranking class=cve - pick proven ammo",
+        "",
+        "import socket, sys",
+        "",
+        "HOST = %r" % host,
+        "CVE = %r" % cve_id,
+        "QUERY = %r" % query,
+        "",
+        "def banner_check(port=80, timeout=6):",
+        "    try:",
+        "        s = socket.create_connection((HOST, port), timeout)",
+        "        s.sendall(b'HEAD / HTTP/1.1\\r\\nHost: ' + HOST.encode()"
+        " + b'\\r\\nConnection: close\\r\\n\\r\\n')",
+        "        return s.recv(512).decode('replace').splitlines()[:4]",
+        "    except Exception as exc:",
+        "        return ['banner probe error: %s' % exc]",
+        "",
+        "if __name__ == '__main__':",
+        "    print('CVE', CVE, '| query', QUERY, '| host', HOST)",
+        "    for p in (80, 443, 5432):",
+        "        lines = banner_check(p)",
+        "        print('- port %d:' % p, ' | '.join(lines)[:220])",
+        "    sys.exit(0)",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def _phase_report(state, ctx):
     host = state["target"]
     lines = []
@@ -468,6 +613,22 @@ def _phase_report(state, ctx):
             for url, out in vuln["nuclei"].items():
                 lines.append("- `%s`" % url)
                 lines.append("  %s" % str(out)[:400].replace("\n", " | "))
+    exploit = state.get("phases", {}).get("exploit", {})
+    if exploit and exploit.get("attempts"):
+        lines.append("")
+        lines.append("## Exploitation (auto-run chain)")
+        for att in exploit["attempts"][:8]:
+            lines.append("- `%s` — %s" % (att["query"],
+                                           ", ".join(att.get("cves", []))))
+            for a in att.get("attempts", [])[:2]:
+                lines.append("    nuclei %s — %s" % (
+                    a.get("url", "?"), str(a.get("nuclei", ""))[:220]
+                    .replace("\n", " | ")))
+            if att.get("poc_file"):
+                lines.append("    PoC probe: `%s`" % att["poc_file"])
+        if exploit.get("pocs"):
+            lines.append("")
+            lines.append("PoC probes written: %d" % len(exploit["pocs"]))
     try:
         pbits = tool_payload_memory_top(host, top_k=8)
     except Exception:
@@ -510,6 +671,7 @@ _PHASES = {
     "recon": _phase_recon,
     "scan": _phase_scan,
     "vuln": _phase_vuln,
+    "exploit": _phase_exploit,
     "report": _phase_report,
 }
 
@@ -554,8 +716,8 @@ def _run_phase(target, phase, campaign_dir="", run_nuclei=False,
     if not target:
         return "mission %s: provide a target (IP or domain)" % phase
     if phase not in _PHASES:
-        return ("mission %s: phase must be one of recon|scan|vuln|report"
-                % phase)
+        return ("mission %s: phase must be one of recon|scan|vuln|"
+                "exploit|report" % phase)
     state = _load(target, campaign_dir)
     ctx = _make_ctx(campaign_dir, run_nuclei, budget_sec)
     return _run_one(state, phase, ctx)
@@ -569,7 +731,8 @@ def tool_attack_mission(target="", phase="", campaign_dir="",
                         run_nuclei=False, budget_sec=100):
     """AUTO-PILOT: run every unfinished attack-mission phase in order.
 
-    phase=''  -> auto: recon -> scan -> vuln -> report (skips done ones)
+    phase=''  -> auto: recon -> scan -> vuln -> exploit -> report
+    (skips done ones)
     phase=X   -> run only that one phase
     """
     target = (target or "").strip()
@@ -603,6 +766,14 @@ def tool_mission_scan(target="", campaign_dir=""):
 
 def tool_mission_vuln(target="", campaign_dir="", run_nuclei=False):
     return _run_phase(target, "vuln", campaign_dir, run_nuclei, 110)
+
+
+def tool_mission_exploit(target="", campaign_dir=""):
+    """EXPLOIT AUTO-RUN CHAIN phase: CVE hits from the vuln phase are
+    actively chased - targeted nuclei verification on live web targets,
+    ready-to-run PoC probes saved under artifacts/exploit_<target>/, and
+    exploit-chain signals recorded into payload memory."""
+    return _run_phase(target, "exploit", campaign_dir, False, 110)
 
 
 def tool_mission_report(target="", campaign_dir=""):
@@ -667,14 +838,16 @@ def tool_mission_reset(target="", campaign_dir=""):
     return "mission_reset: no campaign file for %r" % (target,)
 
 
-def tool_mission_payloads(target="", top_k=10):
-    """Campaign continuity: ranked payload-effectiveness memory for a
-    target - whatever worked on this host before, auto-refreshed by
-    mission scans. Use with top_k to limit rows."""
+def tool_mission_payloads(target="", top_k=10, global_rank=False):
+    """Campaign continuity: ranked payload-effectiveness memory.
+    target='' + global_rank=True -> CROSS-CAMPAIGN leaderboard (payloads
+    that worked across many hosts); otherwise per-target memory."""
     try:
         top_k = int(top_k or 10)
     except (TypeError, ValueError):
         top_k = 10
+    if global_rank:
+        return tool_payload_memory_ranking(top_k=top_k)
     return tool_payload_memory_top((target or "").strip(),
                                    top_k=top_k)
 

@@ -206,6 +206,64 @@ class PayloadMemory:
                             e.get("last_seen", "?"), e.get("source", "")))
         return "\n".join(lines)
 
+    def rank_global(self, vuln_class="", top_k=10, min_samples=1):
+        """CROSS-CAMPAIGN ranking: aggregate payload effectiveness across
+        every host/campaign ever touched.  A payload that produced signals
+        on many distinct hosts beats a single-host fluke, so campaigns
+        share what actually works."""
+        now_dt = datetime.datetime.now()
+        try:
+            min_samples = max(1, int(min_samples or 1))
+            top_k = max(1, int(top_k or 10))
+        except (TypeError, ValueError):
+            min_samples, top_k = 1, 10
+        vc = str(vuln_class or "").strip().lower()
+        with self._lock:
+            buckets = self._data["payloads"]
+            agg = {}
+            for host, rows in buckets.items():
+                for e in rows:
+                    if vc and (e.get("vuln_class") or "").lower() != vc:
+                        continue
+                    p = str(e.get("payload") or "").strip()
+                    if not p:
+                        continue
+                    a = agg.setdefault(p, {
+                        "payload": p, "hits": 0, "misses": 0,
+                        "hosts": set(), "scores": [], "vuln_class": "",
+                        "db": "", "waf": "", "last_seen": "",
+                        "source": ""})
+                    a["hits"] += int(e.get("hits", 0))
+                    a["misses"] += int(e.get("misses", 0))
+                    a["hosts"].add(host)
+                    a["scores"].append(self._score(e, now_dt))
+                    for k in ("vuln_class", "db", "waf", "source"):
+                        if e.get(k) and not a.get(k):
+                            a[k] = e[k]
+                    if e.get("last_seen", "") > a["last_seen"]:
+                        a["last_seen"] = e["last_seen"]
+            ranked = []
+            for a in agg.values():
+                if len(a["hosts"]) < min_samples:
+                    continue
+                n = len(a["scores"])
+                gscore = round(sum(a["scores"]) / n, 4)
+                ranked.append({
+                    "payload": a["payload"],
+                    "hits": a["hits"],
+                    "misses": a["misses"],
+                    "hosts": len(a["hosts"]),
+                    "score": gscore,
+                    "vuln_class": a["vuln_class"],
+                    "db": a["db"],
+                    "waf": a["waf"],
+                    "last_seen": a["last_seen"],
+                    "source": a["source"],
+                })
+            ranked.sort(key=lambda r: (r["hosts"], r["score"],
+                                       r["hits"]), reverse=True)
+        return ranked[:top_k]
+
     def forget(self, host=""):
         with self._lock:
             if host:
@@ -255,3 +313,35 @@ def tool_payload_memory_reset(host=""):
     """Forget remembered payloads for one host, or everything when host
     is omitted."""
     return PAYLOAD_MEMORY.forget(host)
+
+
+def tool_payload_memory_ranking(vuln_class="", top_k=10, min_samples=1):
+    """CROSS-CAMPAIGN payload ranking: payloads that produced signals on
+    MULTIPLE hosts/campaigns, ranked. min_samples = minimum distinct hosts
+    before a payload enters the global leaderboard (default 1)."""
+    try:
+        top_k = max(1, int(top_k or 10))
+        min_samples = max(1, int(min_samples or 1))
+    except (TypeError, ValueError):
+        top_k, min_samples = 10, 1
+    rows = PAYLOAD_MEMORY.rank_global(vuln_class=vuln_class,
+                                      top_k=top_k, min_samples=min_samples)
+    if not rows:
+        return ("(no cross-campaign payload ranking yet - run missions/"
+                "adaptive_fuzz against multiple hosts first)")
+    lines = ["Cross-campaign payload leaderboard (top %d, min %d host(s)%s):"
+             % (len(rows), min_samples,
+                (" class=%s" % vuln_class) if vuln_class else "")]
+    for r in rows:
+        bits = ["hits=%d" % r["hits"], "misses=%d" % r["misses"],
+                "hosts=%d" % r["hosts"], "score=%.3f" % r["score"]]
+        if r.get("db"):
+            bits.append("db=%s" % r["db"])
+        if r.get("waf"):
+            bits.append("waf=%s" % r["waf"])
+        if r.get("vuln_class"):
+            bits.append("class=%s" % r["vuln_class"])
+        lines.append("  %s | %s | last_seen=%s | %s"
+                     % (" | ".join(bits), r["payload"][:90],
+                        r.get("last_seen", "?"), r.get("source", "")))
+    return "\n".join(lines)
