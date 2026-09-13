@@ -7,6 +7,15 @@
   + 0.15*cross_campaign` — swarm kabhi payload technique dobara reinvent nahi karta.
 - feat(webui): `/api/swarm/payloads` (fused payload ranking feed) + `/api/swarm/chains`
   (multi-target chain graph: shared service:port = pivot edge, shared CVE = chain edge).
+- feat(webui_ui): templates/index.html mein 2 naye war-room cards — "🧬 Payload
+  Fusion" (top fused payloads: score bar + hits + campaign count + CVE/technique
+  tags, 6s auto-poll) + "⛓ Multi-Target Chain" (SVG ring graph: green dashed =
+  pivot edge shared svc:port, red = chain edge shared CVE; host nodes = last octet
+  + ports + top CVE tag, live 6s refresh).
+- test(ui): panels live-verified on mock server — index served (Payload Fusion=1,
+  Multi-Target Chain=1, mc-chain-svg=4, mc-fusion-body=2); /api/swarm/payloads ->
+  4 fused rows (nginx/80 0.88 hits=2 nuclei:poc|rce|sqli); /api/swarm/chains ->
+  4 nodes / 5 edges incl. CVE-2021-23017 chain edge.
 - fix(technique): tag union ab set-based + normalized (`nuclei:poc|rce|sqli`),
   same-campaign multiple exploit entries ke techniques merge hoti hain overwrite nahi.
 - test: fusion unit-test passed (2 campaigns -> nginx/80 score 0.91); endpoints
