@@ -1,3 +1,23 @@
+## [2026-09-12] v0.8.9 - CPE -> NUCLEI SNIPER AUTO-TEMPLATE MATCH
+
+- feat(tools): NEW `cpe_match` module - nmap -sV banners se CPE strings nikal kar
+  local nuclei-templates index par sirf RELEVANT templates auto-roll karta hai
+  (blind full-scan nahi, sniper approach). 5 naye tools registered:
+  `cpe_scan`, `cpe_extract`, `cpe_match`, `cpe_nuclei_scan`, `cpe_template_index`.
+- feat(auto_pilot): vuln phase ab CPE-targeted hai - pehle cpe_scan (nmap -sV) chalta
+  hai, phir `_cpe_banner_lines` helper rows ko nmap-style (`80/tcp open http Apache
+  2.4.49`) mein convert karta hai, aur per-URL sirf matched templates ke saath
+  `tool_cpe_nuclei_scan` run hota hai. "no templates matched" par generic
+  `tool_nuclei_scan` fallback. Templates dir indexing + 6h TTL cache; CVE-2024-3094
+  jaisi zero-hit queries working as designed (head-4096 read).
+- test: `tool_cpe_match("openssh")` -> 3 template hits; apache -> 72; unit test
+  `_cpe_banner_lines` PASS; full pipeline `tool_cpe_nuclei_scan(banner=...)` -> 75
+  templates matched (apache+openssh), nuclei exit 0; mission smoke test complete -
+  cpe_banner state + generic fallback verified on 127.0.0.1.
+- infra: 13,717 templates extract karke `C:\Users\GLOBAL IT STORE\nuclei-templates\`
+  (http/ network/ dns/ ssl/ top-level) - direct GitHub zip, `nuclei -update-templates`
+  timeout ki wajah se.
+
 ## [2026-09-12] v0.8.5 - SWARM WAR-ROOM CAMPAIGN (multi-target parallel mission)
 
 - feat(tools): NEW `swarm_campaign` tool - ONE command attacks MANY targets: fan-out

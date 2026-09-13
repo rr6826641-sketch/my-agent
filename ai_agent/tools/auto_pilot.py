@@ -39,6 +39,7 @@ from .network import tool_port_scan, tool_ssl_info
 from .recon import tool_subdomain_enum, tool_dir_fuzz, tool_cve_lookup
 from .web import tool_http_request, tool_tech_detect, tool_check_headers
 from .pentest import tool_nuclei_scan
+from .cpe_match import tool_cpe_scan, tool_cpe_nuclei_scan
 from .reporting import tool_add_finding
 from .payload_memory import (
     tool_payload_memory_record, tool_payload_memory_top,
@@ -303,6 +304,19 @@ def _phase_scan(state, ctx):
                                             web_list or "none")
 
 
+
+def _cpe_banner_lines(text):
+    """Convert tool_cpe_scan output rows into nmap-style banner lines
+    ("80/tcp open http Apache 2.4.49") so the sniper pipeline can parse."""
+    lines = []
+    for ln in (text or "").splitlines():
+        m = re.match(r"^-\s+(\d+)/(tcp|udp)\s+(\S+)\s*\|\s*([^|]*?)\s*\|\s*cpe:", ln)
+        if m:
+            port, proto, svc = m.group(1), m.group(2), m.group(3)
+            prod_ver = (m.group(4) or "").strip()
+            lines.append("%s/%s open %s %s" % (port, proto, svc, prod_ver))
+    return "\n".join(lines)
+
 def _phase_vuln(state, ctx):
     started = time.time()
     host = state["target"]
@@ -361,12 +375,29 @@ def _phase_vuln(state, ctx):
     entry["findings_logged"] = findings
     if ctx.run_nuclei:
         entry["nuclei"] = {}
+        entry["cpe_banner"] = ""
+        cpe_banner = ""
+        try:
+            cpe_out = tool_cpe_scan(state["target"])
+            cpe_banner = _cpe_banner_lines(cpe_out)
+            entry["cpe_banner"] = _trunc(
+                cpe_banner or cpe_out, 1500)
+        except Exception as exc:
+            entry["cpe_banner"] = "cpe_scan FAILED: %r" % (exc,)
         for url in scan.get("web", {}):
             ctx.budget.check(60.0)
+            res = ""
             try:
-                entry["nuclei"][url] = _trunc(tool_nuclei_scan(url), 1500)
+                if cpe_banner:
+                    res = tool_cpe_nuclei_scan(url, banner=cpe_banner)
+                    if "no templates matched" in res:
+                        fb = tool_nuclei_scan(url)
+                        res = res + "\n[generic fallback] " + _trunc(fb, 600)
+                else:
+                    res = tool_nuclei_scan(url)
             except Exception as exc:
-                entry["nuclei"][url] = "FAILED: %r" % (exc,)
+                res = "FAILED: %r" % (exc,)
+            entry["nuclei"][url] = _trunc(res, 1500)
     entry["elapsed_s"] = round(time.time() - started, 1)
     state["phases"]["vuln"] = entry
     _save(state, ctx.campaign_dir)

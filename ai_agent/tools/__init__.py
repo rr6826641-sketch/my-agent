@@ -58,6 +58,10 @@ from .auto_pilot import (
 from .swarm_campaign import (
     tool_swarm_campaign, tool_swarm_status,
 )
+from .cpe_match import (
+    tool_cpe_scan, tool_cpe_extract, tool_cpe_match,
+    tool_cpe_nuclei_scan, tool_cpe_template_index,
+)
 from .web_fetch import fetch_url
 from .reasoning import tool_plan_task, tool_reason, tool_reflect
 from .search import (
@@ -1805,6 +1809,48 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                              "campaign_dir": _str_prop("state dir")},
               "required": []},
              lambda token="", campaign_dir="": tool_swarm_status(token, campaign_dir)),
+
+        Tool("cpe_scan",
+             "CPE->NUCLEI: run nmap -sV against a host and return per-port product/version/CPE rows (the sniper input). Usage: cpe_scan(host='10.0.0.7') or cpe_scan(host='10.0.0.7', ports='22,80,443').",
+             {"type": "object",
+              "properties": {"host": _str_prop("target host / IP"),
+                             "ports": _str_prop("optional port list, e.g. 22,80,443")},
+              "required": ["host"]},
+             lambda host="", ports="": tool_cpe_scan(host, ports)),
+
+        Tool("cpe_extract",
+             "CPE->NUCLEI: parse raw nmap -sV output text into product/version/CPE rows without touching the network. Usage: cpe_extract(banner_text='80/tcp open http Apache httpd 2.4.49').",
+             {"type": "object",
+              "properties": {"banner_text": _str_prop("raw nmap -sV output text")},
+              "required": ["banner_text"]},
+             lambda banner_text="": tool_cpe_extract(banner_text)),
+
+        Tool("cpe_match",
+             "CPE->NUCLEI: resolve a CPE string or product keyword (apache, nginx, tomcat, openssh...) to local nuclei template paths from the cached index. Usage: cpe_match(cpe_or_product='apache httpd 2.4.49'). rebuild=true re-indexes after nuclei -update-templates.",
+             {"type": "object",
+              "properties": {"cpe_or_product": _str_prop("CPE string or product keyword"),
+                             "rebuild": _str_prop("true/false re-build index", "false")},
+              "required": ["cpe_or_product"]},
+             lambda cpe_or_product="", rebuild="": tool_cpe_match(cpe_or_product, rebuild)),
+
+        Tool("cpe_nuclei_scan",
+             "CPE->NUCLEI SNIPER: full pipeline on one URL. Pass a banner line (or let it nmap the host), resolve CPE, match ONLY relevant nuclei templates and run them. Usage: cpe_nuclei_scan(url='http://10.0.0.7:8080/', banner='80/tcp open http Apache httpd 2.4.49'). Optional ports, extra_cves='CVE-2024-1234'.",
+             {"type": "object",
+              "properties": {"url": _str_prop("target URL to scan"),
+                             "banner": _str_prop("nmap -sV banner text (optional)"),
+                             "ports": _str_prop("ports to nmap if banner not given"),
+                             "rebuild": _str_prop("true/false re-build index"),
+                             "extra_cves": _str_prop("comma separated CVE ids")},
+              "required": ["url"]},
+             lambda url="", banner="", ports="", rebuild="", extra_cves="": tool_cpe_nuclei_scan(
+                 url, banner, ports, rebuild, extra_cves)),
+
+        Tool("cpe_template_index",
+             "CPE->NUCLEI: inspect the cached template index (source dir, templates indexed, product/CVE keys) or rebuild with rebuild=true. Usage: cpe_template_index(rebuild='true').",
+             {"type": "object",
+              "properties": {"rebuild": _str_prop("true/false re-build the index")},
+              "required": []},
+             lambda rebuild="": tool_cpe_template_index(rebuild)),
 
 
         Tool("ffuf_fuzz", "Fast web fuzzing with ffuf (dir or vhost mode).",
