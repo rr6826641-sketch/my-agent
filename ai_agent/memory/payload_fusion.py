@@ -81,7 +81,10 @@ class PayloadMemory:
             nuclei = (e.get("nuclei") or "").lower()
             tags = [t for t in _TECH_TAGS if t in nuclei]
             if tags:
-                rec["technique"] = "nuclei:%s" % ("|".join(tags[:3]))
+                t = "nuclei:%s" % ("|".join(tags[:3]))
+                cur = set(p.replace("nuclei:", "") for p in (rec["technique"] or "").split("|") if p)
+                cur |= set(p.replace("nuclei:", "") for p in t.split("|") if p)
+                rec["technique"] = "nuclei:" + "|".join(sorted(cur))
             if cves or tags:
                 rec["hits"] += 1
         for h in (phases.get("recon") or {}).get("hosts", []) or []:
@@ -114,8 +117,9 @@ class PayloadMemory:
                 target["hits"] = int(target.get("hits", 0)) + int(rec["hits"])
                 target["cves"] = sorted(set(target.get("cves", [])) | set(rec["cves"]))
                 if rec.get("technique"):
-                    pieces = set((target.get("technique") or "").split("|")) | set(rec["technique"].split("|"))
-                    target["technique"] = "|".join(sorted(p for p in pieces if p))
+                    cur = set(p.replace("nuclei:", "") for p in (target.get("technique") or "").split("|") if p)
+                    cur |= set(p.replace("nuclei:", "") for p in rec["technique"].split("|") if p)
+                    target["technique"] = "nuclei:" + "|".join(sorted(cur))
                 if rec.get("snippet") and not target.get("snippet"):
                     target["snippet"] = rec["snippet"]
                 camps = target.setdefault("campaigns", [])

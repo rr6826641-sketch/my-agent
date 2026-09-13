@@ -3266,6 +3266,77 @@ def api_swarm():
     return jsonify({"swarms": out, "count": len(out)})
 
 
+
+@app.route("/api/swarm/payloads")
+def api_swarm_payloads():
+    """PAYLOAD MEMORY FUSION: fuse every war-room campaign's payload
+    evidence into one cross-campaign ranking (ULTRA upgrade)."""
+    from ai_agent.memory.payload_fusion import fuse_campaigns
+    try:
+        rep = fuse_campaigns()
+        return jsonify({"stats": rep["stats"], "payloads": rep["payloads"][:60],
+                        "count": len(rep["payloads"]), "ingested": rep["ingested"]})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/swarm/chains")
+def api_swarm_chains():
+    """MULTI-TARGET CHAIN VIZ: campaign graph - hosts as nodes,
+    shared service:port -> pivot edges, shared CVE -> chain edges."""
+    nodes, edges, node_by, camps = [], [], {}, {}
+    for key, path in _iter_campaigns():
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                d = json.load(fh)
+        except Exception:
+            continue
+        if d.get("kind") != "swarm_campaign":
+            continue
+        host_ports, host_cves, host_svcs = {}, {}, {}
+        for h in (d.get("phases", {}).get("recon") or {}).get("hosts", []) or []:
+            if not isinstance(h, dict) or not h.get("host"):
+                continue
+            host = str(h["host"])
+            host_ports[host] = [str(p.get("port")) for p in (h.get("ports") or [])
+                                if p.get("port")][:12]
+            host_svcs[host] = ["%s/%s" % (p.get("service") or "?", p.get("port"))
+                               for p in (h.get("ports") or []) if p.get("port")][:16]
+            host_cves[host] = []
+            node_by[host] = {"campaign": key, "live": bool(host_ports[host])}
+        for e in (d.get("phases", {}).get("exploit") or {}).get("targets", []) or []:
+            if not isinstance(e, dict) or e.get("host") not in node_by:
+                continue
+            host = str(e["host"])
+            for c in (e.get("cves") or []) or []:
+                if str(c).startswith("CVE-") and str(c) not in host_cves[host]:
+                    host_cves[host].append(str(c))
+        camps[key] = {"hosts": sum(1 for n in node_by.values() if n["campaign"] == key),
+                      "live": sum(1 for n in node_by.values()
+                                  if n["campaign"] == key and n["live"])}
+        for host, meta in node_by.items():
+            if not any(n["id"] == host for n in nodes):
+                nodes.append({"id": host, "label": host, "group": key,
+                              "ports": host_ports.get(host, []),
+                              "cves": host_cves.get(host, [])[:4],
+                              "services": host_svcs.get(host, []),
+                              "live": meta["live"]})
+    ids = [n["id"] for n in nodes]
+    for i in range(len(nodes)):
+        for j in range(i + 1, len(nodes)):
+            a, b = nodes[i], nodes[j]
+            shared_svc = sorted(set(a.get("services", [])) & set(b.get("services", [])))
+            shared_cve = sorted(set(a.get("cves", [])) & set(b.get("cves", [])))
+            if shared_svc:
+                edges.append({"source": a["id"], "target": b["id"],
+                              "type": "pivot", "label": ";".join(shared_svc[:3])})
+            if shared_cve:
+                edges.append({"source": a["id"], "target": b["id"],
+                              "type": "chain", "label": ";".join(shared_cve[:3])})
+    return jsonify({"nodes": nodes, "edges": edges, "campaigns": camps,
+                    "node_count": len(nodes), "edge_count": len(edges)})
+
+
 @app.route("/api/missions/<path:key>")
 def api_missions_get(key):
     target = _find_campaign(key)

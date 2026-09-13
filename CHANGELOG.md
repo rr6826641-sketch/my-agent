@@ -1,3 +1,17 @@
+## [2026-09-13] v10.1 - PAYLOAD MEMORY FUSION + CHAIN VIZ
+
+- feat(payload_fusion): naya `ai_agent/memory/payload_fusion.py` — `PayloadMemory`
+  cross-campaign payload/loot fusion engine (har war-room campaign ka exploit/recon
+  evidence = service:port -> CVE/technique records; `payload_memory.json` persistence).
+- feat(fusion_score): `score = 0.55*hit_ratio + 0.30*recency (7-din half-life)
+  + 0.15*cross_campaign` — swarm kabhi payload technique dobara reinvent nahi karta.
+- feat(webui): `/api/swarm/payloads` (fused payload ranking feed) + `/api/swarm/chains`
+  (multi-target chain graph: shared service:port = pivot edge, shared CVE = chain edge).
+- fix(technique): tag union ab set-based + normalized (`nuclei:poc|rce|sqli`),
+  same-campaign multiple exploit entries ke techniques merge hoti hain overwrite nahi.
+- test: fusion unit-test passed (2 campaigns -> nginx/80 score 0.91); endpoints
+  live-verified on mock server (3 hosts/4 edges, payload score 0.88).
+
 ## [2026-09-13] v10.0 - ULTRA MODE v10 + PERSONA SWARM (roadmap #10)
 
 - feat(ultra_v10): naya `ai_agent/ultra_v10.py` module — `PersonaSwarmRouter`
