@@ -1,3 +1,34 @@
+## [2026-09-13] v10.4 - PAYLOAD FUSION AUTO-INJECT (Feature B COMPLETE)
+
+- feat(fusion_auto_inject): `ai_agent/tools/auto_pilot.py` mein PAYLOAD-FUSION
+  AUTO-INJECT pipeline - har NAYI campaign shuru hote hi `payload_memory` ke
+  top fused payload rows (`fuse(min_hits=1)`) khud hi `state['payload_cache']`
+  mein inject ho jati hain (source="payload_fusion"), exact-once gate +
+  never-clobber (manual cache kabhi overwrite nahi hoti). FUSED_INJECT_TOP_K=12.
+- feat(fusion_match): `_match_fused` rank engine - open ports ke khilaf fused ammo
+  match hota hai (rank2=proven port / rank1=svc_key suffix), score desc + cap 6;
+  `_fused_tags` nuclei:poc|rce|sqli -> poc,rce,sqli tags extract karta hai.
+- feat(exploit_fire): `_phase_exploit` jab CVE hits nahi milte, fused ammo LIVE
+  web target par fire karta hai (nuclei -tags), har attempt `fused_auto_inject`
+  signal ke saath payload memory par record hota hai (vuln_class=fused);
+  koi match na ho to chain idle rehta hai (koi false-positive nahi).
+- feat(report): report markdown mein 2 naye sections - "## Fused payload intel
+  (auto-injected)" + "### Fused ammo applied (matched open ports)".
+- feat(ui): WebUI `_mission_summary` ab `payload_cache` expose karta hai
+  (/api/missions), templates/index.html mission list + detail meta par
+  "🧩 Fused payloads: N" badge render karta hai.
+- feat(nuclei_tags): `pentest.tool_nuclei_scan` ko naya `tags=` param -
+  pipe/comma-separated nuclei tag groups payload-fusion drills ke liye.
+- test: `tests/test_payload_fusion_inject.py` 14/14 + `tests/test_fusion_e2e.py`
+  1/1 (real mock HTTP server par full kill-chain: inject -> match -> fire ->
+  report -> API -> badge -> exact-once resume) ALL PASS; webui dock/lockscreen
+  suite ke saath 45/45 GREEN.
+
+## [2026-09-13] v10.3 - WAR-ROOM LIVE CONTROLS (Feature A)
+
+- feat(warroom_controls): campaigns par browser se hi start/pause/kill buttons -
+  ab sirf dekhna nahi, full remote ops.
+
 ## [2026-09-13] v10.2 - ULTRA STYLE REGIME (agent ka writing form = HackerAI jiasa)
 
 - feat(style_prompt): `system_prompt.txt` me naya section "COMMUNICATION &

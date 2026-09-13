@@ -50,6 +50,9 @@ from .payload_memory import (
     tool_payload_memory_record, tool_payload_memory_top,
     tool_payload_memory_ranking,
 )
+from ..memory.payload_fusion import (
+    PayloadMemory as FusedPayloadMemory,
+)
 
 PHASE_ORDER = ("recon", "scan", "vuln", "exploit", "report")
 
@@ -57,6 +60,13 @@ WEB_PORTS = frozenset({
     80, 443, 8000, 8080, 8443, 8888, 9000, 9090, 9443, 3000, 5000,
     7000, 7080, 8020, 8081, 8088, 8880,
 })
+
+# PAYLOAD FUSION AUTO-INJECT (Feature B, v10.4): the cross-campaign fused
+# payload memory is injected into every NEW campaign so proven ammo fires
+# on day one instead of waiting for a fresh vuln-phase CVE hit.
+FUSED_SOURCE = "payload_fusion"
+FUSED_INJECT_TOP_K = 12
+FUSED_MATCH_TOP_K = 6
 
 _PORT_RE = re.compile(r"^\s*(\d{1,5})\s+([A-Za-z0-9][A-Za-z0-9\-\_\.]*)\s*$",
                       re.MULTILINE)
@@ -243,6 +253,87 @@ def _mark(state, phase, status, extra=None):
 
 def _phase_done(state, phase):
     return state.get("phases", {}).get(phase, {}).get("status") == "done"
+
+
+# ---------------------------------------------------------------------------
+# Payload Fusion auto-inject (Feature B)
+# ---------------------------------------------------------------------------
+
+_FUSION_MEMORY = None
+
+
+def _fused_memory():
+    """Lazy singleton over the fused payload store (monkeypatchable)."""
+    global _FUSION_MEMORY
+    if _FUSION_MEMORY is None:
+        _FUSION_MEMORY = FusedPayloadMemory()
+    return _FUSION_MEMORY
+
+
+def _inject_fused_payloads(state, campaign_dir="", top_k=FUSED_INJECT_TOP_K):
+    """Exact-once auto-inject: on a campaign WITHOUT a cache yet, merge the
+    top fused payload rows into state['payload_cache'].  Never clobbers an
+    existing cache, and leaves the state untouched when memory has no fused
+    rows so a later run (after more campaigns fuse evidence) can inject."""
+    try:
+        if state.get("payload_cache") is not None:
+            return None
+        payloads = _fused_memory().fuse(min_hits=1)[:top_k]
+        if not payloads:
+            return None
+        state["payload_cache"] = {
+            "injected_at": _now(),
+            "source": FUSED_SOURCE,
+            "count": len(payloads),
+            "payloads": payloads,
+        }
+        _save(state, campaign_dir)
+        return state["payload_cache"]
+    except Exception:
+        return None
+
+
+def _fused_tags(rec):
+    """nuclei:poc|rce|sqli  ->  'poc,rce,sqli' (nuclei -tags style)."""
+    tech = str(rec.get("technique") or "")
+    if not tech.startswith("nuclei:"):
+        return ""
+    return ",".join(t for t in tech[len("nuclei:"):].split("|") if t)
+
+
+def _match_fused(payload_cache, open_ports, top_k=FUSED_MATCH_TOP_K):
+    """Rank fused memory rows against the campaign's OPEN ports:
+      rank 2 - recorded numeric port is open (service/port pair proven)
+      rank 1 - only the svc_key '/<port>' suffix matches the open port
+    Returns shallow copies sorted by (rank desc, score desc), capped."""
+    if not payload_cache:
+        return []
+    ports = set()
+    for p in open_ports or []:
+        try:
+            ports.add(int(p))
+        except (TypeError, ValueError):
+            continue
+    ranked = []
+    for rec in (payload_cache.get("payloads") or []):
+        rank = 0
+        try:
+            port = int(rec.get("port") or 0)
+            if port in ports:
+                rank = 2
+        except (TypeError, ValueError):
+            port = 0
+        if not rank:
+            m = re.search(r"/(\d+)$", str(rec.get("svc_key") or ""))
+            if m and int(m.group(1)) in ports:
+                rank = 1
+        if not rank:
+            continue
+        row = dict(rec)
+        row["_rank"] = rank
+        ranked.append(row)
+    ranked.sort(key=lambda r: (-r["_rank"], -float(r.get("score") or 0.0)))
+    return ranked[:top_k]
 
 
 # ---------------------------------------------------------------------------
@@ -510,7 +601,9 @@ def _phase_exploit(state, ctx):
       1) targeted nuclei verification against live web targets,
       2) a ready-to-run PoC probe deliverable saved under artifacts/,
       3) recorded into payload memory as an exploit-chain signal.
-    Bounded by the mission budget; nothing is hidden from the report."""
+    Feature B: fused cross-campaign ammo auto-injected at mission start is
+    matched against this campaign's open ports and fired with its proven
+    nuclei tags. Bounded by the mission budget; nothing is hidden."""
     started = time.time()
     host = state["target"]
     vuln = state.get("phases", {}).get("vuln", {})
@@ -518,11 +611,55 @@ def _phase_exploit(state, ctx):
     web_targets = list(state.get("phases", {}).get("scan", {})
                        .get("web", {}) or {})
     entry = {"status": "done", "attempts": [], "pocs": []}
-    if not hits:
-        entry["note"] = "no CVE hits from vuln phase - chain idle"
+    open_ports = [p.get("port")
+                  for p in state.get("phases", {}).get("recon", {})
+                  .get("ports", []) if p.get("port")]
+    fused_matched = _match_fused(state.get("payload_cache") or {},
+                                 open_ports)
+    if not hits and not fused_matched:
+        entry["note"] = ("no CVE hits from vuln phase and no fused ammo "
+                          "matched - chain idle")
         state["phases"]["exploit"] = entry
         _save(state, ctx.campaign_dir)
-        return "[exploit] idle - no CVE hits from vuln phase"
+        return "[exploit] idle - no CVE hits, no fused ammo matched"
+    if fused_matched:
+        # FEATURE B: fire the auto-injected fused ammo against ONE live web
+        # target per matched record, using the proven nuclei tags from the
+        # fused technique (e.g. nuclei:poc|rce|sqli). Budget-bounded.
+        applied = []
+        for rec in fused_matched:
+            tags = _fused_tags(rec)
+            fire = {"svc_key": rec.get("svc_key", "?"),
+                    "port": rec.get("port"),
+                    "score": rec.get("score", 0.0),
+                    "hits": rec.get("hits", 0),
+                    "technique": rec.get("technique", ""),
+                    "cves": (rec.get("cves") or [])[:3],
+                    "tags": tags,
+                    "attempts": []}
+            if not tags or not web_targets:
+                fire["note"] = ("no nuclei tags in technique" if not tags
+                                else "matched but no live web target")
+                applied.append(fire)
+                continue
+            ctx.budget.check(20.0)   # raises _BudgetExceeded when spent
+            url = web_targets[0]
+            res = ""
+            try:
+                res = tool_nuclei_scan(url, tags=tags)
+            except Exception as exc:
+                res = "FAILED: %r" % (exc,)
+            fire["attempts"].append(
+                {"url": url, "nuclei": _trunc(res, 700)})
+            applied.append(fire)
+            try:
+                tool_payload_memory_record(
+                    host, payload="fused:%s:%s" % (rec.get("svc_key", "?"),
+                                                   tags),
+                    signal="fused_auto_inject", vuln_class="fused")
+            except Exception:
+                pass
+        entry["fused_applied"] = applied
     art_dir = os.path.join(os.path.dirname(ctx.reports_dir or "reports"),
                            "artifacts", "exploit_%s" % _slug(host))
     for h in hits[:6]:
@@ -533,8 +670,7 @@ def _phase_exploit(state, ctx):
         att = {"query": h["query"], "cves": cves,
                "attempts": [], "poc_file": ""}
         for url in web_targets[:2]:
-            if not ctx.budget.check(30.0):
-                break
+            ctx.budget.check(30.0)   # raises _BudgetExceeded when spent
             res = ""
             try:
                 res = tool_nuclei_scan(url)
@@ -585,12 +721,16 @@ def _phase_exploit(state, ctx):
     state["phases"]["exploit"] = entry
     _save(state, ctx.campaign_dir)
     ctx.budget.check()
+    fused_n = len(entry.get("fused_applied", []))
+    fused_fired = sum(len(a.get("attempts", []))
+                      for a in entry.get("fused_applied", []))
     return ("[exploit] chained: %d CVE hit(s) | %d nuclei attempt(s) | "
-            "%d PoC probe(s) | findings: %d" % (
+            "%d PoC probe(s) | fused ammo: %d matched / %d fired | "
+            "findings: %d" % (
                 len(entry["attempts"]),
                 sum(len(a.get("attempts", []))
                     for a in entry["attempts"]),
-                len(entry["pocs"]), findings))
+                len(entry["pocs"]), fused_n, fused_fired, findings))
 
 
 def _poc_probe(cve_id, host, query, urls):
@@ -719,6 +859,45 @@ def _phase_report(state, ctx):
         if exploit.get("pocs"):
             lines.append("")
             lines.append("PoC probes written: %d" % len(exploit["pocs"]))
+    payload_cache = state.get("payload_cache") or {}
+    fused_rows = payload_cache.get("payloads") or []
+    if fused_rows:
+        lines.append("")
+        lines.append("## Fused payload intel (auto-injected)")
+        lines.append("_source: %s | injected_at: %s | %d row(s)_" % (
+            payload_cache.get("source", "?"),
+            payload_cache.get("injected_at", "?"), len(fused_rows)))
+        for rec in fused_rows[:8]:
+            lines.append("- `%s` — score %.3f, %s hit(s) across %d "
+                         "campaign(s), technique `%s`, cves: %s" % (
+                             rec.get("svc_key", "?"),
+                             float(rec.get("score") or 0.0),
+                             rec.get("hits", 0),
+                             len(rec.get("campaigns") or []),
+                             rec.get("technique") or "?",
+                             ", ".join((rec.get("cves") or [])[:4])
+                             or "none"))
+    fused_applied = exploit.get("fused_applied") or []
+    if fused_applied:
+        lines.append("")
+        lines.append("### Fused ammo applied (matched open ports)")
+        for fa in fused_applied[:6]:
+            tagbit = "[%s]" % fa["tags"] if fa.get("tags") else ""
+            att = ""
+            if fa.get("attempts"):
+                a0 = fa["attempts"][0]
+                att = " — nuclei %s — %s" % (
+                    a0.get("url", "?"),
+                    str(a0.get("nuclei", ""))[:160].replace("\n", " | "))
+            tail = att or (" — %s" % fa.get("note") if fa.get("note")
+                           else " — not fired")
+            lines.append("- `%s` (score %.3f, %s hit(s), %s%s)%s" % (
+                fa.get("svc_key", "?"),
+                float(fa.get("score") or 0.0),
+                fa.get("hits", 0),
+                fa.get("technique") or "technique?",
+                " " + tagbit if tagbit else "",
+                tail))
     try:
         pbits = tool_payload_memory_top(host, top_k=8)
     except Exception:
@@ -813,6 +992,7 @@ def _run_phase(target, phase, campaign_dir="", run_nuclei=False,
                 "exploit|report" % phase)
     state = _load(target, campaign_dir)
     ctx = _make_ctx(campaign_dir, run_nuclei, budget_sec, deep=deep)
+    _inject_fused_payloads(state, campaign_dir)  # silent hook (Feature B)
     return _run_one(state, phase, ctx)
 
 
@@ -840,6 +1020,10 @@ def tool_attack_mission(target="", phase="", campaign_dir="",
     state = _load(target, campaign_dir)
     ctx = _make_ctx(campaign_dir, run_nuclei, budget_sec, deep=deep)
     out = ["AUTO-PILOT mission: %s" % target]
+    fused = _inject_fused_payloads(state, campaign_dir)
+    if fused:
+        out.append("PAYLOAD FUSION: %d cross-campaign fused payload(s) "
+                   "auto-injected" % (fused.get("count", 0) or 0))
     for ph in PHASE_ORDER:
         if not _control_gate(target, campaign_dir):
             out.append("WAR-ROOM: campaign KILLED by operator - "

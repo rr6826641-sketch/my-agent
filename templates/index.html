@@ -639,8 +639,9 @@
     if(!keys.length){var o=document.createElement("option");o.value="";o.textContent="— no missions yet —";sel.appendChild(o);}
     keys.forEach(function(k){var o=document.createElement("option");o.value=k.key;
       var cst=(k.control&&k.control.status)||"";
+      var pc=(k.payload_cache&&k.payload_cache.count)||0;
       o.textContent=(k.name||k.key)+"  ·  "+String(k.updated||k.created||"").slice(0,16)
-        +(cst?"  ["+cst+"]":"");sel.appendChild(o);});
+        +(pc>0?"  ·  🧩"+pc:"")+(cst?"  ["+cst+"]":"");sel.appendChild(o);});
     if(keep){sel.value=keep.key; setBadge((keep.control&&keep.control.status)||"");}
     else if(cur&&keys.find(function(k){return k.key===cur;})){sel.value=cur;}
     if(sel.value&&sel.value!==""){loadMission(sel.value,false);} else {renderEmpty();}
@@ -671,7 +672,8 @@
       var st=p.status||"pending";
       html+='<div class="mc-phase"><b>'+k+'</b><span class="mc-st '+stClass(st)+'">'+esc(st)+'</span></div>';});
     el("mc-statuses").innerHTML=html;
-    el("mc-meta").textContent="Findings logged: "+(d.findings_logged||0)+"  ·  Errors: "+(d.errors||[]).length+"  ·  Domain: "+(d.domain?"yes":"no");
+    var pfc=(d.payload_cache&&d.payload_cache.count)||0;
+    el("mc-meta").textContent="Findings logged: "+(d.findings_logged||0)+"  ·  Errors: "+(d.errors||[]).length+"  ·  Domain: "+(d.domain?"yes":"no")+(pfc>0?"  ·  🧩 Fused payloads: "+pfc:"");
     var ports=(ph.recon&&ph.recon.ports)||[];
     el("mc-ports").innerHTML=ports.length?ports.map(function(p){return '<span class="mc-port">'+esc(p.port||"")+'/'+esc(p.service||"")+'</span>';}).join(""):'<span class="mc-hint">none / recon pending</span>';
     var rows=[]; var vuln=ph.vuln||{};

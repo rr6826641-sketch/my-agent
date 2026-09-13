@@ -3197,7 +3197,14 @@ def _mission_summary(path):
         "findings": d.get("findings_logged", 0),
         "posture": d.get("posture", "standard"),
         "errors": d.get("errors", []),
+        "payload_cache": None,
     }
+    pc = d.get("payload_cache")
+    if isinstance(pc, dict) and pc.get("payloads"):
+        out["payload_cache"] = {
+            "count": len(pc.get("payloads") or []),
+            "injected_at": pc.get("injected_at"),
+        }
     if d.get("kind") == "swarm_campaign":
         # SWARM LIVE-MAP payload: per-host nodes with open ports + CVEs
         nodes, hostmap = [], {}
