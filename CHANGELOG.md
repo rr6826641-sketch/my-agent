@@ -1,3 +1,17 @@
+## [2026-09-13] v0.8.10 - WEBUI MISSION CONSOLE (war-room panel)
+
+- feat(webui): roadmap #5 done - naya `MISSIONS` view (`/api/missions`,
+  `/api/missions/<key>`, `/api/missions/<key>/report`). Sidebar mein naya
+  "🎯 Missions" tab: live war-room panel jo har campaign par phase progress
+  (recon/scan/vuln/report status chips), open ports, findings table aur
+  per-phase output stream dikhata hai - auto-refresh 3s jab mission running,
+  6s idle. Report download button -> markdown report file.
+- feat(webui): campaign list her key/campaign subdir se collect hota hai
+  (`campaigns/*/*.json`), mission summary mein phases+findings+errors,
+  report path Windows-safe normalize + fallback `reports/attack_mission_<t>.md`.
+- test: live smoke on mock webui - 2 missions listed, detail JSON OK, report
+  download HTTP 200 (1091 bytes) verified.
+
 ## [2026-09-12] v0.8.9 - CPE -> NUCLEI SNIPER AUTO-TEMPLATE MATCH
 
 - feat(tools): NEW `cpe_match` module - nmap -sV banners se CPE strings nikal kar

@@ -3161,6 +3161,102 @@ def api_health_dashboard():
         from flask import Response as _Resp
     return _Resp(_HEALTH_DASH_HTML, mimetype="text/html")
 
+# ==================== MISSION CONSOLE (roadmap #5, v0.8.10) ====================
+_CAMPAIGNS_DIR = os.path.join(PROJECT_DIR, "campaigns")
+
+
+def _iter_campaigns():
+    """Yield (key, path) for every campaign JSON under PROJECT_DIR/campaigns."""
+    base = _CAMPAIGNS_DIR
+    if not os.path.isdir(base):
+        return
+    for root, _dirs, files in os.walk(base):
+        for fn in sorted(files):
+            if fn.endswith(".json"):
+                full = os.path.join(root, fn)
+                rel = os.path.relpath(full, base)
+                yield rel[:-5].replace(os.sep, "/"), full
+
+
+def _mission_summary(path):
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            d = json.load(fh)
+    except Exception as exc:
+        return {"key": os.path.basename(path), "error": str(exc)}
+    phases = d.get("phases", {})
+    return {
+        "key": None,
+        "name": d.get("target", os.path.basename(path)),
+        "target": d.get("target"),
+        "created": d.get("created"),
+        "updated": d.get("updated"),
+        "domain": d.get("domain", False),
+        "phases": {k: (v.get("status") if isinstance(v, dict) else None)
+                   for k, v in phases.items()},
+        "findings": d.get("findings_logged", 0),
+        "errors": d.get("errors", []),
+    }
+
+
+def _find_campaign(key):
+    for name, path in _iter_campaigns():
+        if name == key:
+            return path
+    return None
+
+
+@app.route("/api/missions")
+def api_missions_list():
+    out = []
+    for key, path in _iter_campaigns():
+        s = _mission_summary(path)
+        s["key"] = key
+        out.append(s)
+    out.sort(key=lambda r: str(r.get("updated") or r.get("created") or ""), reverse=True)
+    return jsonify({"missions": out, "count": len(out)})
+
+
+@app.route("/api/missions/<path:key>")
+def api_missions_get(key):
+    target = _find_campaign(key)
+    if not target:
+        return jsonify({"error": "mission not found"}), 404
+    try:
+        with open(target, "r", encoding="utf-8", errors="replace") as fh:
+            return jsonify(json.load(fh))
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/missions/<path:key>/report")
+def api_missions_report(key):
+    target = _find_campaign(key)
+    if not target:
+        return jsonify({"error": "mission not found"}), 404
+    try:
+        with open(target, "r", encoding="utf-8", errors="replace") as fh:
+            d = json.load(fh)
+    except Exception:
+        return jsonify({"error": "unreadable campaign"}), 500
+    rp = (d.get("phases", {}).get("report", {}) or {}).get("path")
+    full = None
+    if rp:
+        cand = os.path.normpath(os.path.join(PROJECT_DIR, os.path.expandvars(str(rp))))
+        if os.path.isfile(cand):
+            full = cand
+    if not full:
+        cand = os.path.join(PROJECT_DIR, "reports",
+                            "attack_mission_%s.md" % str(d.get("target", key)))
+        if os.path.isfile(cand):
+            full = cand
+    if not full:
+        return jsonify({"error": "report file missing"}), 404
+    try:
+        return send_file(full, as_attachment=True, download_name=os.path.basename(full))
+    except TypeError:  # older Flask
+        return send_file(full, as_attachment=True, attachment_filename=os.path.basename(full))
+
 
 def main():
     ap = argparse.ArgumentParser(description="AI Agent Web UI")

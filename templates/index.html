@@ -53,6 +53,7 @@
     <nav class="nav">
       <button class="nav-item active" data-view="chat"><i class="ni">💬</i><span>Chat</span></button>
       <button class="nav-item" data-view="activity"><i class="ni">⚡</i><span>Live Activity</span></button>
+      <button class="nav-item" data-view="missions"><i class="ni">🎯</i><span>Missions</span></button>
       <button class="nav-item" data-view="settings"><i class="ni">⚙️</i><span>Settings</span></button>
     </nav>
 
@@ -460,6 +461,77 @@
 </main>
 </div>
 
+<!-- ---------- MISSION CONSOLE VIEW (roadmap #5) ---------- -->
+<section class="view" id="view-missions">
+  <style>
+    .mc-wrap{display:flex;flex-direction:column;gap:14px;padding:18px 20px;}
+    .mc-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+    .mc-select{background:#0b0f1e;color:#e8edf5;border:1px solid #2a3550;border-radius:8px;padding:9px 12px;font-size:14px;min-width:280px;cursor:pointer;}
+    .mc-refresh{background:rgba(255,255,255,.06);color:#d7deeb;border:1px solid #2a3550;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;}
+    .mc-refresh:hover{background:rgba(255,255,255,.12);}
+    .mc-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+    .mc-card{background:#0e1220;border:1px solid #22304a;border-radius:12px;padding:14px 16px;min-width:0;}
+    .mc-card h3{font-size:14px;letter-spacing:.3px;margin:0 0 10px;color:#c7d3ec;}
+    .mc-meta{font-size:12px;color:#8a97b3;}
+    .mc-statuses{display:flex;flex-direction:column;gap:7px;}
+    .mc-phase{display:flex;justify-content:space-between;}
+    .mc-phase b{text-transform:uppercase;font-size:12px;color:#9fb0d0;}
+    .mc-st{font-size:12px;padding:2px 9px;border-radius:99px;}
+    .mc-st.done{background:#1a3f2d;color:#4ade80;}
+    .mc-st.running{background:#3d2b1a;color:#f5c542;}
+    .mc-st.interrupted,.mc-st.failed,.mc-st.error{background:#3d1a2b;color:#f47174;}
+    .mc-st.pending,.mc-st.unknown{background:#243152;color:#aab8d8;}
+    .mc-ports{display:flex;flex-wrap:wrap;gap:7px;}
+    .mc-port{font-size:12px;padding:3px 10px;border-radius:99px;background:#1a2133;color:#9fc9ff;border:1px solid #2c4370;font-family:ui-monospace,Consolas,monospace;}
+    .mc-table{width:100%;border-collapse:collapse;font-size:12.5px;}
+    .mc-table th{text-align:left;color:#93a3c4;border-bottom:1px solid #26324e;padding:5px 8px;}
+    .mc-table td{border-bottom:1px solid #1d2740;padding:5px 8px;color:#cdd8f0;word-break:break-all;}
+    .mc-pre{max-height:240px;overflow:auto;background:#0a0e18;border:1px solid #1d2740;border-radius:8px;padding:10px 12px;font-size:11.5px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:#a9c1e8;white-space:pre-wrap;word-break:break-all;}
+    .mc-dl{margin-top:6px;background:linear-gradient(135deg,#b5303f,#7d1f2e);color:#fff;border:0;border-radius:9px;padding:10px 18px;font-size:13.5px;font-weight:600;cursor:pointer;}
+    .mc-dl:disabled{opacity:.45;cursor:not-allowed;}
+    .mc-hint{font-size:12px;color:#73819f;}
+  </style>
+  <header class="chat-header">
+    <div class="ht">
+      <div class="ht-ico" aria-hidden="true">🎯</div>
+      <div>
+        <h2>MISSION CONSOLE</h2>
+        <p id="mc-sub">War-room panel — mission progress stream, per-phase output, findings table &amp; report download.</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="mc-refresh" id="mc-refresh" title="Refresh mission list">⟳ Refresh</button>
+    </div>
+  </header>
+  <div class="mc-wrap">
+    <div class="mc-top">
+      <select class="mc-select" id="mc-select" title="Select campaign mission"><option value="">— no missions yet —</option></select>
+      <span class="mc-hint" id="mc-poll-hint">auto-refresh: 3s while running, 6s idle</span>
+    </div>
+    <div class="mc-grid">
+      <div class="mc-card">
+        <h3>⚡ Phase Progress</h3>
+        <div class="mc-statuses" id="mc-statuses"><span class="mc-hint">—</span></div>
+        <div class="mc-meta" id="mc-meta"></div>
+      </div>
+      <div class="mc-card">
+        <h3>🔎 Recon / Open Ports</h3>
+        <div class="mc-ports" id="mc-ports"><span class="mc-hint">—</span></div>
+      </div>
+      <div class="mc-card">
+        <h3>⚠️ Findings <em id="mc-findings-count"></em></h3>
+        <table class="mc-table"><thead><tr><th>Item</th><th>Evidence</th></tr></thead>
+          <tbody id="mc-findings-body"><tr><td colspan="2" class="mc-hint">—</td></tr></tbody></table>
+      </div>
+      <div class="mc-card">
+        <h3>📜 Per-Phase Output</h3>
+        <pre class="mc-pre" id="mc-output">—</pre>
+      </div>
+    </div>
+    <button class="mc-dl" id="mc-dl" disabled>⬇ Download Report (Markdown)</button>
+  </div>
+</section>
+
 <!-- ---------- New Campaign modal ---------- -->
 <div class="modal" id="rpg-modal" hidden>
   <div class="modal-card">
@@ -500,6 +572,81 @@
 </script>
 <script src="/static/marked.min.js"></script>
 <script src="/static/app.js"></script>
+<script>
+/* MISSION CONSOLE (roadmap #5, v0.8.10) — standalone, non-breaking */
+(function(){
+  var sel=document.querySelector("#mc-select"); if(!sel) return;
+  var LIST="/api/missions"; var keys=[]; var timer=null;
+  function el(id){return document.querySelector("#"+id);}
+  function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+  async function getJSON(u){try{var r=await fetch(u,{cache:"no-store"});return await r.json();}catch(e){return{error:String(e)};}}
+  function stClass(s){s=(s||"").toLowerCase();
+    if(s==="done"||s==="complete"||s==="completed"||s==="ok")return"done";
+    if(s==="running"||s==="in_progress"||s==="started")return"running";
+    if(s==="interrupted"||s==="error"||s==="failed")return"interrupted";
+    return"pending";}
+  async function refreshList(){
+    var d=await getJSON(LIST); if(d.error){var s=el("mc-sub"); s&&(s.textContent="API error: "+d.error); return;}
+    keys=d.missions||[]; var prev=sel.value; var keep=keys.find(function(k){return k.key===prev;});
+    var cur=sel.value;
+    sel.innerHTML="";
+    if(!keys.length){var o=document.createElement("option");o.value="";o.textContent="— no missions yet —";sel.appendChild(o);}
+    keys.forEach(function(k){var o=document.createElement("option");o.value=k.key;
+      o.textContent=(k.name||k.key)+"  ·  "+String(k.updated||k.created||"").slice(0,16);sel.appendChild(o);});
+    if(keep){sel.value=keep.key;} else if(cur&&keys.find(function(k){return k.key===cur;})){sel.value=cur;}
+    if(sel.value&&sel.value!==""){loadMission(sel.value,false);} else {renderEmpty();}
+  }
+  function renderEmpty(){
+    el("mc-statuses").innerHTML='<span class="mc-hint">—</span>'; el("mc-ports").innerHTML='<span class="mc-hint">—</span>';
+    el("mc-findings-body").innerHTML='<tr><td colspan="2" class="mc-hint">—</td></tr>'; el("mc-output").textContent="—";
+    el("mc-meta").textContent=""; el("mc-dl").setAttribute("disabled",""); el("mc-findings-count").textContent="";
+  }
+  function loadMission(key){
+    var m=keys.find(function(k){return k.key===key;})
+    if(m){var sub=el("mc-sub"); sub&&(sub.textContent="Target: "+m.target+"  ·  Created: "+(m.created||"?")+"  ·  Updated: "+(m.updated||"?"));}
+    getJSON(LIST+"/"+encodeURIComponent(key)).then(function(d){
+      if(d.error){var mm=el("mc-meta"); mm&&(mm.textContent="Load error: "+d.error); return;}
+      renderMission(d);
+      var dl=el("mc-dl"); var rp=(d.phases&&d.phases.report&&d.phases.report.path);
+      if(rp){dl.removeAttribute("disabled"); dl.onclick=function(){window.location=LIST+"/"+encodeURIComponent(key)+"/report";};}
+      else{dl.setAttribute("disabled",""); dl.onclick=null;}
+      var st=(d.phases&&d.phases.vuln&&d.phases.vuln.status)||"";
+      var busy=/running|in_progress|started/i.test(st);
+      clearTimeout(timer);
+      timer=busy?setTimeout(function(){loadMission(key);},3000):setTimeout(refreshList,6000);
+    });
+  }
+  function renderMission(d){
+    var ph=d.phases||{}; var order=["recon","scan","vuln","report"]; var html="";
+    order.forEach(function(k){var p=ph[k]; if(!p)return;
+      var st=p.status||"pending";
+      html+='<div class="mc-phase"><b>'+k+'</b><span class="mc-st '+stClass(st)+'">'+esc(st)+'</span></div>';});
+    el("mc-statuses").innerHTML=html;
+    el("mc-meta").textContent="Findings logged: "+(d.findings_logged||0)+"  ·  Errors: "+(d.errors||[]).length+"  ·  Domain: "+(d.domain?"yes":"no");
+    var ports=(ph.recon&&ph.recon.ports)||[];
+    el("mc-ports").innerHTML=ports.length?ports.map(function(p){return '<span class="mc-port">'+esc(p.port||"")+'/'+esc(p.service||"")+'</span>';}).join(""):'<span class="mc-hint">none / recon pending</span>';
+    var rows=[]; var vuln=ph.vuln||{};
+    (vuln.queries||[]).forEach(function(q){rows.push(["query",q]);});
+    (vuln.hits||[]).forEach(function(h){rows.push(typeof h==="string"?["hit",h]:["hit",JSON.stringify(h)]);});
+    (d.findings||[]).forEach(function(f){try{rows.push([f.type||"finding",f.evidence||JSON.stringify(f)]);}catch(e){}});
+    var tb=el("mc-findings-body"); var cnt=el("mc-findings-count");
+    if(!rows.length){tb.innerHTML='<tr><td colspan="2" class="mc-hint">No findings logged yet.</td></tr>'; cnt.textContent="";}
+    else{tb.innerHTML=rows.slice(0,80).map(function(r){return '<tr><td>'+esc(r[0])+'</td><td>'+esc(String(r[1]).slice(0,320))+'</td></tr>';}).join(""); cnt.textContent="("+rows.length+")";}
+    var out="";
+    order.forEach(function(k){var p=ph[k]; if(!p)return;
+      out+="## "+k+"  ["+(p.status||"?")+"]\n";
+      ["started_at","elapsed_s","bytes","path"].forEach(function(m){if(p[m]!==undefined)out+="  "+m+": "+p[m]+"\n";});
+      if(p.ports)out+="  ports: "+JSON.stringify(p.ports).slice(0,400)+"\n";
+      if(p.cpe_banner)out+="  cpe_banner: "+String(p.cpe_banner).slice(0,260)+"\n";
+      if(p.nuclei)out+="  nuclei: "+JSON.stringify(p.nuclei).slice(0,300)+"\n";
+      if(p.ssl)out+="  ssl: "+String(p.ssl).slice(0,160)+"\n";});
+    el("mc-output").textContent=out.trim()||"—";
+  }
+  el("mc-refresh").onclick=refreshList;
+  sel.onchange=function(){ if(sel.value){loadMission(sel.value);} else {renderEmpty();} };
+  refreshList();
+})();
+</script>
 <script src="/gatekeeper/lockscreen.js?v=0.8.8" defer></script>
 </body>
 </html>
