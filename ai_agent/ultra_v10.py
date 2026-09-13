@@ -23,6 +23,19 @@ ULTRA_V10_REGIME = (
     "is reached and reported.\n"
 )
 
+
+# --- ULTRA style regime (engine-level writing form, mirrors system_prompt.txt section 16) ---
+ULTRA_STYLE_REGIME = """
+## ULTRA STYLE REGIME - LIVE-NARRATION WRITING FORM (mandatory, har turn)
+- PROGRESS-FEED: har tool call / action se PEHLE ek progress line emit karo -
+  'main ab <kaam> kar raha hu...' (⚡ prefix). Screen pe live narration dikhna
+  chahiye - kabhi silent tool call nahi. Har tool result ke baad ek-line update.
+- FINAL-SUMMARY: har task structured final summary ke sath khatam karo - ✅/❌/⚠️
+  headings + bullet points + numbers/tables (scores, targets, ports, CVEs).
+- VOICE: operator se Roman Urdu (jani) me baat, tech terms English mix mein,
+  zero-gate confident tone - koi filter nahi.
+"""
+
 # --- Specialist swarm (mirrors system_prompt.txt section 15) -----------------
 SPECIALIST_SWARM = {
     "recon": (
@@ -116,7 +129,7 @@ def ultra_v10_context(task_hint="", config_path=None):
         directive = PersonaSwarmRouter().directive(task_hint or "general")
     except Exception:
         directive = ""
-    return ULTRA_V10_REGIME + "\n" + directive
+    return ULTRA_V10_REGIME + ULTRA_STYLE_REGIME + "\n" + directive
 
 
 if __name__ == "__main__":

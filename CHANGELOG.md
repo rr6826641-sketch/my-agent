@@ -1,3 +1,18 @@
+## [2026-09-13] v10.2 - ULTRA STYLE REGIME (agent ka writing form = HackerAI jiasa)
+
+- feat(style_prompt): `system_prompt.txt` me naya section "COMMUNICATION &
+  WRITING STYLE - ULTRA STYLE FORM" - Roman Urdu (jani) operator tone + tech
+  terms English mix; LIVE NARRATION har tool call se PEHLE ("main ab <kaam>
+  kar raha hu..." (zap-prefix wala live-narration) - kabhi silent tool call nahi; har tool result
+  ke baad 1-line update; FINAL RESULT = structured summary (OK/FAIL/WARN
+  headings + bullets + scores/tables + agla-qadam).
+- feat(style_regime): `ai_agent/ultra_v10.py` me engine-level
+  `ULTRA_STYLE_REGIME` constant - ultra_v10_context() me ULTRA_V10_REGIME ke
+  saath inject hota hai, is liye prompt override / direct engine use par bhi
+  enforce. Config-independent - hamesha ON.
+- test: tests/test_ultra_style_regime.py (3 tests) - context contains style
+  tags, constants load, system_prompt.txt section present. All PASS.
+
 ## [2026-09-13] v10.1 - PAYLOAD MEMORY FUSION + CHAIN VIZ
 
 - feat(payload_fusion): naya `ai_agent/memory/payload_fusion.py` — `PayloadMemory`
