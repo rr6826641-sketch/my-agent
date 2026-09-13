@@ -180,6 +180,58 @@ def _save(state, campaign_dir=""):
     return state
 
 
+def _control_path(campaign_dir=""):
+    """WAR-ROOM LIVE CONTROL: shared control-state file so the WebUI
+    (start/pause/kill buttons) and the runner speak the same source."""
+    return os.path.join(_campaign_dir(campaign_dir), ".control.json")
+
+
+def _control_read(target, campaign_dir=""):
+    """Return {"status": running|paused|killed, "set_at": ...} or {}."""
+    try:
+        with io.open(_control_path(campaign_dir), "r", encoding="utf-8") as fh:
+            d = json.load(fh)
+        return d.get(target, {}) or {}
+    except Exception:
+        return {}
+
+
+def _control_set(target, action, campaign_dir=""):
+    """Persist a war-room control action for one campaign target.
+    Accepts UI verbs (start|pause|kill) or statuses (running|paused|
+    killed); always stores the canonical status vocabulary."""
+    action = {"start": "running", "pause": "paused", "kill": "killed"} \
+        .get(str(action).strip().lower(), str(action).strip().lower())
+    p = _control_path(campaign_dir)
+    d = {}
+    try:
+        with io.open(p, "r", encoding="utf-8") as fh:
+            d = json.load(fh)
+    except Exception:
+        pass
+    d[target] = {"status": action, "set_at": _now()}
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with io.open(p, "w", encoding="utf-8") as fh:
+            json.dump(d, fh, indent=2)
+    except Exception:
+        pass
+    return d[target]
+
+
+def _control_gate(target, campaign_dir=""):
+    """Block until RUNNING, then return True ; return False when KILLED.
+    Missing control state = RUNNING (backwards compatible)."""
+    while True:
+        st = str((_control_read(target, campaign_dir) or {})
+                 .get("status", "running")).strip().lower()
+        if st in ("kill", "killed"):
+            return False
+        if st not in ("pause", "paused"):
+            return True
+        time.sleep(2.0)
+
+
 def _mark(state, phase, status, extra=None):
     entry = state["phases"].setdefault(phase, {})
     entry["status"] = status
@@ -789,6 +841,12 @@ def tool_attack_mission(target="", phase="", campaign_dir="",
     ctx = _make_ctx(campaign_dir, run_nuclei, budget_sec, deep=deep)
     out = ["AUTO-PILOT mission: %s" % target]
     for ph in PHASE_ORDER:
+        if not _control_gate(target, campaign_dir):
+            out.append("WAR-ROOM: campaign KILLED by operator - "
+                       "remaining phases aborted at %s" % ph)
+            _mark(state, ph, "killed")
+            _save(state, campaign_dir)
+            break
         out.append(_run_one(state, ph, ctx))
     report = state.get("phases", {}).get("report", {})
     status = "ALL PHASES COMPLETE" if report.get("status") == "done" \

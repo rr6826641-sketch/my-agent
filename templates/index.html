@@ -496,6 +496,13 @@
     .mc-swarm-dead{font-size:11px;font-weight:700;color:#f47174;}
     .mc-swarm-ports{font-size:11px;color:#9fc9ff;}
     .mc-swarm-cve{font-size:11px;color:#f5c542;}
+    .mc-ctl{background:#0e1b2e;border:1px solid #2c4266;color:#e8edf5;border-radius:8px;padding:7px 12px;font-weight:700;margin-left:6px;cursor:pointer;}
+    .mc-ctl:hover{border-color:#4ade80;}
+    .mc-ctl-badge{font-size:11px;font-weight:800;margin-left:8px;}
+    .mc-ctl-badge.ctl-run{color:#4ade80;}
+    .mc-ctl-badge.ctl-pause{color:#f5c542;}
+    .mc-ctl-badge.ctl-kill{color:#f47174;}
+    .mc-ctl-badge.ctl-none{color:#718096;}
     .mc-fusion{display:flex;flex-direction:column;gap:8px;max-height:300px;overflow:auto;}
     .mc-fusion-row{display:flex;align-items:center;gap:8px;min-width:0;background:#0c1020;border:1px solid #22304a;border-radius:8px;padding:7px 10px;}
     .mc-fusion-key{font-size:11.5px;color:#7ee0a3;font-family:ui-monospace,Consolas,monospace;min-width:92px;}
@@ -518,6 +525,10 @@
       </div>
     </div>
     <div class="header-actions">
+      <span class="mc-ctl-badge ctl-none" id="mc-ctl-badge"></span>
+      <button class="mc-ctl" id="mc-start" title="Start / resume campaign - spawns the auto-pilot runner">▶ Start</button>
+      <button class="mc-ctl" id="mc-pause" title="Pause campaign - runner blocks between phases">⏸ Pause</button>
+      <button class="mc-ctl" id="mc-kill" title="Kill campaign - aborts remaining phases">⏹ Kill</button>
       <button class="mc-refresh" id="mc-refresh" title="Refresh mission list">⟳ Refresh</button>
     </div>
   </header>
@@ -627,14 +638,17 @@
     sel.innerHTML="";
     if(!keys.length){var o=document.createElement("option");o.value="";o.textContent="— no missions yet —";sel.appendChild(o);}
     keys.forEach(function(k){var o=document.createElement("option");o.value=k.key;
-      o.textContent=(k.name||k.key)+"  ·  "+String(k.updated||k.created||"").slice(0,16);sel.appendChild(o);});
-    if(keep){sel.value=keep.key;} else if(cur&&keys.find(function(k){return k.key===cur;})){sel.value=cur;}
+      var cst=(k.control&&k.control.status)||"";
+      o.textContent=(k.name||k.key)+"  ·  "+String(k.updated||k.created||"").slice(0,16)
+        +(cst?"  ["+cst+"]":"");sel.appendChild(o);});
+    if(keep){sel.value=keep.key; setBadge((keep.control&&keep.control.status)||"");}
+    else if(cur&&keys.find(function(k){return k.key===cur;})){sel.value=cur;}
     if(sel.value&&sel.value!==""){loadMission(sel.value,false);} else {renderEmpty();}
   }
   function renderEmpty(){
     el("mc-statuses").innerHTML='<span class="mc-hint">—</span>'; el("mc-ports").innerHTML='<span class="mc-hint">—</span>';
     el("mc-findings-body").innerHTML='<tr><td colspan="2" class="mc-hint">—</td></tr>'; el("mc-output").textContent="—";
-    el("mc-meta").textContent=""; el("mc-dl").setAttribute("disabled",""); el("mc-findings-count").textContent="";
+    el("mc-meta").textContent=""; el("mc-dl").setAttribute("disabled",""); el("mc-findings-count").textContent=""; setBadge("");
   }
   function loadMission(key){
     var m=keys.find(function(k){return k.key===key;})
@@ -678,6 +692,23 @@
     el("mc-output").textContent=out.trim()||"—";
   }
   el("mc-refresh").onclick=refreshList;
+  /* WAR-ROOM LIVE CONTROLS (Feature A, v10.3) - start / pause / kill */
+  function setBadge(st){var b=el("mc-ctl-badge"); st=st||""; if(!b)return;
+    b.className="mc-ctl-badge ctl-"+(st||"none");
+    b.textContent=st?("control: "+st+"  "):"";}
+  function missionControl(key,action){
+    if(!key){return;}
+    fetch(LIST+"/"+encodeURIComponent(key)+"/control",
+      {method:"POST",headers:{"Content-Type":"application/json"},
+       body:JSON.stringify({action:action})})
+    .then(function(r){return r.json();}).then(function(d){
+      setBadge((d.control&&d.control.status)||""); refreshList();})
+    .catch(function(){setBadge("error");});
+  }
+  el("mc-start").onclick=function(){var k=sel.value; if(k)missionControl(k,"start");};
+  el("mc-pause").onclick=function(){var k=sel.value; if(k)missionControl(k,"pause");};
+  el("mc-kill").onclick=function(){var k=sel.value;
+    if(k&&window.confirm("KILL campaign '"+k+"'? Remaining phases will abort."))missionControl(k,"kill");};
   sel.onchange=function(){ if(sel.value){loadMission(sel.value);} else {renderEmpty();} };
   refreshList();
 })();

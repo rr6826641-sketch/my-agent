@@ -3172,7 +3172,7 @@ def _iter_campaigns():
         return
     for root, _dirs, files in os.walk(base):
         for fn in sorted(files):
-            if fn.endswith(".json"):
+            if fn.endswith(".json") and not fn.startswith("."):
                 full = os.path.join(root, fn)
                 rel = os.path.relpath(full, base)
                 yield rel[:-5].replace(os.sep, "/"), full
@@ -3224,6 +3224,9 @@ def _mission_summary(path):
             "live": sum(1 for n in nodes if n["live"]),
         }
         out["kind"] = "swarm_campaign"
+    ctl = d.get("control")
+    if isinstance(ctl, dict):
+        out["control"] = ctl
     return out
 
 
@@ -3234,12 +3237,27 @@ def _find_campaign(key):
     return None
 
 
+def _campaign_target(key):
+    """Target host of a mission key (mirrors the runner's own lookup)."""
+    path = _find_campaign(key)
+    if not path:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception:
+        data = {}
+    return (data.get("target") or
+            (os.path.basename(str(path))[:-5] if path else None))
+
+
 @app.route("/api/missions")
 def api_missions_list():
     out = []
     for key, path in _iter_campaigns():
         s = _mission_summary(path)
         s["key"] = key
+        s["control"] = _control_state(key)
         out.append(s)
     out.sort(key=lambda r: str(r.get("updated") or r.get("created") or ""), reverse=True)
     return jsonify({"missions": out, "count": len(out)})
@@ -3260,6 +3278,7 @@ def api_swarm():
             continue
         s = _mission_summary(path)
         s["key"] = key
+        s["control"] = _control_state(key)
         out.append(s)
     out.sort(key=lambda r: str(r.get("updated") or r.get("created") or ""),
              reverse=True)
@@ -3376,6 +3395,127 @@ def api_missions_report(key):
         return send_file(full, as_attachment=True, download_name=os.path.basename(full))
     except TypeError:  # older Flask
         return send_file(full, as_attachment=True, attachment_filename=os.path.basename(full))
+
+
+# ============ WAR-ROOM LIVE CONTROLS (Feature A, v10.3) ============
+_CONTROL_FILE = os.path.join(_CAMPAIGNS_DIR, ".control.json")
+_RUNNERS = {}
+_RUNNERS_LOCK = threading.Lock()
+
+
+def _mc_stamp():
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _control_state(key):
+    """Persisted war-room control state for a mission key.
+    Falls back to the target-derived key so CLI-started runs that write
+    only under the target host are still visible in the WebUI."""
+    try:
+        with open(_CONTROL_FILE, "r", encoding="utf-8") as fh:
+            d = json.load(fh)
+    except Exception:
+        return {}
+    st = d.get(key) or {}
+    if not st:
+        tgt = _campaign_target(key)
+        if tgt:
+            st = d.get(tgt) or {}
+    return st
+
+
+def _control_set(key, action):
+    """Persist start|pause|kill for one mission; returns the new state.
+    Input verbs are normalized to running|paused|killed so the runner's
+    phase gate and the UI badge agree on one vocabulary."""
+    action = {"start": "running", "pause": "paused", "kill": "killed"} \
+        .get(str(action).strip().lower(), str(action).strip().lower())
+    d = {}
+    try:
+        with open(_CONTROL_FILE, "r", encoding="utf-8") as fh:
+            d = json.load(fh)
+    except Exception:
+        pass
+    d[key] = {"status": action, "set_at": _mc_stamp()}
+    try:
+        os.makedirs(_CAMPAIGNS_DIR, exist_ok=True)
+        with open(_CONTROL_FILE, "w", encoding="utf-8") as fh:
+            json.dump(d, fh, indent=2)
+    except Exception as exc:
+        return {"status": action, "set_at": _mc_stamp(), "error": repr(exc)}
+    return d[key]
+
+
+def _mission_worker(key):
+    """Run the full auto-pilot kill-chain for one campaign in a daemon
+    thread.  The runner polls campaigns/.control.json between phases, so
+    PAUSE/KILL from the war-room binds mid-run at the next phase gate."""
+    try:
+        from ai_agent.tools.auto_pilot import tool_attack_mission
+        path = _find_campaign(key)
+        if not path:
+            return
+        data = {}
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except Exception:
+            pass
+        tgt = (data.get("target") or
+               (os.path.basename(str(path))[:-5] if path else None))
+        if tgt:
+            tool_attack_mission(target=tgt, campaign_dir=_CAMPAIGNS_DIR,
+                                budget_sec=600)
+    except Exception:
+        import traceback
+        traceback.print_exc()
+
+
+def _mission_runner(key):
+    """Spawn one daemon runner per mission key (no double-start)."""
+    with _RUNNERS_LOCK:
+        th = _RUNNERS.get(key)
+        if th and th.is_alive():
+            return th
+        th = threading.Thread(target=_mission_worker, args=(key,),
+                              daemon=True, name="warroom-%s" % key)
+        _RUNNERS[key] = th
+        th.start()
+        return th
+
+
+@app.route("/api/missions/<path:key>/control", methods=["POST"])
+def api_missions_control(key):
+    """WAR-ROOM LIVE CONTROL: start | pause | kill a campaign from the UI.
+    start  -> marks RUNNING + spawns the auto-pilot runner (kill-chain
+              actually executes; no-op if already running)
+    pause  -> runner blocks between phases until start is pressed again
+    kill   -> runner aborts remaining phases at the next phase gate
+    """
+    if not _find_campaign(key):
+        return jsonify({"error": "mission not found"}), 404
+    body = request.get_json(silent=True) or {}
+    action = str(body.get("action", "")).strip().lower()
+    if action not in ("start", "pause", "kill"):
+        return jsonify({"error": "action must be start|pause|kill"}), 400
+    st = _control_set(key, action)
+    # Bind the control state under BOTH the mission key and the target
+    # host: the runner's phase gate looks it up by target, the WebUI by key.
+    tgt = _campaign_target(key)
+    if tgt and tgt != key:
+        _control_set(tgt, action)
+    path = _find_campaign(key)
+    try:  # mirror canonical control into the campaign JSON for file audits
+        with open(path, "r", encoding="utf-8") as fh:
+            d = json.load(fh)
+        d["control"] = {"status": st.get("status"), "set_at": st.get("set_at")}
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(d, fh, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+    if action == "start":
+        _mission_runner(key)
+    return jsonify({"ok": True, "key": key, "control": st})
 
 
 def main():
