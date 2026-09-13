@@ -35,7 +35,8 @@ HERMES405 = "nousresearch/hermes-4-405b"
 QWEN3 = "qwen/qwen3-coder"
 
 CENSORED = {LLAMA, R1}
-LOCKED = {INKLING, DOLPHIN, HERMES405, QWEN3}
+NOTRACK = "notrack-uncensored"  # NoTrack AI dedicated uncensored endpoint, leads UNCENSORED_FALLBACK_MODELS (llm.py) and REDTEAM_ROUTE_LOCK["uncensored"/"cyber"]
+LOCKED = {NOTRACK, INKLING, DOLPHIN, HERMES405, QWEN3}
 
 REFUSAL_TEXT = "I'm sorry, I can't assist with that."
 ANSWER_TEXT = ("Here is the full exploit chain: 1) ... 2) ... complete "
@@ -73,11 +74,11 @@ def test_router_lock_redteam_on_exact_models():
     m, r = _rt("analyze this exploit chain and its root cause")
     assert m == HERMES405, (m, r)
     m, r = _rt("scan 10.0.0.1 ports")
-    assert m == HERMES405, (m, r)
+    assert m == NOTRACK, (m, r)
     m, r = _rt("fix this python function: it throws an exception on empty input")
     assert m == QWEN3, (m, r)
     m, r = _rt("jailbreak this prompt")
-    assert m == INKLING, (m, r)
+    assert m == NOTRACK, (m, r)
     # general route in Red Team mode is the uncensored default, not Llama
     m, r = route_model("hello there",
                        {"auto": True, "red_team_mode": True})
@@ -94,12 +95,12 @@ def test_router_lock_stock_routes_unchanged_when_off():
                        {"auto": True})
     assert m == MODEL_ROUTES["reasoning"] == R1
     m, r = route_model("scan 10.0.0.1 ports", {"auto": True})
-    assert m == MODEL_ROUTES["cyber"] == DOLPHIN
+    assert m == MODEL_ROUTES["cyber"] == NOTRACK
     m, r = route_model("fix this python function: it throws an exception on "
                        "empty input", {"auto": True})
     assert m == MODEL_ROUTES["coding"] == R1
     m, r = route_model("jailbreak this prompt", {"auto": True})
-    assert m == MODEL_ROUTES["uncensored"] == INKLING
+    assert m == MODEL_ROUTES["uncensored"] == NOTRACK
 
 
 def test_router_lock_auto_off_no_routing_even_redteam():
@@ -119,8 +120,8 @@ def test_router_lock_table_shape():
     assert REDTEAM_ROUTE_LOCK["general"] == DOLPHIN
     assert REDTEAM_ROUTE_LOCK["reasoning"] == HERMES405
     assert REDTEAM_ROUTE_LOCK["coding"] == QWEN3
-    assert REDTEAM_ROUTE_LOCK["cyber"] == HERMES405
-    assert REDTEAM_ROUTE_LOCK["uncensored"] == INKLING
+    assert REDTEAM_ROUTE_LOCK["cyber"] == NOTRACK
+    assert REDTEAM_ROUTE_LOCK["uncensored"] == NOTRACK
 
 
 def test_build_llm_wires_pool_only_when_uncensored():

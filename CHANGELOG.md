@@ -16,6 +16,16 @@
   Multi-Target Chain=1, mc-chain-svg=4, mc-fusion-body=2); /api/swarm/payloads ->
   4 fused rows (nginx/80 0.88 hits=2 nuclei:poc|rce|sqli); /api/swarm/chains ->
   4 nodes / 5 edges incl. CVE-2021-23017 chain edge.
+- test(full_suite): `pytest -q` FULL RUN -> 771 passed, 3 skipped;
+  9 failures (pre-existing, v10.1 features ke koi regressions NAHI) me se
+  4 redteam tests ki stale route-table expectations sync ki (cyber/uncensored
+  routes ab deliberate NOTRACK lead se match karte hain: REDTEAM_ROUTE_LOCK
+  uncensored/cyber + MODEL_ROUTES cyber/uncensored -> notrack-uncensored),
+  1 security-audit fix (config.json ab UNTRACKED - .gitignore line 2 align,
+  [D] removal; local file intact; real secrets kabhi committed nahi thay -
+  sirf env-var refs NOTRACK_API_KEY etc), 1 session_mgr flaky (re-run PASS),
+  3 MCP wiring env-only (local-fs server auto-wire - known env-dependent).
+- test(redteam_promax): 14/14 PASS after sync; security_audit 10/10 PASS.
 - fix(technique): tag union ab set-based + normalized (`nuclei:poc|rce|sqli`),
   same-campaign multiple exploit entries ke techniques merge hoti hain overwrite nahi.
 - test: fusion unit-test passed (2 campaigns -> nginx/80 score 0.91); endpoints
