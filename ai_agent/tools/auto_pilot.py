@@ -784,6 +784,124 @@ def _poc_probe(cve_id, host, query, urls):
     return "\n".join(lines)
 
 
+def _html_escape(text):
+    """Minimal HTML escaping for report fields."""
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def _write_html_report(state, ctx, md_markdown=""):
+    """Feature C: client-ready dark-themed self-contained HTML pentest report.
+
+    Generated alongside the markdown report at campaign end.  Inline CSS only
+    (no CDN) so the file opens offline and prints clean.  Sections mirror the
+    markdown: phase chips, recon ports, scan targets, CVE matches, exploit
+    attempts, fused payload intel + applied ammo, errors.
+    """
+    host = _html_escape(state.get("target", "?"))
+    gen = _html_escape(_now())
+    posture = _html_escape(state.get("posture", "standard"))
+    phases = state.get("phases", {})
+    chips = "".join(
+        '<span class="chip %s">%s:%s</span>' % (
+            "ok" if phases.get(p, {}).get("status") == "done" else
+            ("err" if phases.get(p, {}).get("status") == "error" else "run"),
+            p, _html_escape(phases.get(p, {}).get("status", "pending")))
+        for p in PHASE_ORDER)
+    recon = phases.get("recon", {})
+    port_rows = "".join(
+        "<tr><td>%d</td><td>%s</td></tr>" % (
+            int(p.get("port") or 0),
+            _html_escape(p.get("service") or "unknown"))
+        for p in recon.get("ports", []))
+    scan = phases.get("scan", {})
+    scan_rows = "".join(
+        "<tr><td>%s</td><td>%s</td></tr>" % (
+            _html_escape(url), _html_escape(info.get("status", "?")))
+        for url, info in (scan.get("web") or {}).items())
+    vuln = phases.get("vuln", {})
+    cve_rows = ""
+    for h in (vuln.get("hits") or [])[:15]:
+        cve_rows += "<tr><td>%s</td><td>%s</td></tr>" % (
+            _html_escape(h.get("query", "?")),
+            _html_escape(", ".join(h.get("cves") or [])))
+    exploit = phases.get("exploit", {})
+    att_rows = ""
+    for att in (exploit.get("attempts") or [])[:8]:
+        att_rows += "<tr><td>%s</td><td>%s</td></tr>" % (
+            _html_escape(att.get("query", "?")),
+            _html_escape(", ".join(att.get("cves") or [])))
+    pc = state.get("payload_cache") or {}
+    fused_rows = "".join(
+        "<tr><td>%s</td><td>%.3f</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+            _html_escape(r.get("svc_key", "?")),
+            float(r.get("score") or 0.0),
+            r.get("hits", 0),
+            len(r.get("campaigns") or []),
+            _html_escape(r.get("technique") or "?"),
+            _html_escape(", ".join(r.get("cves") or []) or "-"))
+        for r in (pc.get("payloads") or [])[:10])
+    fused_app = "".join(
+        "<tr><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+            _html_escape(fa.get("svc_key", "?")),
+            _html_escape(fa.get("tags") or "-"),
+            _html_escape((fa.get("attempts") or [{}])[0]
+                         .get("nuclei", fa.get("note") or "not fired"))[:160])
+        for fa in (exploit.get("fused_applied") or [])[:8])
+    errs = "".join(
+        "<li><b>%s/%s</b>: %s</li>" % (
+            _html_escape(e.get("phase", "?")), _html_escape(e.get("step", "?")),
+            _html_escape(e.get("error", "?")))
+        for e in (state.get("errors") or [])[-10:])
+    page = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Pentest Report — %s</title>
+<style>
+body{background:#0b0f1a;color:#dbe4ff;font-family:Consolas,'Segoe UI',monospace;margin:32px;}
+h1{font-size:26px;color:#7df9ff;}h2{color:#ffd479;border-bottom:1px solid #2a355a;padding-bottom:4px;}
+.chip{display:inline-block;margin:4px;padding:3px 10px;border-radius:12px;font-size:12px;}
+.chip.ok{background:#0f3d24;color:#7dffa8;}.chip.run{background:#2a355a;color:#ffd479;}.chip.err{background:#4a1220;color:#ff8080;}
+table{border-collapse:collapse;width:100%%;margin:10px 0;}th,td{border:1px solid #2a355a;padding:6px 10px;text-align:left;font-size:13px;}
+th{background:#141c30;color:#7df9ff;}tr:nth-child(even){background:#10172a;}
+.meta{color:#8fa3c8;font-size:13px;}code{background:#141c30;padding:1px 5px;border-radius:4px;}
+@media print{body{background:#fff;color:#000;}}@media print{table{border-color:#999;}th{background:#eee;}}
+</style></head><body>
+<h1>ATTACK MISSION REPORT — %s</h1>
+<p class="meta">Generated: %s &nbsp;|&nbsp; Posture: <b>%s</b> &nbsp;|&nbsp; Fused ammo rows: %d</p>
+<div>%s</div>
+<h2>Recon — open ports</h2><table><tr><th>Port</th><th>Service</th></tr>%s</table>
+<h2>Scan — web targets</h2><table><tr><th>URL</th><th>Status</th></tr>%s</table>
+<h2>Vulnerability matches (CVE)</h2><table><tr><th>Query</th><th>CVEs</th></tr>%s</table>
+<h2>Exploitation — auto-run chain</h2><table><tr><th>Query</th><th>CVEs</th></tr>%s</table>
+<h2>Fused payload intel (auto-injected)</h2>
+<p class="meta">source: %s | injected_at: %s</p>
+<table><tr><th>svc_key</th><th>score</th><th>hits</th><th>campaigns</th><th>technique</th><th>CVEs</th></tr>%s</table>
+<h2>Fused ammo applied (matched open ports)</h2>
+<table><tr><th>svc_key</th><th>tags</th><th>outcome</th></tr>%s</table>
+<h2>Phase errors</h2><ul>%s</ul>
+</body></html>
+""" % (
+        host, host, gen, posture, len(pc.get("payloads") or []), chips,
+        port_rows or "<tr><td colspan=2>none</td></tr>",
+        scan_rows or "<tr><td colspan=2>none</td></tr>",
+        cve_rows or "<tr><td colspan=2>no CVE hits</td></tr>",
+        att_rows or "<tr><td colspan=2>no exploits</td></tr>",
+        _html_escape(pc.get("source") or "?"),
+        _html_escape(pc.get("injected_at") or "?"),
+        fused_rows or "<tr><td colspan=5>no fused rows</td></tr>",
+        fused_app or "<tr><td colspan=3>no fused ammo fired</td></tr>",
+        errs or "<li>none</li>")
+    try:
+        os.makedirs(ctx.reports_dir, exist_ok=True)
+        html_path = os.path.join(ctx.reports_dir,
+                                 "attack_mission_%s.html" % _slug(host))
+        with io.open(html_path, "w", encoding="utf-8") as fh:
+            fh.write(page)
+        return html_path
+    except Exception:
+        return ""
+
+
 def _phase_report(state, ctx):
     host = state["target"]
     lines = []
@@ -931,6 +1049,14 @@ def _phase_report(state, ctx):
         return "[report] FAILED to write: %r" % (exc,)
     entry = {"status": "done", "path": path,
              "bytes": len(md.encode("utf-8", "replace"))}
+    html_path = ""
+    try:
+        html_path = _write_html_report(state, ctx, md)
+    except Exception as exc:  # HTML is a bonus; markdown report stays valid
+        state["errors"].append({"phase": "report", "step": "write_html",
+                                "error": repr(exc)})
+    if html_path:
+        entry["html"] = html_path   # Feature C: client-ready HTML report
     state["phases"]["report"] = entry
     _save(state, ctx.campaign_dir)
     return "[report] written: %s (%d bytes)" % (path, entry["bytes"])

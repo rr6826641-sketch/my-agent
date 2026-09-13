@@ -3198,7 +3198,13 @@ def _mission_summary(path):
         "posture": d.get("posture", "standard"),
         "errors": d.get("errors", []),
         "payload_cache": None,
+        "report_html": None,
     }
+    rp = (phases.get("report", {}) or {}).get("html")
+    if rp:
+        cand = os.path.normpath(os.path.join(PROJECT_DIR, os.path.expandvars(str(rp))))
+        if os.path.isfile(cand):
+            out["report_html"] = cand
     pc = d.get("payload_cache")
     if isinstance(pc, dict) and pc.get("payloads"):
         out["payload_cache"] = {
@@ -3385,7 +3391,8 @@ def api_missions_report(key):
             d = json.load(fh)
     except Exception:
         return jsonify({"error": "unreadable campaign"}), 500
-    rp = (d.get("phases", {}).get("report", {}) or {}).get("path")
+    rp = (d.get("phases", {}).get("report", {}) or {}).get("html") \
+        or (d.get("phases", {}).get("report", {}) or {}).get("path")
     full = None
     if rp:
         cand = os.path.normpath(os.path.join(PROJECT_DIR, os.path.expandvars(str(rp))))

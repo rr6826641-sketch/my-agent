@@ -673,7 +673,8 @@
       html+='<div class="mc-phase"><b>'+k+'</b><span class="mc-st '+stClass(st)+'">'+esc(st)+'</span></div>';});
     el("mc-statuses").innerHTML=html;
     var pfc=(d.payload_cache&&d.payload_cache.count)||0;
-    el("mc-meta").textContent="Findings logged: "+(d.findings_logged||0)+"  ·  Errors: "+(d.errors||[]).length+"  ·  Domain: "+(d.domain?"yes":"no")+(pfc>0?"  ·  🧩 Fused payloads: "+pfc:"");
+    var rh=(d.report_html)?'<a class="mc-btn" href="/api/missions/'+esc(d.target||d.key||'')+'/report">📄 HTML Report</a>':'';
+    el("mc-meta").innerHTML=esc("Findings logged: "+(d.findings_logged||0)+"  ·  Errors: "+(d.errors||[]).length+"  ·  Domain: "+(d.domain?"yes":"no")+(pfc>0?"  ·  🧩 Fused payloads: "+pfc:"")+rh);
     var ports=(ph.recon&&ph.recon.ports)||[];
     el("mc-ports").innerHTML=ports.length?ports.map(function(p){return '<span class="mc-port">'+esc(p.port||"")+'/'+esc(p.service||"")+'</span>';}).join(""):'<span class="mc-hint">none / recon pending</span>';
     var rows=[]; var vuln=ph.vuln||{};

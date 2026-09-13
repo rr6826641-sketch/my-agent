@@ -1,3 +1,20 @@
+## [2026-09-13] v10.5 - AUTO PENTEST REPORT HTML (Feature C COMPLETE)
+
+- feat(report_html): har campaign end par `reports/attack_mission_<target>.html`
+  - self-contained dark-theme client-ready HTML report (no CDN, offline +
+  print friendly: @media print yak). Sections: phase chips (done/running/
+  error), recon open-ports table, scan web targets, CVE matches, exploit
+  auto-run chain, fused payload intel (score/hits/campaigns/technique/CVEs),
+  fused ammo applied, phase errors. Har field HTML-escaped (XSS-safe) -
+  `_html_escape` + `_write_html_report` in auto_pilot.py.
+- feat(webui): `_mission_summary` ab `report_html` expose karta hai; mission
+  detail panel mein "📄 HTML Report" button (templates/index.html);
+  `/api/missions/<key>/report` pehle HTML file serve karta hai, nahi to
+  markdown fallback.
+- test: `tests/test_report_html.py` 5/5 PASS (HTML sections + CVE/fused
+  coverage, XSS escaping, _phase_report entry wiring, summary report_html
+  exposure, report-route HTML serving).
+
 ## [2026-09-13] v10.4 - PAYLOAD FUSION AUTO-INJECT (Feature B COMPLETE)
 
 - feat(fusion_auto_inject): `ai_agent/tools/auto_pilot.py` mein PAYLOAD-FUSION
