@@ -1,0 +1,92 @@
+{
+  "base_url": "https://api.groq.com/openai/v1",
+  "model": "qwen/qwen3.8-27b",
+  "mock_mode": false,
+  "max_iterations": 120,
+  "max_messages": 800,
+  "spawn_timeout": 900,
+  "max_spawn_depth": 4,
+  "allow_subagents": true,
+  "mock": false,
+  "red_team_mode": true,
+  "fallback_models": [
+    "notrack-uncensored",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.8-27b",
+    "allam-2-7b",
+    "Qwen/Qwen3.8-27B",
+    "deepseek-ai/DeepSeek-V4-Flash"
+  ],
+  "auto": true,
+  "refusal_retries": 8,
+  "persona": "promax",
+  "red_team_level": "promax",
+  "access_mode": "full",
+  "pin_uncensored": true,
+  "pin_strict": true,
+  "mcp_servers": [
+    {
+      "name": "local-fs",
+      "command": "C:\\Users\\GLOBAL IT STORE\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+      "args": [
+        "E:\\HackerAI\\my-agent\\mcp_servers\\local_fs_demo.py"
+      ],
+      "prefix": "mcp_",
+      "confirm": false
+    }
+  ],
+  "local_first": false,
+  "local_endpoints": [
+    {
+      "name": "notrack",
+      "base_url": "https://api.notrack.ai/v1",
+      "api_key_env": "NOTRACK_API_KEY",
+      "models": [
+        "notrack-uncensored"
+      ],
+      "timeout": 30.0
+    },
+    {
+      "name": "openrouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "models": [
+        "qwen/qwen3.5-397b-a17b:free",
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "nvidia/nemotron-3-super-120b-a12b:free",
+        "huihui-ai/qwen3.5-27b-abliterated",
+        "huihui-ai/llama-3.3-70b-abliterated",
+        "mlabonne/phi-3.5-mini-instruct-abliterated",
+        "anthracite-org/magnum-v4-72b",
+        "sao10k/l3.1-stheno-v3.2",
+        "huihui-ai/qwen2.5-coder-32b-abliterated",
+        "cognitivecomputations/dolphin-2.6-mixtral-8x7b",
+        "mikbyte/megallon-12b"
+      ],
+      "timeout": 20.0
+    },
+    {
+      "name": "venice",
+      "base_url": "https://api.venice.ai/api/v1",
+      "api_key_env": "VENICE_API_KEY",
+      "models": [
+        "venice-uncensored-1-2",
+        "venice-uncensored-role-play"
+      ],
+      "timeout": 30.0
+    },
+    {
+      "name": "huggingface",
+      "base_url": "https://router.huggingface.co/v1",
+      "api_key_env": "HUGGINGFACE_API_KEY",
+      "models": [
+        "Qwen/Qwen3.8-27B",
+        "openai/gpt-oss-20b",
+        "deepseek-ai/DeepSeek-V4-Flash"
+      ],
+      "timeout": 30.0
+    }
+  ],
+  "ultra_enabled": true,
+  "ultra_observations": true
+}

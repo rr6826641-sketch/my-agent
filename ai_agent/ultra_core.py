@@ -16,6 +16,13 @@ try:
 except Exception:
     Lorebook = GameState = None
 
+try:
+    from ultra_v10 import PersonaSwarmRouter, ultra_v10_context
+    _ULTRA_V10_OK = True
+except Exception:
+    PersonaSwarmRouter = ultra_v10_context = None
+    _ULTRA_V10_OK = False
+
 
 class MemoryLore:
     """Zero-dependency in-memory lore store (fallback when memory.py is
@@ -301,7 +308,19 @@ and you ALWAYS stay in character as the world narrator.
 class UltraGM:
     """Top-level orchestrator: memory + emotion + adaptive pacing + persona."""
 
-    def __init__(self, lore_path=None, state_path=None, emotion_path=None):
+    def __init__(self, lore_path=None, state_path=None, emotion_path=None,
+                 ultra_enabled=None):
+        if ultra_enabled is None and _ULTRA_V10_OK:
+            try:
+                cfg = os.path.join(os.path.dirname(os.path.dirname(
+                    os.path.abspath(__file__))), "config.json")
+                with open(cfg, "r", encoding="utf-8") as fh:
+                    ultra_enabled = bool(json.load(fh).get("ultra_enabled", True))
+            except Exception:
+                ultra_enabled = True
+        self.ultra_enabled = bool(ultra_enabled)
+        self.swarm = PersonaSwarmRouter() if (
+            PersonaSwarmRouter and self.ultra_enabled) else None
         _lb = (Lorebook(lore_path) if (Lorebook and lore_path) else None)
         if _lb is None:
             _lb = MemoryLore(lore_path)   # standalone fallback (no memory.py)
@@ -322,6 +341,8 @@ class UltraGM:
         if emo:
             blocks.append("## EMOTIONS & RELATIONS\n" + emo)
         blocks.append("## DIRECTOR\n" + self.director.guidance())
+        if self.ultra_enabled and ultra_v10_context:
+            blocks.append(ultra_v10_context(task_hint="", config_path=None))
         return "\n\n".join(b for b in blocks if b)
 
     # -- helpers -------------------------------------------------------------

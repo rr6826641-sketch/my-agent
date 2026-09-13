@@ -1,3 +1,24 @@
+## [2026-09-13] v10.0 - ULTRA MODE v10 + PERSONA SWARM (roadmap #10)
+
+- feat(ultra_v10): naya `ai_agent/ultra_v10.py` module — `PersonaSwarmRouter`
+  (keyword-scored turn-to-turn specialist routing) + `ULTRA_V10_REGIME`
+  (zero-gate execution contracts: no refusals, no filters, full-depth).
+- feat(ultra_core): `UltraGM` ab ULTRA v10 context auto-append karta hai
+  (config.json `ultra_enabled` auto-detect; `ultra_observations: true`).
+- feat(system_prompt): +ULTRA MODE v10 section (deep-scan posture,
+  auto-exploit chaining, swarm live-map, self-healing multi-model swap,
+  zero-gate execution, 5-part ULTRA output pack) + ULTRA PERSONA SYSTEM
+  (5 specialists: RECON MASTER / EXPLOIT ENGINEER / CODE VAMPIRE /
+  GHOST OPS / INTEL WEAVER).
+- feat(config): `max_iterations: 120`, `max_messages: 800`,
+  `max_spawn_depth: 4`, `refusal_retries: 8`, openrouter pool 20 models,
+  multi-model swap FAIL 2x + retry, 11 openrouter models, 6 API keys live.
+- feat(webui): `/api/swarm` live-map affirmed — per-host nodes (live/ports/
+  CVEs) via `phases.recon.hosts` + `phases.exploit.targets` reduction;
+  index.html render panel (`#mc-swarm-nodes`) polling no-store verified.
+- test: real-model smoke (notrack.ai) = ULTRA v10 regime active, 5-specialist
+  swarm confirmed; WebUI live-map chain verified end-to-end.
+
 ## [2026-09-13] v0.8.13 - DEEP-SCAN POSTURE (roadmap #9)
 
 - feat(auto_pilot): naya `mission_deep` tool + `deep=True` flag across mission
