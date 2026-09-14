@@ -46,6 +46,9 @@ RETRYABLE_TOOLS = frozenset({
     "dns_lookup", "dns_axfr", "reverse_dns", "geoip", "whois",
     "cve_lookup", "check_headers", "ssl_info", "url_status",
     "redirect_chain", "robots_txt", "ping_host", "tech_detect", "waf_detect",
+    "osint_ct_subdomains", "osint_wayback_urls", "osint_username_search",
+    "osint_email_lookup", "osint_phone_lookup", "osint_dork_builder",
+    "osint_netblock_lookup",
 })
 
 TRANSIENT_MARKERS = (

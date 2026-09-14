@@ -171,6 +171,13 @@ from .custom import (
     tool_sha1_quick, tool_strings_extract, tool_html_to_text,
     tool_dedupe_lines, tool_count_lines,
 )
+from .osint import (
+    tool_osint_ct_subdomains, tool_osint_wayback_urls,
+    tool_osint_username_search, tool_osint_email_lookup,
+    tool_osint_phone_lookup, tool_osint_dork_builder,
+    tool_osint_metadata_extract, tool_osint_netblock_lookup,
+    tool_osint_dns_doh, tool_osint_ip_info, tool_osint_github_lookup,
+)
 from .darkweb_intel import (
     tool_scrape_onion_service, tool_search_darkweb_leaks,
 )
@@ -1616,6 +1623,108 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
               "required": ["keywords"]},
              lambda keywords="", numbers="0-9", years="2015-2026", specials="!@#":
                  tool_wordlist_gen(keywords, numbers, years, specials)),
+
+        # ---- osint ----
+        Tool("osint_ct_subdomains",
+             "Subdomain enumeration via Certificate Transparency (crt.sh) "
+             "with issuer, validity window and CA details for a root domain.",
+             {"type": "object",
+              "properties": {"domain": _str_prop("root domain, e.g. example.com"),
+                             "max_results": {"type": "integer", "default": 150}},
+              "required": ["domain"]},
+             lambda domain="", max_results=150:
+                 tool_osint_ct_subdomains(domain, int(max_results or 150))),
+        Tool("osint_wayback_urls",
+             "Harvest historical URLs of a domain from the Wayback Machine "
+             "CDX API (pages, endpoints, parameters, past content).",
+             {"type": "object",
+              "properties": {"domain": _str_prop("e.g. example.com"),
+                             "limit": {"type": "integer", "default": 100}},
+              "required": ["domain"]},
+             lambda domain="", limit=100:
+                 tool_osint_wayback_urls(domain, limit=int(limit or 100))),
+        Tool("osint_username_search",
+             "Check availability/presence of a username across 25+ sites "
+             "(GitHub, Reddit, X, Instagram, TikTok, Steam, Pinterest, "
+             "VK, Twitch, etc.) via public profile pages.",
+             {"type": "object",
+              "properties": {"username": _str_prop("username to search")},
+              "required": ["username"]},
+             lambda username="": tool_osint_username_search(username)),
+        Tool("osint_email_lookup",
+             "Email reputation and breach-exposure check via emailrep.io "
+             "(optional EMAILREP_KEY env for higher rate limits).",
+             {"type": "object",
+              "properties": {"email": _str_prop("e.g. user@example.com")},
+              "required": ["email"]},
+             lambda email="": tool_osint_email_lookup(email)),
+        Tool("osint_phone_lookup",
+             "Phone number intelligence: country, carrier, line type, region, "
+             "formats. Uses phonenumbers lib if installed, prefix fallback "
+             "otherwise.",
+             {"type": "object",
+              "properties": {"number": _str_prop("e.g. +14155552671")},
+              "required": ["number"]},
+             lambda number="":
+                 tool_osint_phone_lookup(number)),
+        Tool("osint_dork_builder",
+             "Build targeted Google/Bing dork queries for a domain/org by "
+             "category (files, logins, panels, docs, git, subdomains, cloud).",
+             {"type": "object",
+              "properties": {"target": _str_prop("domain, e.g. example.com"),
+                             "org": _str_prop("organisation name (optional)"),
+                             "category": _str_prop(
+                                 "all/files/logins/panels/docs/git/"
+                                 "subdomains/cloud", "all")},
+              "required": ["target"]},
+             lambda target="", org="", category="all":
+                 tool_osint_dork_builder(target, org or "",
+                                         category or "all")),
+        Tool("osint_metadata_extract",
+             "Extract hidden metadata from files: JPEG EXIF, PNG chunks, PDF "
+             "info, Office docProps, plus a pure-python parser fallback "
+             "(author, software, GPS, timestamps).",
+             {"type": "object",
+              "properties": {"path": _str_prop("path to the target file")},
+              "required": ["path"]},
+             lambda path="": tool_osint_metadata_extract(path)),
+        Tool("osint_netblock_lookup",
+             "IP-to-netblock mapping via RDAP/ipinfo: owning org, CIDR, ASN, "
+             "registry, contacts, abuse email.",
+             {"type": "object",
+              "properties": {"ip": _str_prop("IPv4 or IPv6 address")},
+              "required": ["ip"]},
+             lambda ip="": tool_osint_netblock_lookup(ip)),
+
+        Tool("osint_dns_doh",
+             "Resolve A/AAAA/MX/TXT/NS/CNAME records via DNS-over-HTTPS "
+             "(Cloudflare/Google, keyless). Fast passive DNS mapping, "
+             "mail-server and SPF/DMARC TXT discovery.",
+             {"type": "object",
+              "properties": {"domain": _str_prop("e.g. example.com"),
+                             "record_type": _str_prop(
+                                 "A/AAAA/MX/TXT/NS/CNAME/SOA/CAA", "A")},
+              "required": ["domain"]},
+             lambda domain="", record_type="A":
+                 tool_osint_dns_doh(domain, record_type or "A")),
+        Tool("osint_ip_info",
+             "Passive IP intelligence (keyless ip-api.com): country, region, "
+             "city, ISP, org, ASN, lat/lon, timezone. Geo-locate infra behind "
+             "CDNs and confirm hosting footprint.",
+             {"type": "object",
+              "properties": {"ip": _str_prop("IPv4 or IPv6 address")},
+              "required": ["ip"]},
+             lambda ip="": tool_osint_ip_info(ip)),
+        Tool("osint_github_lookup",
+             "Public GitHub search via keyless API. kind=users: find "
+             "accounts by name (login, repos, followers, bio, location). "
+             "kind=repos: public repos by keyword (stars, forks, language).",
+             {"type": "object",
+              "properties": {"query": _str_prop("name or keyword"),
+                             "kind": _str_prop("users or repos", "users")},
+              "required": ["query"]},
+             lambda query="", kind="users":
+                 tool_osint_github_lookup(query, kind or "users")),
 
         # ---- code & utilities ----
         Tool("run_python", "Execute Python code in a subprocess; returns "
