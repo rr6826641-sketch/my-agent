@@ -76,6 +76,10 @@ from .cve_active import (
     tool_log4shell_scan, tool_spring4shell_scan, tool_heartbleed_check,
     tool_shellshock_check, tool_eternalblue_check, tool_cve_active_pack,
 )
+from .cloud_bucket import (
+    tool_s3_bucket_enum, tool_azure_blob_enum, tool_gcs_bucket_enum,
+    tool_cloud_bucket_pack,
+)
 from .cpe_match import (
     tool_cpe_scan, tool_cpe_extract, tool_cpe_match,
     tool_cpe_nuclei_scan, tool_cpe_template_index,
@@ -3638,6 +3642,81 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                                             base_path=base_path, token=token,
                                             timeout=timeout,
                                             max_tests=max_tests)))
+    REGISTRY.append(Tool("s3_bucket_enum",
+         "AWS S3 bucket brute-forcer: derives {keyword}{suffix} candidates and "
+         "probes https://{name}.s3.amazonaws.com (listing via ?list-type=2). "
+         "PUBLIC bucket (listing enabled) = data leak; 403 = name exists but "
+         "private (still a name lead).",
+         {"type": "object",
+          "properties": {
+              "keyword": _str_prop("org/product keyword to derive bucket names"),
+              "wordlist": _str_prop("optional path to a bucket-name wordlist file"),
+              "max_names": {"type": "integer", "default": 40},
+              "timeout": {"type": "integer", "default": 10},
+              "workers": {"type": "integer", "default": 4},
+              "budget_sec": {"type": "integer", "default": 75}},
+          "required": []},
+         lambda keyword="", wordlist="", max_names=40, timeout=10, workers=4,
+                budget_sec=75: tool_s3_bucket_enum(keyword=keyword, wordlist=wordlist,
+                                                   max_names=max_names, timeout=timeout,
+                                                   workers=workers, budget_sec=budget_sec)))
+    REGISTRY.append(Tool("azure_blob_enum",
+         "Azure Blob Storage open-container scanner: probes "
+         "https://{name}.blob.core.windows.net/?restype=container&comp=list - "
+         "200 with listing = PUBLIC container (data leak), 403/409 = exists "
+         "but private (name lead).",
+         {"type": "object",
+          "properties": {
+              "keyword": _str_prop("org/product keyword to derive container names"),
+              "wordlist": _str_prop("optional path to a name wordlist file"),
+              "max_names": {"type": "integer", "default": 40},
+              "timeout": {"type": "integer", "default": 10},
+              "workers": {"type": "integer", "default": 4},
+              "budget_sec": {"type": "integer", "default": 75}},
+          "required": []},
+         lambda keyword="", wordlist="", max_names=40, timeout=10, workers=4,
+                budget_sec=75: tool_azure_blob_enum(keyword=keyword, wordlist=wordlist,
+                                                    max_names=max_names, timeout=timeout,
+                                                    workers=workers, budget_sec=budget_sec)))
+    REGISTRY.append(Tool("gcs_bucket_enum",
+         "Google Cloud Storage public bucket scanner: probes "
+         "storage.googleapis.com/{name} (+ {name}.storage.googleapis.com "
+         "fallback) - 200 with listing = PUBLIC bucket (data leak), 403 = "
+         "exists but private (name lead).",
+         {"type": "object",
+          "properties": {
+              "keyword": _str_prop("org/product keyword to derive bucket names"),
+              "wordlist": _str_prop("optional path to a bucket-name wordlist file"),
+              "max_names": {"type": "integer", "default": 40},
+              "timeout": {"type": "integer", "default": 10},
+              "workers": {"type": "integer", "default": 4},
+              "budget_sec": {"type": "integer", "default": 75}},
+          "required": []},
+         lambda keyword="", wordlist="", max_names=40, timeout=10, workers=4,
+                budget_sec=75: tool_gcs_bucket_enum(keyword=keyword, wordlist=wordlist,
+                                                    max_names=max_names, timeout=timeout,
+                                                    workers=workers, budget_sec=budget_sec)))
+    REGISTRY.append(Tool("cloud_bucket_pack",
+         "One-shot Cloud Bucket Enumerator: runs S3 + Azure Blob + GCS scans "
+         "over the same candidate name set (clouds='s3,azure,gcs', subset ok). "
+         "Public bucket(s) = easy data-leak win.",
+         {"type": "object",
+          "properties": {
+              "keyword": _str_prop("org/product keyword to derive bucket names"),
+              "wordlist": _str_prop("optional path to a bucket-name wordlist file"),
+              "clouds": _str_prop("comma list: s3,azure,gcs"),
+              "max_names": {"type": "integer", "default": 40},
+              "timeout": {"type": "integer", "default": 10},
+              "workers": {"type": "integer", "default": 4},
+              "budget_sec": {"type": "integer", "default": 60}},
+          "required": []},
+         lambda keyword="", wordlist="", clouds="s3,azure,gcs", max_names=40,
+                timeout=10, workers=4, budget_sec=60:
+                tool_cloud_bucket_pack(keyword=keyword, wordlist=wordlist,
+                                       clouds=clouds, max_names=max_names,
+                                       timeout=timeout, workers=workers,
+                                       budget_sec=budget_sec)))
+
 
     global _REGISTRY, _BUILTIN_NAMES
     _BUILTIN_NAMES = {t.name for t in REGISTRY}

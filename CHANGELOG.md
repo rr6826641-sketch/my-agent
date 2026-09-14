@@ -739,3 +739,12 @@ Sare notable changes is project ke. Format: `[Semantic Versioning](https://semve
 - `swagger_fetch` - auto-discovers OpenAPI/Swagger specs (swagger.json, openapi.json, v3/api-docs, ...) and returns every callable endpoint + format/version/title
 - `api_fuzz` - drives bounded auth-bypass (no/wrong token), IDOR (object-id tampering) and mass-assignment (extra privileged fields in POST/PUT/PATCH bodies) tests; "interesting" hits flagged for manual validation
 - Both tools bypass system proxies (direct connection) so local testing is reliable
+
+## [v14-cloudbucket] 2026-09-14
+
+### NEW - Cloud Bucket Enumerator (bundle #5)
+- `s3_bucket_enum` - AWS S3 brute-force: {keyword}{suffix} candidates vs https://{name}.s3.amazonaws.com, public-listing check via ?list-type=2 (200+XML = PUBLIC data leak; 403 = exists/private name lead; 404 = missing)
+- `azure_blob_enum` - Azure Blob open-container check (?restype=container&comp=list): 200 = PUBLIC container, 403/409 = exists/private
+- `gcs_bucket_enum` - GCS public bucket check (storage.googleapis.com/{name} + {name}.storage.googleapis.com fallback)
+- `cloud_bucket_pack` - one-shot sweep across S3 + Azure + GCS over the same name set (clouds=s3,azure,gcs subset ok)
+- Name generation: 60+ suffix permutations (-prod -dev -backup -uploads -2024 ...) + optional wordlist file; bounded concurrency (workers), per-request delay + hard time budget; heuristic flags only - manual validation required
