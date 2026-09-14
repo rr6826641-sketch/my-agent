@@ -80,3 +80,4 @@ _patch_gk_tmp.py
 # AUTO-PILOT campaign state (per-target runtime data)
 campaigns/
 payload_memory.json
+*.bak_*

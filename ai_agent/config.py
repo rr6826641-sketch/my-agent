@@ -167,6 +167,8 @@ def load_config(args=None):
             cfg["auto"] = True
         if getattr(args, "red_team_mode", False):
             cfg["red_team_mode"] = True
+        if getattr(args, "selftest", False):
+            cfg["selftest"] = True
         if args.once:
             cfg["once"] = args.once
         if args.memory_file:

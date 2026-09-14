@@ -312,7 +312,8 @@ def _run_selftest(cfg):
             try:
                 _req = _urlreq.Request(_ep["base_url"].rstrip("/") + "/models",
                     headers={"Authorization": "Bearer " + _os.environ.get(
-                        _ep.get("api_key_env", ""), "")})
+                        _ep.get("api_key_env", ""), ""),
+                             "User-Agent": BROWSER_UA if "BROWSER_UA" in dir() else "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0 Safari/537.36"})
                 with _urlreq.urlopen(_req, timeout=6) as _r:
                     print("[selftest] endpoint %s: HTTP %s" % (_ep["name"], _r.status))
             except Exception as _e:

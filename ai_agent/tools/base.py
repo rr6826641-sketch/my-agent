@@ -37,6 +37,26 @@ def truncate(text, limit=6000):
 
 TOOL_TIMEOUT = 120  # hard cap per tool call (seconds)
 
+# Bounded auto-retry (tool wrapper): idempotent read-only tools get a single
+# retry when the first attempt fails with a transient network/lookup error,
+# so flaky links don't burn an agent turn on a one-shot failure. Side-effect
+# tools (write/exec/upload/scan) are deliberately excluded.
+RETRYABLE_TOOLS = frozenset({
+    "fetch_url", "open_url", "web_search", "search_web",
+    "dns_lookup", "dns_axfr", "reverse_dns", "geoip", "whois",
+    "cve_lookup", "check_headers", "ssl_info", "url_status",
+    "redirect_chain", "robots_txt", "ping_host", "tech_detect", "waf_detect",
+})
+
+TRANSIENT_MARKERS = (
+    "timed out", "timeout", "connectionerror", "connection error",
+    "connection refused", "connection reset", "reset by peer",
+    "temporary failure", "temporarily unavailable", "getaddrinfo",
+    "read timed out", "remote end closed", "chunkedencoding",
+    "http 408", "http 429", "http 502", "http 503", "http 504",
+    "too many redirects", "socket.timeout",
+)
+
 _proc_lock = threading.Lock()
 _active_procs = set()
 
@@ -180,6 +200,17 @@ def execute_tool(tool_by_name, tool_call, timeout=TOOL_TIMEOUT,
                       "failed", 124)
             return ("[%s timed out after %ds — killed]" % (fn_name, timeout))
     out = box.get("out", "(no output)")
+    # Bounded auto-retry: one retry only, read-only tools only, backoff 0.8s.
+    if (fn_name in RETRYABLE_TOOLS and isinstance(out, str)
+            and any(m in out.lower() for m in TRANSIENT_MARKERS)
+            and not (cancel_event is not None and cancel_event.is_set())):
+        time.sleep(0.8)
+        try:
+            out2 = truncate(tool.func(**cmd_args))
+        except Exception:
+            out2 = None
+        if out2:
+            out = out2
     _emit_end(out, "completed" if run_id is not None else "completed",
               0 if run_id is not None else None)
     return out

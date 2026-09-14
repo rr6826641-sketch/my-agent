@@ -1,3 +1,28 @@
+## [2026-09-14] v10.9 - ENDPOINT FIXES + TOOL RETRY WRAPPER
+
+- fix(selftest): notrack/groq GET /models 403 (Cloudflare error 1010) —
+  sab raw urllib probe ka UA-issue tha, API keys thik thi. Probe ab browser
+  UA bhejta hai (real client jaisa) -> dono endpoints HTTP 200 REPORTS +
+  RESULT PASS (pehle false 403 lag raha tha).
+- fix(notrack): real agent client se verified - notrack-uncensored PONG reply.
+  CF_FRIENDLY_HOSTS mein already maujood tha, sirf probe galat tha.
+- fix(groq): do real bugs pakde - (a) api.groq.com ab CF_FRIENDLY_HOSTS mein
+  (browser UA nahi tha to Cloudflare 1010 de raha tha), (b) config groq model
+  id `llama-3.3-70b-versatile` delete ho chuka tha (404) - live /models se
+  14 models verify karke qwen/qwen3.8-27b + openai/gpt-oss-20b/120b set kiye.
+  Real client se qwen/qwen3.8-27b PONG reply - endpoint FIX CONFIRMED.
+- feat(tools/base.py): execute_tool bounded auto-retry wrapper - idempotent
+  read-only tools (18: fetch_url, web_search, dns_*, geoip, whois, cve_lookup,
+  check_headers, ssl_info, url_status, redirect_chain, robots_txt, ping_host,
+  tech_detect, waf_detect...) transient failures (timeout/refused/reset/DNS/
+  408/429/502-504) par 1 retry, 0.8s backoff. Side-effect tools (run_terminal,
+  write_file, scans, uploads...) kabhi retry nahi hote. Unit test: fake flaky
+  fetch_url 2 attempts -> OK; run_terminal 1 attempt -> untouched. PASS.
+- chore: .gitignore `*.bak_*` — rollback backups locally hi rehte hain,
+  repo par nahi. config.json design se untracked hai (secrets .env only) -
+  groq model fix local config par hai, commit se bahar.
+- test: selftest mock + live PASS, noy track real-client roundtrip PASS.
+
 ## [2026-09-14] v10.8 - CONFIG TUNING + DEEP CLI UPGRADE
 
 - feat(cli): agent.py --persona <id> override - config.json edit kiye baghair

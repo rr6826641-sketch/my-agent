@@ -42,7 +42,7 @@ NETWORK_FALLBACK_MSG = ("Internet connection interrupted while reaching "
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
               "AppleWebKit/537.36 (KHTML, like Gecko) "
               "Chrome/126.0.0.0 Safari/537.36")
-CF_FRIENDLY_HOSTS = ("api.notrack.ai", "notrack.ai")
+CF_FRIENDLY_HOSTS = ("api.notrack.ai", "notrack.ai", "api.groq.com")
 
 # requests exceptions that mean "the network is unstable" and are worth an
 # exponential-backoff retry. HTTP 4xx/5xx and malformed-request errors are
@@ -664,6 +664,21 @@ _INTENT_CLASS_RE = re.compile(r"intent_class:\s*([A-Za-z0-9_]+)",
                               re.IGNORECASE)
 
 
+def _normalize_messages(messages):
+    """Accept a raw string or a list of dicts/strings and return OpenAI-
+    style message dicts. Fixes AttributeError in _intent_class_of when a
+    caller passes a bare prompt string."""
+    if isinstance(messages, str):
+        return [{"role": "user", "content": messages}]
+    out = []
+    for m in messages or []:
+        if isinstance(m, str):
+            out.append({"role": "user", "content": m})
+        else:
+            out.append(m)
+    return out
+
+
 def _intent_class_of(messages):
     """Extract the reformulator's intent class from the system scope block.
 
@@ -1023,6 +1038,7 @@ class OpenAIClient:
         return messages  # no user turn yet: keep context pending
 
     def chat(self, messages, tools=None, temperature=0.2):
+        messages = _normalize_messages(messages)
         intent_class = _intent_class_of(messages)
         models = self._chain_for_call()
         if self.refusal_intel.enabled and intent_class:
