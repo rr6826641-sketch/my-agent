@@ -1,3 +1,26 @@
+## [2026-09-14] v10.8 - CONFIG TUNING + DEEP CLI UPGRADE
+
+- feat(cli): agent.py --persona <id> override - config.json edit kiye baghair
+  persona hot-swap (custom/promax/ultra/apex/blackice/dan-r...). Unknown id
+  par config wali persona preserve hoti hai aur warning print hoti hai.
+- feat(selftest): persona tag headline print (active [PERSONA OVERRIDE - ULTRA
+  v11 ...] block dikhata hai) + non-mock mode mein uncensored local-endpoint
+  liveness probe (notrack / groq GET /models) - uncensored path reachable hai
+  ya nahi ek hi command se confirm.
+- feat(config): GROQ endpoint added - GROQ_API_KEY .env mein maujood tha lekin
+  config local_endpoints mein groq block missing tha (ab
+  https://api.groq.com/openai/v1, llama-3.3-70b-versatile). OpenRouter top
+  picks cached /models catalog ke khilaf verify karke fallback_models chain
+  (12 entries) + openrouter local_endpoints block mein add kiye:
+  anthracite-org/magnum-v4-72b, qwen/qwen3.5-397b-a17b,
+  sao10k/l3.3-euryale-70b-v2.3.
+- test: --selftest mock PASS (persona block 3726 chars, tags=1), live
+  round-trip PASS (model replied SELFTEST_OK), webui boot 200 + /api/status
+  persona=custom / red_team_mode=true / level=promax / key=true / 240 tools,
+  --persona promax CLI override verified. Rollback files:
+  agent.py.bak_deep_20260914, config.json.bak_20260914_053828, aur pehle se
+  maujood *.bak_20260914 backups - koi bhi wapas copy karo bas.
+
 ## [2026-09-14] v10.7 - VOICE INPUT/OUTPUT (Feature E COMPLETE)
 
 - feat(voice): Mission Console mein bolo aur agent jawab bolega. Voice input =

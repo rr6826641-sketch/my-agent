@@ -37,6 +37,11 @@ def build_parser():
                    help="Run terminal commands without asking for permission")
     p.add_argument("--once", default="", help="Run a single query and exit")
     p.add_argument("--memory-file", default="", help="Path to memory JSON file")
+    p.add_argument("--selftest", action="store_true",
+                   help="Run boot+persona+model health check and exit")
+    p.add_argument("--persona", default="",
+                   help="Persona id override without editing config.json"
+                   " (custom/promax/ultra/apex/blackice/...)")
     p.add_argument("--max-iterations", type=int, default=0,
                    help="Max tool-call loop iterations (default 60)")
     return p
@@ -45,6 +50,15 @@ def build_parser():
 def main():
     args = build_parser().parse_args()
     cfg = load_config(args)
+    if args.persona:
+        from ai_agent import personas as _personas
+        _pid = _personas.normalize(args.persona)
+        if _pid in [x["id"] for x in _personas.list_personas()]:
+            cfg["persona"] = _pid
+            print("[persona] CLI override -> '%s'" % _pid)
+        else:
+            print("[persona] unknown persona '%s' - keeping config '%s'" % (
+                args.persona, cfg.get("persona")))
 
     uncensored = bool(cfg.get("red_team_mode"))
     # Red Team level parity with the web UI: promax/promix widen the
@@ -107,6 +121,9 @@ def main():
         intent_reformulator=IntentReformulator(),
         confirm_terminal=(not cfg["auto"]),
     )
+
+    if cfg.get("selftest"):
+        raise SystemExit(_run_selftest(cfg))
 
     if cfg["once"]:
         _stream_reply(agent, cfg["once"])
@@ -241,6 +258,67 @@ def _run_pipeline_cli(agent, target):
                 " (aborted at stage %s)" % st["failed_stage"]
                 if st.get("failed_stage") else ""))
             print("\n" + (ev.get("report") or ""))
+
+
+def _run_selftest(cfg):
+    """One-shot health check: config, persona assembly, env keys, live model.
+    Used after upgrades to confirm the agent boots with the active persona."""
+    import os as _os
+    from ai_agent import personas as _personas
+    fail = 0
+    print("[selftest] config: persona=%s red_team_mode=%s model=%s" % (
+        cfg.get("persona"), bool(cfg.get("red_team_mode")), cfg.get("model")))
+    # persona assembly
+    level = str(cfg.get("red_team_level") or "promax").lower()
+    mix = _os.environ.get("PERSONA_MIX", "")  # unused, keep parity import out
+    block = _personas.get_block(cfg.get("persona"), uncensored=bool(cfg.get("red_team_mode")))
+    if not block:
+        print("[selftest] FAIL: persona block empty"); fail += 1
+    else:
+        print("[selftest] persona block: %d chars, tags=%d" % (
+            len(block), block.count("[PERSONA")))
+        _head = next((l.strip() for l in block.splitlines()
+                      if l.strip().startswith("[PERSONA")), "")
+        print("[selftest] persona tag: %s" % (_head or "none"))
+    # env keys
+    for k in ("GROQ_API_KEY", "NOTRACK_API_KEY", "OPENROUTER_API_KEY",
+              "VENICE_API_KEY", "HUGGINGFACE_API_KEY"):
+        v = _os.environ.get(k, "")
+        print("[selftest] env %s: %s" % (k, "SET(%d)" % len(v) if v else "EMPTY"))
+    # live model round-trip
+    if cfg.get("mock"):
+        print("[selftest] mock mode - skipping live call")
+    else:
+        try:
+            from ai_agent.llm import OpenAIClient
+            llm = OpenAIClient(api_key=cfg.get("api_key") or "",
+                               base_url=cfg["base_url"], model=cfg["model"],
+                               fallback_models=cfg.get("fallback_models"),
+                               local_endpoints=cfg.get("local_endpoints"),
+                               local_first=bool(cfg.get("local_first")))
+            llm.persona_block = block
+            out = llm.chat("Reply with exactly: SELFTEST_OK")
+            text = str(getattr(out, "content", out) if not isinstance(out, str) else out)
+            ok = "SELFTEST_OK" in text
+            print("[selftest] live model: %s -> %r" % ("OK" if ok else "REPLY", text[:60]))
+            if not ok: fail += 1
+        except Exception as e:
+            print("[selftest] live model: FAIL -> %s" % e); fail += 1
+        # endpoint liveness probe for uncensored local endpoints
+        import urllib.request as _urlreq
+        for _ep in cfg.get("local_endpoints") or []:
+            if _ep.get("name") not in ("notrack", "groq"):
+                continue
+            try:
+                _req = _urlreq.Request(_ep["base_url"].rstrip("/") + "/models",
+                    headers={"Authorization": "Bearer " + _os.environ.get(
+                        _ep.get("api_key_env", ""), "")})
+                with _urlreq.urlopen(_req, timeout=6) as _r:
+                    print("[selftest] endpoint %s: HTTP %s" % (_ep["name"], _r.status))
+            except Exception as _e:
+                print("[selftest] endpoint %s: probe FAIL -> %s" % (_ep["name"], _e))
+    print("[selftest] RESULT: %s" % ("PASS" if fail == 0 else "FAIL (%d)" % fail))
+    return fail
 
 
 if __name__ == "__main__":
