@@ -178,6 +178,9 @@ from .osint import (
     tool_osint_metadata_extract, tool_osint_netblock_lookup,
     tool_osint_dns_doh, tool_osint_ip_info, tool_osint_github_lookup,
 )
+from .remote_control import (
+    tool_remote_control, tool_remote_ssh, tool_remote_screenshot,
+)
 from .darkweb_intel import (
     tool_scrape_onion_service, tool_search_darkweb_leaks,
 )
@@ -3248,6 +3251,52 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                        "description": "attack focus"}},
          "required": []},
         lambda mode="hashcat": gen_crypto_kit(mode=mode or "hashcat")))
+
+    REGISTRY.append(Tool(
+        "remote_control",
+        "Remote Control Hub: HTTP-based system control (token-auth). "
+        "start=hub on 0.0.0.0:port (console page + /api/exec, /api/pty, "
+        "/api/upload, /api/download, /api/ps, /api/kill), status=hub info, "
+        "stop=shutdown, token=show/rotate stored token.",
+        {"type": "object",
+         "properties": {"action": _str_prop("start/status/stop/token", "status"),
+                        "port": {"type": "integer", "default": 8443},
+                        "token": _str_prop("custom token (auto if empty)")},
+         "required": []},
+        lambda action="status", port=8443, token="":
+            tool_remote_control(action or "status", port=int(port or 8443),
+                                token=token or "")))
+    REGISTRY.append(Tool(
+        "remote_ssh",
+        "SSH remote host control via paramiko (run command / connect_test / "
+        "upload / download). Password ya private key auth.",
+        {"type": "object",
+         "properties": {"host": _str_prop("remote host"),
+                        "user": _str_prop("ssh user", "root"),
+                        "port": {"type": "integer", "default": 22},
+                        "password": _str_prop("password (or use key_path)"),
+                        "key_path": _str_prop("private key path"),
+                        "command": _str_prop("command to run remotely"),
+                        "action": _str_prop("run/connect_test/upload/download",
+                                            "run"),
+                        "local_path": _str_prop("local file path"),
+                        "remote_path": _str_prop("remote file path")},
+         "required": ["host"]},
+        lambda host="", user="root", port=22, password="", key_path="",
+               command="", action="run", local_path="", remote_path="":
+            tool_remote_ssh(host, user or "root", int(port or 22),
+                            password or "", key_path or "", command or "",
+                            action or "run", local_path or "",
+                            remote_path or "")))
+    REGISTRY.append(Tool(
+        "remote_screenshot",
+        "Capture the active screen to a PNG file (PIL/mss/PowerShell "
+        "fallback). Returns saved path - phir /api/download ya file tools "
+        "se le lo.",
+        {"type": "object",
+         "properties": {"save_to": _str_prop("full save path (auto default)")},
+         "required": []},
+        lambda save_to="": tool_remote_screenshot(save_to or "")))
 
     REGISTRY.append(Tool(
         "osint_kit",
