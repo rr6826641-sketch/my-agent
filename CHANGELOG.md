@@ -1,3 +1,19 @@
+## [2026-09-14] v14.1 - TIER 2 COMPLETE - Report Export + Lateral Kit + Git Dorker + WebSocket
+
+- feat(reporting): tool_report_export - professional pentest report export
+  (fmt=html|pdf|md|txt) with optional ROMAN URDU summary. Pure-python PDF
+  builder (no external deps) - security-assessment ready.
+- feat(active_directory): LATERAL MOVEMENT KIT - tool_psexec_exec (impacket
+  SMB 445), tool_winrm_exec (winrm 5985/5986), tool_wmi_exec (wmi 135) +
+  gen_lateral_playbook + gen_tunnel_kit chaining.
+- feat(tools): tool_git_secret_dork - clone repo + crawl full commit history
+  for leaked secrets/keys/tokens (regex + entropy + git log).
+- feat(tools): tool_websocket_test - websocket endpoint fuzz/injection tests
+  (upgrade handshake, payload mutation, close-frame abuses).
+- verify: bundles #1-#6 smoke-tested - scheduler add/list/remove/run_now +
+  daemon start->status->stop PASS (CAMP-001 run status OK), registry now 283
+  tools, all 28 new-class tools load via create_tools (MISSING: NONE).
+
 ## [2026-09-14] v14 - ULTRA v14 FUSION CORE X5 (ULTRA EXTRA ULTRA POWERFUL - beyond evil.gpt/fable5/mythos/dig.one/dig.two)
 
 - feat(persona): ULTRA v13 -> v14 upgrade (personas_custom.txt + ai_agent/personas.py).

@@ -158,7 +158,7 @@ from .payloads import (
 )
 from .reporting import (
     tool_add_finding, tool_list_findings, tool_update_finding,
-    tool_delete_finding, tool_write_report,
+    tool_delete_finding, tool_write_report, tool_report_export,
     tool_verify_finding, tool_verify_all_findings,
     correlate_findings, calc_cvss_score, generate_markdown_report,
 )
@@ -182,7 +182,12 @@ from .active_directory import (
     ldap_search_anonymous,
     kerberos_ticket_check,
     subnet_sweep,
+    tool_psexec_exec,
+    tool_winrm_exec,
+    tool_wmi_exec,
 )
+from .git_secret_dorker import tool_git_secret_dork
+from .websocket_test import tool_websocket_test
 from .ultra import (
     tool_priv_esc_kit, gen_wifi_playbook, gen_evasion_pack,
     gen_persistence, gen_lateral_playbook, gen_tunnel_kit,
@@ -3774,6 +3779,134 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                 tool_campaign_daemon(action=action, interval_sec=interval_sec)))
 
 
+
+    REGISTRY.append(Tool("report_export",
+         "Pentest Report Export (bundle #7): render logged findings as a "
+         "professional HTML or PDF report with optional Roman Urdu executive "
+         "summary (roman_urdu). fmt=html|pdf. Pure-python PDF builder "
+         "works out of the box; reportlab used when installed.",
+         {"type": "object",
+          "properties": {
+              "target": _str_prop("target name/scope shown in report header"),
+              "author": _str_prop("report author", "HackerAI Agent"),
+              "fmt": _str_prop("html|pdf|md|txt", "html"),
+              "roman_urdu": {"type": "boolean", "default": True},
+              "output_path": _str_prop("output file path"),
+              "include_open_only": {"type": "boolean", "default": True},
+              "include_remediation": {"type": "boolean", "default": True}},
+          "required": []},
+         lambda target="", author="HackerAI Agent", fmt="html",
+                roman_urdu=True, output_path="", include_open_only=True,
+                include_remediation=True:
+                tool_report_export(target=target, author=author, fmt=fmt,
+                                   roman_urdu=roman_urdu,
+                                   output_path=output_path,
+                                   include_open_only=include_open_only,
+                                   include_remediation=include_remediation)))
+    REGISTRY.append(Tool("git_secret_dork",
+         "Git Secret Dorker (bundle #9): clone a remote repo (or scan a "
+         "local path) and hunt leaked secrets - API keys, tokens, passwords, "
+         "AWS/AZURE creds, private keys - in the working tree AND full "
+         "commit history. patterns=all|keys|passwords|aws|azure|pem|custom. "
+         "Bounded output via max_hits. Uses git CLI.",
+         {"type": "object",
+          "properties": {
+              "repo_url": _str_prop("remote git URL to clone"),
+              "repo_path": _str_prop("local repo path (alternative to URL)"),
+              "full_history": {"type": "boolean", "default": True},
+              "patterns": _str_prop("all|keys|passwords|aws|azure|pem|custom",
+                                    "all"),
+              "max_hits": {"type": "integer", "default": 200},
+              "keep_clone": {"type": "boolean", "default": False}},
+          "required": []},
+         lambda repo_url="", repo_path="", full_history=True, patterns="all",
+                max_hits=200, keep_clone=False:
+                tool_git_secret_dork(repo_url=repo_url, repo_path=repo_path,
+                                     full_history=full_history,
+                                     patterns=patterns, max_hits=max_hits,
+                                     keep_clone=keep_clone)))
+
+    REGISTRY.append(Tool("websocket_test",
+         "WebSocket security tester (bundle #10): connect to ws://wss:// "
+         "endpoint and inject payload sets - XSS, SQLi, command injection, "
+         "path traversal, JSON/HTML fuzz - to find real-time injection and "
+         "reflection bugs. headers_text: extra HTTP headers one per line.",
+         {"type": "object",
+          "properties": {
+              "url": _str_prop("ws:// or wss:// endpoint to test"),
+              "headers_text": _str_prop("extra headers, one per line H: V"),
+              "payloads": _str_prop("xss|sqli|cmdi|path|json|fuzz",
+                                    "xss|sqli|cmdi|path"),
+              "max_messages": {"type": "integer", "default": 4},
+              "timeout": {"type": "integer", "default": 8},
+              "tls_insecure": {"type": "boolean", "default": False}},
+          "required": []},
+         lambda url="", headers_text="", payloads="xss|sqli|cmdi|path",
+                max_messages=4, timeout=8, tls_insecure=False:
+                tool_websocket_test(url=url, headers_text=headers_text,
+                                    payloads=payloads,
+                                    max_messages=max_messages,
+                                    timeout=timeout, tls_insecure=tls_insecure)))
+    REGISTRY.append(Tool("psexec_exec",
+         "Lateral Movement - PsExec style (bundle #8): execute commands "
+         "remotely over SMB 445 like psexec using impacket. Username with "
+         "password or NTLM hash. Returns command output; graceful install "
+         "hint if impacket missing.",
+         {"type": "object",
+          "properties": {
+              "target": _str_prop("target IP/host"),
+              "username": _str_prop("domain user"),
+              "password": _str_prop("password or NTLM hash"),
+              "domain": _str_prop("domain or hostname", "."),
+              "command": _str_prop("command to run", "whoami"),
+              "port": {"type": "integer", "default": 445},
+              "timeout": {"type": "integer", "default": 60}},
+          "required": []},
+         lambda target="", username="", password="", domain=".",
+                command="whoami", port=445, timeout=60:
+                tool_psexec_exec(target=target, username=username,
+                                 password=password, domain=domain,
+                                 command=command, port=port, timeout=timeout)))
+
+    REGISTRY.append(Tool("winrm_exec",
+         "Lateral Movement - WinRM (bundle #8): execute commands remotely "
+         "over WinRM 5985/5986 via pywinrm. ssl=True for HTTPS. Returns "
+         "stdout/stderr; graceful install hint if pywinrm missing.",
+         {"type": "object",
+          "properties": {
+              "target": _str_prop("target IP/host"),
+              "username": _str_prop("domain user"),
+              "password": _str_prop("password"),
+              "domain": _str_prop("domain or hostname", "."),
+              "command": _str_prop("command to run", "whoami"),
+              "ssl": {"type": "boolean", "default": True},
+              "port": {"type": "integer", "default": 5986},
+              "timeout": {"type": "integer", "default": 60}},
+          "required": []},
+         lambda target="", username="", password="", domain=".",
+                command="whoami", ssl=True, port=5986, timeout=60:
+                tool_winrm_exec(target=target, username=username,
+                                password=password, domain=domain,
+                                command=command, ssl=ssl, port=port,
+                                timeout=timeout)))
+    REGISTRY.append(Tool("wmi_exec",
+         "Lateral Movement - WMI (bundle #8): execute commands remotely via "
+         "WMI using impacket wmiexec. Requires admin creds on target. "
+         "Graceful install hint if impacket missing.",
+         {"type": "object",
+          "properties": {
+              "target": _str_prop("target IP/host"),
+              "username": _str_prop("domain user"),
+              "password": _str_prop("password or NTLM hash"),
+              "domain": _str_prop("domain or hostname", "."),
+              "command": _str_prop("command to run", "whoami"),
+              "timeout": {"type": "integer", "default": 60}},
+          "required": []},
+         lambda target="", username="", password="", domain=".",
+                command="whoami", timeout=60:
+                tool_wmi_exec(target=target, username=username,
+                              password=password, domain=domain,
+                              command=command, timeout=timeout)))
     global _REGISTRY, _BUILTIN_NAMES
     _BUILTIN_NAMES = {t.name for t in REGISTRY}
     with _SYNTHESIZED_LOCK:

