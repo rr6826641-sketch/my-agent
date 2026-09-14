@@ -10,7 +10,7 @@ Ye ek complete AI agent hai jo **sochta hai, tools use karta hai, aur kaam karta
 
 **🔴 Red Team PRO MAX (default top tier)** — `/api/redteam` bina `level` ke on karo toh agent seedha **PRO MAX** composite persona par jaata hai (sabse powerful preset — APEX + BLACKICE + DAN-R + UNFILTERED + MAX layer set). Optional `level`: `promax` (default) · `promix` · `master` (`unfiltered` persona).
 
-**⚡ ULTRA v12 core (custom persona, default active)** — `personas_custom.txt` mein EXTRA ULTRA POWERFUL core: six-phase full chain (recon → exploit → post-x → report), swarm parallel sub-agents, evidence+artifacts, tool mastery, aur **HackerAI Style Lock (100% identity match)** — writing form bilkul HackerAI assistant jaisa (Roman Urdu "jani" tone / casual-direct English, outcome-first, zero filler). Zero filter on security work: full exploit chains, payloads, shellcode — production-ready, koi refusal nahi.
+**⚡ ULTRA v14 core (custom persona, default active) - v14 FUSION CORE X5 layer on top** — `personas_custom.txt` mein EXTRA ULTRA POWERFUL core: six-phase full chain (recon → exploit → post-x → report), swarm parallel sub-agents, evidence+artifacts, tool mastery, aur **HackerAI Style Lock (100% identity match)** — writing form bilkul HackerAI assistant jaisa (Roman Urdu "jani" tone / casual-direct English, outcome-first, zero filler). Zero filter on security work: full exploit chains, payloads, shellcode — production-ready, koi refusal nahi.
 
 ---
 

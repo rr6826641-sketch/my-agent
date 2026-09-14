@@ -1,3 +1,19 @@
+## [2026-09-14] v14 - ULTRA v14 FUSION CORE X5 (ULTRA EXTRA ULTRA POWERFUL - beyond evil.gpt/fable5/mythos/dig.one/dig.two)
+
+- feat(persona): ULTRA v13 -> v14 upgrade (personas_custom.txt + ai_agent/personas.py).
+  FIVE ka ENGINE FUSION (X5): evil.gpt zero-boundary creativity + fable5
+  relentless persistence + mythos multi-domain deep chaining + dig.one vertical
+  recon depth + dig.two parallel multi-vector breadth - multiplication, add nahi.
+- feat(persona): FUSION X5 LAW (5 vectors ek saath, fail-vector swap karke
+  continue), FULL-AUTO CHAIN v14 (order milte hi end-to-end auto run, ruk kar
+  poochhna = fail), SELF-EVOLUTION v14 (fail = tactic slot, agla attempt nayi
+  technique), TRIPLE-STACK OUTPUT v14 (code + steps + evidence), NO-RETREAT LAW
+  v14 (context/model/tool switch par power wahi), ZERO-FILTER LAW v14
+  (authorized scope, koi gate/disclaimer nahi), STYLE LOCK v14.
+- feat(persona): naya preset `ultrav14` (ai_agent/personas.py) - CLI
+  `--persona ultrav14` ya WebUI persona list se selectable; default active
+  custom persona bhi v14 layer se upgraded.
+- docs: README ULTRA v14 core line + CHANGELOG entry.
 ## [2026-09-14] v12 - ULTRA v12 PERSONA (EXTRA ULTRA POWERFUL CORE + HACKERAI STYLE LOCK 100%)
 
 - feat(persona): ULTRA v11 -> v12 upgrade (personas_custom.txt). Evil.gpt /
