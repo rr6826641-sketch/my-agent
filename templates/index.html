@@ -514,6 +514,38 @@
     .mc-chain-pivot{color:#4ade80;}
     .mc-chain-cve{color:#f87171;}
     .mc-chain-host{font-size:11px;color:#cdd8f0;}
+    /* Feature D (v10.6) — chain-viz drill-down: clickable nodes + host details panel */
+    .mc-node{cursor:pointer;}
+    .mc-node:hover{filter:brightness(1.45);}
+    .mc-node-dim{opacity:0.3;}
+    .mc-chain-hint{font-size:10.5px;color:#5b6b8c;margin-top:2px;}
+    .mc-host-panel{display:none;margin-top:10px;background:#0b0f1e;border:1px solid #2a3550;border-radius:10px;padding:12px 14px;min-width:0;}
+    .mc-host-panel.show{display:block;}
+    .mc-host-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+    .mc-host-dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:0 0 auto;}
+    .mc-host-dot.live{background:#4ade80;box-shadow:0 0 6px rgba(74,222,128,.5);}
+    .mc-host-dot.dead{background:#f47174;box-shadow:0 0 6px rgba(244,113,116,.5);}
+    .mc-host-title{font-size:14px;font-weight:800;color:#e8edf5;font-family:ui-monospace,Consolas,monospace;word-break:break-all;}
+    .mc-host-tag{font-size:10.5px;background:#12263a;color:#cdd8f0;border:1px solid #2a3550;border-radius:20px;padding:2px 10px;white-space:nowrap;}
+    .mc-host-x{margin-left:auto;background:rgba(255,255,255,.06);border:1px solid #2a3550;color:#93a3c4;border-radius:6px;cursor:pointer;font-size:12px;padding:3px 10px;}
+    .mc-host-x:hover{color:#f47174;border-color:#f47174;}
+    .mc-host-go{display:inline-block;background:rgba(74,222,128,.12);color:#4ade80;border:1px solid #4ade80;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;text-decoration:none;white-space:nowrap;}
+    .mc-host-go:hover{background:rgba(74,222,128,.28);}
+    .mc-host-sec{display:grid;grid-template-columns:170px 1fr;gap:6px 14px;margin-top:8px;}
+    .mc-host-sec dt{font-size:10.5px;color:#5b6b8c;letter-spacing:.04em;text-transform:uppercase;}
+    .mc-host-sec dd{margin:0;min-width:0;}
+    .mc-host-status{font-size:11px;color:#7ee0a3;font-weight:700;}
+    .mc-host-status.dead{color:#f47174;}
+    .mc-host-svc{display:inline-block;font-size:10.5px;font-family:ui-monospace,Consolas,monospace;color:#cdd8f0;background:#0c1020;border:1px solid #22304a;border-radius:20px;padding:2px 9px;margin:0 4px;}
+    .mc-host-cve{display:inline-block;font-size:10.5px;font-family:ui-monospace,Consolas,monospace;color:#f87171;background:#170d14;border:1px solid #f87171;border-radius:20px;padding:2px 9px;margin:0 4px;}
+    .mc-host-links{border-top:1px solid #1d2740;margin-top:8px;display:flex;flex-direction:column;gap:5px;max-height:150px;overflow:auto;}
+    .mc-host-links h5{margin:0;font-size:10.5px;color:#5b6b8c;}
+    .mc-host-linkrow{display:flex;align-items:center;gap:8px;font-size:11px;color:#cdd8f0;padding:3px 8px;border-radius:6px;background:#0c1020;}
+    .mc-host-linkrow:hover{background:#12263a;}
+    .mc-host-nb{cursor:pointer;color:#7ee0a3;font-family:ui-monospace,Consolas,monospace;text-decoration:underline;word-break:break-all;}
+    .mc-host-pivot{color:#4ade80;font-size:10px;font-weight:700;}
+    .mc-host-chain{color:#f87171;font-size:10px;font-weight:700;}
+    .mc-host-mut{font-size:10px;color:#5b6b8c;font-family:ui-monospace,Consolas,monospace;word-break:break-all;}
 
   </style>
   <header class="chat-header">
@@ -571,6 +603,25 @@
           <span class="mc-chain-pivot">— — PIVOT (shared service:port)</span>
           <span class="mc-chain-cve">—- CHAIN (shared CVE)</span>
           <span class="mc-chain-host">nodes = hosts</span>
+        </div>
+        <div class="mc-chain-hint">💡 click a node to drill-down — host details + graph links</div>
+        <div class="mc-host-panel" id="mc-host-panel">
+          <div class="mc-host-head">
+            <span class="mc-host-dot live" id="mch-dot"></span>
+            <span class="mc-host-title" id="mch-title">—</span>
+            <span class="mc-host-tag" id="mch-camp">—</span>
+            <a class="mc-host-go" id="mch-go" href="#" title="Open this host's campaign in the Mission Console above">▸ Mission Console</a>
+            <button class="mc-host-x" id="mch-close" title="Close host details (Esc)">✕</button>
+          </div>
+          <dl class="mc-host-sec">
+            <dt>Status</dt><dd><span class="mc-host-status" id="mch-status">—</span></dd>
+            <dt>Open Ports</dt><dd id="mch-ports">—</dd>
+            <dt>CVEs</dt><dd id="mch-cves">—</dd>
+          </dl>
+          <div class="mc-host-links">
+            <h5>Graph links · click a host to jump</h5>
+            <div id="mch-links">—</div>
+          </div>
         </div>
       </div>
     </div>
@@ -791,28 +842,42 @@
 })();
 </script>
 <script>
-/* MULTI-TARGET CHAIN GRAPH (v10.1) — SVG force-ish spring layout, no deps */
+/* MULTI-TARGET CHAIN GRAPH + DRILL-DOWN (v10.6, Feature D) — SVG spring layout, no deps.
+   v10.6: node click -> host details panel (ports/svcs/CVEs/status), neighboring-host
+   jump links, focus-mode dimming, mission-console jump, live refresh keeps selection. */
 (function(){
   try{
     var svg=document.querySelector("#mc-chain-svg"); if(!svg) return;
     var cnt=document.querySelector("#mc-chain-count");
+    var panel=document.querySelector("#mc-host-panel");
     var NS="http://www.w3.org/2000/svg";
+    var lastData=null, selectedId=null;
     function el(tag,attrs){ var n=document.createElementNS(NS,tag); for(var k in attrs){ n.setAttribute(k,attrs[k]); } return n; }
+    function pe(id){ return document.querySelector("#"+id); }
+    function esc(s){ return String(s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
+    function focusSet(id,edges){
+      var set={}; set[id]=true;
+      for(var i=0;i<edges.length;i++){ var e=edges[i];
+        if(e.source===id) set[e.target]=true;
+        if(e.target===id) set[e.source]=true; }
+      return set;
+    }
     function renderC(d){
+      lastData=d;
       var nodes=(d&&Array.isArray(d.nodes))?d.nodes:[];
       var edges=(d&&Array.isArray(d.edges))?d.edges:[];
       if(cnt) cnt.textContent="("+nodes.length+" hosts / "+edges.length+" links)";
       svg.innerHTML="";
-      if(!nodes.length){ var t=el("text",{x:440,y:170,"text-anchor":"middle",fill:"#73819f","font-size":14}); t.textContent="— no chain yet — run a war-room campaign —"; svg.appendChild(t); return; }
+      if(!nodes.length){ var t=el("text",{x:440,y:170,"text-anchor":"middle",fill:"#73819f","font-size":14}); t.textContent="— no chain yet — run a war-room campaign —"; svg.appendChild(t); selectedId=null; if(panel) panel.classList.remove("show"); return; }
+      if(selectedId && !nodes.find(function(nd){return nd.id===selectedId;})){ selectedId=null; if(panel) panel.classList.remove("show"); }
       var W=900,H=340,pad=40;
-      var n=(nodes.length>8)?8:nodes.length;
-      var cx,cy;
       function ringPos(i,total){
         var ang=-(Math.PI/2)+((2*Math.PI*i)/Math.max(1,total));
         return {x:W/2+Math.cos(ang)*((W/2)-pad), y:H/2+Math.sin(ang)*((H/2)-pad)};
       }
       var pos=[];
       for(var i=0;i<nodes.length;i++){ var p=ringPos(i,nodes.length); pos.push(p); }
+      var fs=selectedId?focusSet(selectedId,edges):null;
       // edges beneath
       for(var j=0;j<edges.length;j++){
         var e=edges[j]||{};
@@ -820,43 +885,132 @@
         for(var k=0;k<nodes.length;k++){ if(nodes[k].id===e.source) si=k; if(nodes[k].id===e.target) ti=k; }
         if(si<0||ti<0) continue;
         var a=pos[si],b=pos[ti];
+        var onSel=fs && (e.source===selectedId||e.target===selectedId);
         var line=el("line",{x1:a.x,y1:a.y,x2:b.x,y2:b.y,
           stroke:(e.type==="chain"?"#f87171":"#4ade80"),
-          "stroke-width":(e.type==="chain"?2:1.4),
+          "stroke-width":(onSel?3.4:(e.type==="chain"?2:1.4)),
           "stroke-dasharray":(e.type==="chain"?"":"8 6"),
-          "stroke-opacity":0.75,"data-type":e.type||"pivot"});
+          "stroke-opacity":(fs&&!onSel?0.14:(onSel?1:0.75)),"data-type":e.type||"pivot"});
         svg.appendChild(line);
         var mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
-        var lab=el("text",{x:mx,y:my-5,"text-anchor":"middle",fill:(e.type==="chain"?"#f87171":"#2e8b57"),"font-size":9});
+        var lab=el("text",{x:mx,y:my-5,"text-anchor":"middle",fill:(e.type==="chain"?"#f87171":"#2e8b57"),"font-size":9,"style":"pointer-events:none","opacity":(fs&&!onSel?0.2:1)});
         lab.textContent=String(e.label||"").split(";")[0]+((String(e.label||"").split(";").length>1)?" …":"");
         svg.appendChild(lab);
       }
       // nodes
       for(var m=0;m<nodes.length;m++){
         var nd=nodes[m]||{}, p=pos[m];
-        var r= el("circle",{cx:p.x,cy:p.y,r:22,fill:(nd.live?"#12263a":"#0c1020"),stroke:(nd.live?"#4ade80":"#f47174"),"stroke-width":2});
+        var dimNode=fs && !(fs[nd.id]);
+        var r= el("circle",{cx:p.x,cy:p.y,r:22,fill:(nd.live?"#12263a":"#0c1020"),
+          stroke:(selectedId===nd.id?"#f5c542":(nd.live?"#4ade80":"#f47174")),
+          "stroke-width":(selectedId===nd.id?3.2:2),
+          "class":"mc-node"+(dimNode?" mc-node-dim":""),
+          title:String(nd.label||nd.id||"?")
+            +"  ·  ports: "+(Array.isArray(nd.ports)&&nd.ports.length?nd.ports.join(","):"—")
+            +"  ·  cves: "+(Array.isArray(nd.cves)&&nd.cves.length?nd.cves.join(","):"—")
+            +"  ·  click for details"});
+        r.addEventListener("click",function(id){ return function(){ openHost(id); }; }(nd.id));
         svg.appendChild(r);
-        var ip=el("text",{x:p.x,y:p.y+3,"text-anchor":"middle",fill:"#e8edf5","font-size":9,"font-family":"ui-monospace,Consolas,monospace"});
+        var ip=el("text",{x:p.x,y:p.y+3,"text-anchor":"middle",fill:"#e8edf5","font-size":9,"font-family":"ui-monospace,Consolas,monospace","style":"pointer-events:none","opacity":(dimNode?0.3:1)});
         ip.textContent=String(nd.label||nd.id||"?").split(".").pop();
         svg.appendChild(ip);
-        var h=el("text",{x:p.x,y:p.y+38,"text-anchor":"middle",fill:"#93a3c4","font-size":9});
+        var h=el("text",{x:p.x,y:p.y+38,"text-anchor":"middle",fill:"#93a3c4","font-size":9,"style":"pointer-events:none","opacity":(dimNode?0.3:1)});
         var ports=Array.isArray(nd.ports)&&nd.ports.length?nd.ports.join(","):"—";
         h.textContent=ports;
         svg.appendChild(h);
         if(Array.isArray(nd.cves)&&nd.cves.length){
-          var cv=el("text",{x:p.x,y:p.y-28,"text-anchor":"middle",fill:"#f87171","font-size":8.5});
+          var cv=el("text",{x:p.x,y:p.y-28,"text-anchor":"middle",fill:"#f87171","font-size":8.5,"style":"pointer-events:none","opacity":(dimNode?0.3:1)});
           cv.textContent=nd.cves[0];
           svg.appendChild(cv);
         }
       }
+      svg.onclick=function(ev){ if(ev.target===svg) closePanel(); };
+      if(selectedId) renderPanel(selectedId);
     }
+    function openHost(id){
+      selectedId=id;
+      svg.onclick=svg.onclick; /* keep svg-click-close binding */
+      renderPanel(id);
+      rerenderGraph();
+    }
+    function closePanel(){
+      selectedId=null;
+      if(panel) panel.classList.remove("show");
+      rerenderGraph();
+    }
+    function rerenderGraph(){ if(lastData) renderC(lastData); }
+    function renderPanel(id){
+      if(!panel) return;
+      var d=lastData||{};
+      var nodes=(d&&Array.isArray(d.nodes))?d.nodes:[];
+      var edges=(d&&Array.isArray(d.edges))?d.edges:[];
+      var nd=nodes.find(function(x){return x.id===id;});
+      if(!nd){ closePanel(); return; }
+      panel.classList.add("show");
+      var live=!!nd.live;
+      var dot=pe("mch-dot"); dot.className="mc-host-dot "+(live?"live":"dead");
+      pe("mch-title").textContent=String(nd.label||nd.id||"?");
+      pe("mch-camp").textContent="campaign: "+(nd.group||"—");
+      pe("mch-camp").title=String(nd.group||"");
+      var st=pe("mch-status"); st.className="mc-host-status"+(live?"":" dead");
+      st.textContent=live?"● LIVE — open ports found":"○ NO OPEN PORTS — host down / recon-only";
+      // ports + services
+      var svcs=Array.isArray(nd.services)&&nd.services.length?nd.services:[];
+      var ports=Array.isArray(nd.ports)&&nd.ports.length?nd.ports:[];
+      var pHtml="";
+      if(svcs.length){ pHtml=svcs.map(function(s){return '<span class="mc-host-svc">'+esc(s)+'</span>';}).join(""); }
+      else if(ports.length){ pHtml=ports.map(function(s){return '<span class="mc-host-svc">'+esc(s)+'</span>';}).join(""); }
+      else { pHtml='<span class="mc-hint">none</span>'; }
+      pe("mch-ports").innerHTML=pHtml;
+      pe("mch-ports").title=(ports.length?("raw ports: "+ports.join(", ")):"");
+      // cves
+      var cves=Array.isArray(nd.cves)&&nd.cves.length?nd.cves:[];
+      pe("mch-cves").innerHTML=cves.length
+        ? cves.map(function(c){return '<span class="mc-host-cve">'+esc(c)+'</span>';}).join("")
+        : '<span class="mc-hint">none logged</span>';
+      // graph links (drill-down to neighbours)
+      var lnk=pe("mch-links");
+      var rows=[];
+      for(var i=0;i<edges.length;i++){
+        var e=edges[i];
+        if(e.source!==id && e.target!==id) continue;
+        var nb=(e.source===id)?e.target:e.source;
+        var nbn=nodes.find(function(x){return x.id===nb;});
+        var lbl=String(e.label||"");
+        var typeTxt=(e.type==="chain"?"CHAIN":"PIVOT");
+        var typeCls=(e.type==="chain"?"mc-host-chain":"mc-host-pivot");
+        rows.push('<div class="mc-host-linkrow">'
+          +'<span class="'+typeCls+'">'+esc(typeTxt)+'</span>'
+          +'<span class="mc-host-mut" title="shared '+(e.type==="chain"?"CVE":"service:port")+'">'+esc(lbl)+'</span>'
+          +'<span class="mc-host-nb" data-host="'+esc(nb)+'" title="jump to host">'+esc(nbn?String(nbn.label||nb):nb)+'</span>'
+          +'</div>');
+      }
+      lnk.innerHTML=rows.length?rows.join(""):'<span class="mc-hint">no links to other hosts</span>';
+      var nbs=lnk.querySelectorAll(".mc-host-nb");
+      for(var j=0;j<nbs.length;j++){ nbs[j].onclick=function(h){ return function(){ openHost(h); }; }(nbs[j]?nbs[j].getAttribute("data-host"):""); }
+      // mission console jump
+      var go=pe("mch-go");
+      go.onclick=function(ev){ ev.preventDefault(); jumpToMission(nd.group||""); };
+    }
+    function jumpToMission(key){
+      if(!key) return;
+      var sel=document.querySelector("#mc-select"); if(!sel) return;
+      var opt=null;
+      for(var i=0;i<sel.options.length;i++){ if(sel.options[i].value===key){ opt=sel.options[i]; break; } }
+      if(!opt){ opt=document.createElement("option"); opt.value=key; opt.textContent=key; sel.appendChild(opt); }
+      sel.value=key;
+      try{ if(typeof sel.onchange==="function") sel.onchange(); }catch(e){}
+    }
+    document.addEventListener("keydown",function(ev){
+      if(ev.key==="Escape"||ev.key==="Esc"){ if(selectedId&&panel&&panel.classList.contains("show")) closePanel(); }
+    });
+    var xbtn=pe("mch-close"); if(xbtn) xbtn.onclick=function(){ closePanel(); };
     function pollC(){
       try{ fetch("/api/swarm/chains",{cache:"no-store"}).then(function(r){return r.json();}).then(renderC).catch(function(){}); }catch(e){}
     }
     pollC(); setInterval(pollC,6000);
   }catch(e){}
 })();
-</script>
-<script src="/gatekeeper/lockscreen.js?v=0.8.8" defer></script>
+</script><script src="/gatekeeper/lockscreen.js?v=0.8.8" defer></script>
 </body>
 </html>

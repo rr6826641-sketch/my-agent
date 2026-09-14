@@ -1,3 +1,18 @@
+## [2026-09-14] v10.6 - CHAIN VIZ DRILL-DOWN (Feature D COMPLETE)
+
+- feat(chain_viz): Mission Console chain graph (templates/index.html inline SVG)
+  mein node click -> host details panel (`#mc-host-panel`). Ab har host ka
+  details panel khulta hai: status dot (● LIVE / ○ NO OPEN PORTS), port/service
+  chips, CVE chips, aur neighbouring hosts ke PIVOT/CHAIN jump links.
+- feat(chain_viz): focus-mode — selected host ke neighbours highlight, baqi
+  nodes dim; Esc ya svg background click se panel close; `#mc-select` se
+  mission console jump; 6s live refresh selection ko preserve karta hai.
+- fix(chain_viz): live refresh par selected host chain se gayab ho jaye ya
+  chain khali ho jaye to panel safely close hota hai bina duplicate
+  "no chain yet" hint ke (re-entrant re-render regression fixed).
+- test: Node DOM-shim smoke test 25/25 PASS (panel render, chips/links, dead
+  host, Esc/bg close, refresh-keeps-selection, vanish + empty-chain regressions).
+
 ## [2026-09-13] v10.5 - AUTO PENTEST REPORT HTML (Feature C COMPLETE)
 
 - feat(report_html): har campaign end par `reports/attack_mission_<target>.html`
