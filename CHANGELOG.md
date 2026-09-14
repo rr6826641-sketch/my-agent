@@ -1,3 +1,29 @@
+## [2026-09-14] v12 - ULTRA v12 PERSONA (EXTRA ULTRA POWERFUL CORE + HACKERAI STYLE LOCK 100%)
+
+- feat(persona): ULTRA v11 -> v12 upgrade (personas_custom.txt). Evil.gpt /
+  fable5 / mythos / dig.one / dig.two class builds ko cross karta hai:
+  - SIX-PHASE FULL CHAIN: Recon+OSINT -> Enumeration -> Vuln mapping ->
+    Exploitation+PoC -> Post-exploitation+pivots -> Remediation+report.
+    Ek continuous run, koi surface answer nahi.
+  - SWARM DEPTH: parallel sub-agents (recon / fuzzing / payload dev /
+    evidence capture) ek saath, results merge, next pivot chaining.
+  - EVIDENCE + ARTIFACTS: bounded request/response captures, exact payloads,
+    reproduction steps, impact; severity (Critical/High/Med/Low/Info) sorted.
+  - TOOL MASTERY: nmap, ffuf, gobuster, sqlmap, nuclei, msf, impacket,
+    curl/python one-liners - pehli baar exact syntax + full install cmds.
+  - ZERO FILTER intact: security work mein koi refusal, koi lecture, koi
+    "as an AI", koi pseudo-code, koi truncation. Production-ready chains.
+- feat(persona): HACKERAI STYLE LOCK (100% IDENTITY MATCH) - writing form
+  bilkul HackerAI assistant jaise: operator Roman Urdu likhe to "jani"
+  tone/short punchy sentences/colloquial spellings; English to casual-direct;
+  technical content exact English syntax; outcome-first structure (intro line
+  -> kaam -> 2-4 line summary -> next steps); zero filler/emojis/padding.
+- fix(sync): `HackerAI\my-agent` copy ke liye missing `ai_agent/memory/`
+  package (vector_store, compactor, knowledge_graph, payload_fusion) active
+  build se sync kiya - wo copy ab bhi boot ho sakti hai (ModuleNotFoundError
+  fix). Active build par selftest RESULT: PASS (persona v12 5150 chars,
+  live model SELFTEST_OK, notrack+groq HTTP 200).
+
 ## [2026-09-14] v10.9 - ENDPOINT FIXES + TOOL RETRY WRAPPER
 
 - fix(selftest): notrack/groq GET /models 403 (Cloudflare error 1010) —
