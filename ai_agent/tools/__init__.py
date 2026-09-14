@@ -69,6 +69,9 @@ from .credential_attack import (
     tool_hydra_brute, tool_password_spray, tool_hash_crack,
 )
 
+from .api_fuzz import (
+    tool_swagger_fetch, tool_api_fuzz,
+)
 from .cve_active import (
     tool_log4shell_scan, tool_spring4shell_scan, tool_heartbleed_check,
     tool_shellshock_check, tool_eternalblue_check, tool_cve_active_pack,
@@ -3599,6 +3602,42 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                 callback_host="", wait=15, timeout=10: tool_cve_active_pack(
                     target=target, ports=ports, https_port=https_port,
                     callback_host=callback_host, wait=wait, timeout=timeout)))
+
+    REGISTRY.append(Tool("swagger_fetch",
+         "Auto-discovers and parses OpenAPI/Swagger specs: probes common "
+         "locations (swagger.json, openapi.json, v3/api-docs, ...), returns "
+         "format/version/title plus every callable endpoint (path + methods) "
+         "ready for api_fuzz.",
+         {"type": "object",
+          "properties": {
+              "target": _str_prop("http(s)://host[:port] (required)"),
+              "paths": _str_prop("optional comma-separated custom spec paths"),
+              "timeout": {"type": "integer", "default": 12},
+              "max_paths": {"type": "integer", "default": 15}},
+          "required": ["target"]},
+         lambda target="", paths="", timeout=12, max_paths=15:
+             tool_swagger_fetch(target=target, paths=paths, timeout=timeout,
+                                max_paths=max_paths)))
+    REGISTRY.append(Tool("api_fuzz",
+         "OpenAPI endpoint fuzzer: after swagger_fetch (or from user-provided "
+         "endpoints JSON) drives bounded auth-bypass (no/wrong token), IDOR "
+         "(object-id tampering) and mass-assignment (extra fields in "
+         "POST/PUT/PATCH bodies) probes. Interesting hits need manual "
+         "validation.",
+         {"type": "object",
+          "properties": {
+              "target": _str_prop("http(s)://host[:port] (required)"),
+              "endpoints": _str_prop("optional endpoints JSON from swagger_fetch"),
+              "base_path": _str_prop("optional prefix e.g. /api/v1"),
+              "token": _str_prop("optional bearer token baseline"),
+              "timeout": {"type": "integer", "default": 10},
+              "max_tests": {"type": "integer", "default": 80}},
+          "required": ["target"]},
+         lambda target="", endpoints="", base_path="", token="", timeout=10,
+                max_tests=80: tool_api_fuzz(target=target, endpoints=endpoints,
+                                            base_path=base_path, token=token,
+                                            timeout=timeout,
+                                            max_tests=max_tests)))
 
     global _REGISTRY, _BUILTIN_NAMES
     _BUILTIN_NAMES = {t.name for t in REGISTRY}

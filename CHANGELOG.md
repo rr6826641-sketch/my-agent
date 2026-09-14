@@ -732,3 +732,10 @@ Sare notable changes is project ke. Format: `[Semantic Versioning](https://semve
 - `shellshock_check` - CVE-2014-6271: `() { :; }; echo; echo <marker>` in UA/Referer header; command echo = RCE proof
 - `eternalblue_check` - MS17-010: SMBv1 Negotiate->SessionSetup->Trans2 0x0e; STATUS_INSUFF_SERVER_RESOURCES (0xC0000205) signature (nmap-style, safe)
 - `cve_active_pack` - one-shot sweep of all five vs a target with auto web/TLS/SMB port detection
+
+## [v14-apifuzz] 2026-09-14
+
+### NEW - OpenAPI/Swagger API Fuzz Engine (bundle #4)
+- `swagger_fetch` - auto-discovers OpenAPI/Swagger specs (swagger.json, openapi.json, v3/api-docs, ...) and returns every callable endpoint + format/version/title
+- `api_fuzz` - drives bounded auth-bypass (no/wrong token), IDOR (object-id tampering) and mass-assignment (extra privileged fields in POST/PUT/PATCH bodies) tests; "interesting" hits flagged for manual validation
+- Both tools bypass system proxies (direct connection) so local testing is reliable
