@@ -722,3 +722,13 @@ Sare notable changes is project ke. Format: `[Semantic Versioning](https://semve
 - `hash_crack` - offline dict crack: md5/sha1/sha224/sha256/sha384/sha512/ntlm/bcrypt/salted-sha256/auto
 - Pure-Python MD4 (RFC1320) for NTLM - works on Python 3.14 which dropped OpenSSL md4
 - Built-in common-password + user wordlists; custom file/list support
+
+## [v14-cve-pack] 2026-09-14
+
+### NEW - Live CVE Active-Scanner Pack (bundle #3)
+- `log4shell_scan` - CVE-2021-44228: JNDI header injection (12 headers + URL) + local LDAP callback listener to catch inbound hits (RCE proof)
+- `spring4shell_scan` - CVE-2022-22965: class.module.classLoader data-binder payload writes marker file; retrieval confirms vuln + cleanup guidance
+- `heartbleed_check` - CVE-2014-0160: real TLS handshake + malformed Heartbeat; leaks memory preview (pure-Python TLS client)
+- `shellshock_check` - CVE-2014-6271: `() { :; }; echo; echo <marker>` in UA/Referer header; command echo = RCE proof
+- `eternalblue_check` - MS17-010: SMBv1 Negotiate->SessionSetup->Trans2 0x0e; STATUS_INSUFF_SERVER_RESOURCES (0xC0000205) signature (nmap-style, safe)
+- `cve_active_pack` - one-shot sweep of all five vs a target with auto web/TLS/SMB port detection

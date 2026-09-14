@@ -68,6 +68,11 @@ from .notify import (
 from .credential_attack import (
     tool_hydra_brute, tool_password_spray, tool_hash_crack,
 )
+
+from .cve_active import (
+    tool_log4shell_scan, tool_spring4shell_scan, tool_heartbleed_check,
+    tool_shellshock_check, tool_eternalblue_check, tool_cve_active_pack,
+)
 from .cpe_match import (
     tool_cpe_scan, tool_cpe_extract, tool_cpe_match,
     tool_cpe_nuclei_scan, tool_cpe_template_index,
@@ -3491,6 +3496,109 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                     hash_value=hash_value, hash_type=hash_type,
                     wordlist=wordlist, salt=salt,
                     max_attempts=max_attempts)))
+
+    # ---- Live CVE Active-Scanner Pack ----
+    REGISTRY.append(Tool("log4shell_scan",
+         "Active Log4Shell check (CVE-2021-44228): injects ${jndi:ldap://...} "
+         "payloads into 12 common HTTP headers + URL and catches the inbound "
+         "callback with a local listener. Confirmed RCE primitive when the "
+         "target connects back. Needs callback_host reachable by the target.",
+         {"type": "object",
+          "properties": {
+              "target": _str_prop("host/IP (required)"),
+              "port": _str_prop("HTTP port (default 80)"),
+              "https": {"type": "boolean", "default": False,
+                        "description": "use TLS"},
+              "path": _str_prop("URL path (default /)"),
+              "callback_host": _str_prop("public host the target can reach back to"),
+              "callback_port": {"type": "integer", "default": 38999,
+                                "description": "listener port"},
+              "wait": {"type": "integer", "default": 20,
+                       "description": "seconds to watch for callback"}},
+          "required": ["target"]},
+         lambda target="", port="80", https=False, path="/", callback_host="",
+                callback_port=38999, wait=20: tool_log4shell_scan(
+                    target=target, port=port, https=https, path=path,
+                    callback_host=callback_host, callback_port=callback_port,
+                    wait=wait)))
+    REGISTRY.append(Tool("spring4shell_scan",
+         "Active Spring4Shell check (CVE-2022-22965): sends the "
+         "class.module.classLoader data-binder payload that writes a marker "
+         "into the webroot on vulnerable Spring MVC <= 5.3.17 (+JDK9/Tomcat), "
+         "then retrieves the marker to confirm. Returns cleanup guidance.",
+         {"type": "object",
+          "properties": {
+              "target": _str_prop("host/IP (required)"),
+              "port": _str_prop("HTTP port (default 80)"),
+              "https": {"type": "boolean", "default": False},
+              "path": _str_prop("controller path (default /)"),
+              "log": _str_prop("marker filename (default poc_spring4shell_<pid>.txt)")},
+          "required": ["target"]},
+         lambda target="", port="80", https=False, path="/", log="":
+             tool_spring4shell_scan(target=target, port=port, https=https,
+                                    path=path, log=log)))
+    REGISTRY.append(Tool("heartbleed_check",
+         "Active Heartbleed check (CVE-2014-0160): real TLS handshake + "
+         "malformed Heartbeat request; vulnerable OpenSSL leaks process "
+         "memory which we capture (capped hex preview) as proof. "
+         "Non-destructive.",
+         {"type": "object",
+          "properties": {
+              "target": _str_prop("host/IP (required)"),
+              "port": _str_prop("TLS port (default 443)"),
+              "timeout": {"type": "integer", "default": 10,
+                          "description": "seconds per socket op"}},
+          "required": ["target"]},
+         lambda target="", port="443", timeout=10: tool_heartbleed_check(
+             target=target, port=port, timeout=timeout)))
+    REGISTRY.append(Tool("shellshock_check",
+         "Active ShellShock check (CVE-2014-6271): sends the canonical "
+         "'() { :; }; echo; echo <marker>' payload in HTTP headers to a CGI "
+         "endpoint; vulnerable bash echoes the marker back = command exec "
+         "proof.",
+         {"type": "object",
+          "properties": {
+              "target": _str_prop("host/IP (required)"),
+              "port": _str_prop("HTTP port (default 80)"),
+              "https": {"type": "boolean", "default": False},
+              "path": _str_prop("CGI script path (default /cgi-bin/)"),
+              "echo_id": _str_prop("custom proof marker")},
+          "required": ["target"]},
+         lambda target="", port="80", https=False, path="/cgi-bin/", echo_id="":
+             tool_shellshock_check(target=target, port=port, https=https,
+                                   path=path, echo_id=echo_id)))
+    REGISTRY.append(Tool("eternalblue_check",
+         "Active EternalBlue check (MS17-010): speaks SMBv1 (Negotiate -> "
+         "Session Setup -> Trans2 0x0e) and looks for the "
+         "STATUS_INSUFF_SERVER_RESOURCES (0xC0000205) signature - same "
+         "technique as Nmap smb-vuln-ms17-010. Safe - no exploit payload.",
+         {"type": "object",
+          "properties": {
+              "target": _str_prop("host/IP (required)"),
+              "port": _str_prop("SMB port (default 445)"),
+              "timeout": {"type": "integer", "default": 10}},
+          "required": ["target"]},
+         lambda target="", port="445", timeout=10: tool_eternalblue_check(
+             target=target, port=port, timeout=timeout)))
+    REGISTRY.append(Tool("cve_active_pack",
+         "One-shot active CVE sweep: runs all five checks (log4shell, "
+         "spring4shell, heartbleed, shellshock, eternalblue) against a "
+         "target, auto-detecting web/TLS/SMB ports. The kill-chain "
+         "auto-complete after cve_lookup / cpe_match identify candidates.",
+         {"type": "object",
+          "properties": {
+              "target": _str_prop("host/IP (required)"),
+              "ports": _str_prop("comma-separated ports (default 80,443,445,8080)"),
+              "https_port": _str_prop("which ports use TLS (default 443)"),
+              "callback_host": _str_prop("log4shell callback host"),
+              "wait": {"type": "integer", "default": 15,
+                       "description": "log4shell callback window (s)"},
+              "timeout": {"type": "integer", "default": 10}},
+          "required": ["target"]},
+         lambda target="", ports="80,443,445,8080", https_port="",
+                callback_host="", wait=15, timeout=10: tool_cve_active_pack(
+                    target=target, ports=ports, https_port=https_port,
+                    callback_host=callback_host, wait=wait, timeout=timeout)))
 
     global _REGISTRY, _BUILTIN_NAMES
     _BUILTIN_NAMES = {t.name for t in REGISTRY}
