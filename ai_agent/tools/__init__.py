@@ -59,6 +59,11 @@ from .auto_pilot import (
 from .swarm_campaign import (
     tool_swarm_campaign, tool_swarm_status,
 )
+
+from .notify import (
+    tool_notify_telegram, tool_notify_discord,
+    tool_notify_webhook, tool_notify_findings,
+)
 from .cpe_match import (
     tool_cpe_scan, tool_cpe_extract, tool_cpe_match,
     tool_cpe_nuclei_scan, tool_cpe_template_index,
@@ -3346,6 +3351,71 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                          "description": "domain / email / username"}},
          "required": []},
         lambda target="": gen_osint_kit(target=target or "")))
+
+    # ---- Notification Engine (Telegram / Discord / Webhook / findings digest) ----
+    REGISTRY.append(Tool("notify_telegram",
+         "Send a live alert to a Telegram chat via the Bot API. Use for "
+         "critical findings, campaign completions and autonomous agent "
+         "updates so no action stays silent. Requires bot_token (or "
+         "TELEGRAM_BOT_TOKEN in .env) and chat_id (or TELEGRAM_CHAT_ID). "
+         "The bot token is always masked in responses.",
+         {"type": "object",
+          "properties": {
+              "bot_token": _str_prop("Telegram bot token (or set TELEGRAM_BOT_TOKEN)"),
+              "chat_id": _str_prop("recipient chat id (or set TELEGRAM_CHAT_ID)"),
+              "message": _str_prop("text to send")},
+          "required": []},
+         lambda bot_token="", chat_id="", message="": tool_notify_telegram(
+             bot_token=bot_token, chat_id=chat_id, message=message)))
+    REGISTRY.append(Tool("notify_discord",
+         "Send a message to a Discord channel through a webhook URL. "
+         "Use for live alerts / findings updates. Requires webhook_url "
+         "(or DISCORD_WEBHOOK_URL in .env).",
+         {"type": "object",
+          "properties": {
+              "webhook_url": _str_prop("Discord webhook URL (or DISCORD_WEBHOOK_URL)"),
+              "message": _str_prop("text content"),
+              "username": _str_prop("optional display name (max 80 chars)")},
+          "required": []},
+         lambda webhook_url="", message="", username="": tool_notify_discord(
+             webhook_url=webhook_url, message=message, username=username)))
+    REGISTRY.append(Tool("notify_webhook",
+         "POST a JSON notification to any webhook/endpoint (Slack/Teams "
+         'style {"text": ...} or a raw JSON payload). Generic integration '
+         "for any alerting pipeline.",
+         {"type": "object",
+          "properties": {
+              "url": _str_prop("destination endpoint"),
+              "message": _str_prop('text - sent as {"text": <message>}'),
+              "payload": _str_prop("optional raw JSON string, sent as-is"),
+              "method": _str_prop("HTTP method (default POST)")},
+          "required": ["url"]},
+         lambda url="", message="", payload="", method="POST": tool_notify_webhook(
+             url=url, message=message, payload=payload, method=method)))
+    REGISTRY.append(Tool("notify_findings",
+         "Send a severity-filtered digest of logged findings (findings.jsonl) "
+         "to telegram | discord | webhook. Perfect for autonomous campaigns: "
+         "schedule it at the end of a chain so every critical/high finding is "
+         "reported live. No message is sent when nothing matches - no false "
+         "alerts.",
+         {"type": "object",
+          "properties": {
+              "channel": _str_prop("telegram | discord | webhook (default telegram)"),
+              "min_severity": _str_prop("critical | high | medium | low | info (default high)"),
+              "limit": {"type": "integer", "default": 10,
+                        "description": "max findings in the alert"},
+              "bot_token": _str_prop("telegram: bot token (or TELEGRAM_BOT_TOKEN)"),
+              "chat_id": _str_prop("telegram: chat id (or TELEGRAM_CHAT_ID)"),
+              "webhook_url": _str_prop("discord/webhook: destination URL"),
+              "include_summary": {"type": "boolean", "default": True,
+                                  "description": "prepend summary header line"}},
+          "required": []},
+         lambda channel="telegram", min_severity="high", limit=10, bot_token="",
+                chat_id="", webhook_url="", include_summary=True:
+             tool_notify_findings(channel=channel, min_severity=min_severity,
+                                  limit=limit, bot_token=bot_token,
+                                  chat_id=chat_id, webhook_url=webhook_url,
+                                  include_summary=include_summary)))
 
     global _REGISTRY, _BUILTIN_NAMES
     _BUILTIN_NAMES = {t.name for t in REGISTRY}

@@ -703,3 +703,13 @@ Sare notable changes is project ke. Format: `[Semantic Versioning](https://semve
   COMPLETED / FAILED), auto-scroll, bounded to 140 rows, secret-sanitised.
 - test: node --check static/app.js clean; mirror hooked into addRow so no
   action can bypass the feed.
+
+## [v14-notify] 2026-09-14
+
+### NEW - Notification Engine (bundle #1 selected)
+- `notify_telegram` - live Bot API alerts (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)
+- `notify_discord` - Discord webhook messages (DISCORD_WEBHOOK_URL)
+- `notify_webhook` - generic JSON webhook (Slack/Teams style or raw payload)
+- `notify_findings` - severity-filtered digest of findings.jsonl to any channel
+- Tokens always masked in outputs; no false alerts (empty store / below severity = no send)
+- Registered in tool registry; .env.example updated with notification keys
