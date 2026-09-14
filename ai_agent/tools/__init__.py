@@ -177,6 +177,10 @@ from .osint import (
     tool_osint_phone_lookup, tool_osint_dork_builder,
     tool_osint_metadata_extract, tool_osint_netblock_lookup,
     tool_osint_dns_doh, tool_osint_ip_info, tool_osint_github_lookup,
+    tool_osint_rdap_whois,
+    tool_osint_reverse_dns,
+    tool_osint_ssl_cert_scan,
+    tool_osint_http_headers,
 )
 from .remote_control import (
     tool_remote_control, tool_remote_ssh, tool_remote_screenshot,
@@ -3252,6 +3256,40 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
          "required": []},
         lambda mode="hashcat": gen_crypto_kit(mode=mode or "hashcat")))
 
+    REGISTRY.append(Tool(
+        "osint_rdap_whois",
+        "Domain registration WHOIS via RDAP (keyless): registrar, "
+        "created/expiry dates, status codes, nameservers, registrant.",
+        {"type": "object",
+         "properties": {"domain": _str_prop("registered domain to look up")},
+         "required": ["domain"]},
+        lambda domain="": tool_osint_rdap_whois(domain)))
+    REGISTRY.append(Tool(
+        "osint_reverse_dns",
+        "Reverse DNS (PTR) for an IP via DNS-over-HTTPS (keyless). Maps "
+        "an IP back to its hostname - CDN/hosting confirmation.",
+        {"type": "object",
+         "properties": {"ip": _str_prop("IPv4 or IPv6 address")},
+         "required": ["ip"]},
+        lambda ip="": tool_osint_reverse_dns(ip)))
+    REGISTRY.append(Tool(
+        "osint_ssl_cert_scan",
+        "Grab a host's TLS certificate: subject, SANs, issuer, validity, "
+        "days to expiry, TLS version + cipher (passive, stdlib only).",
+        {"type": "object",
+         "properties": {"host": _str_prop("hostname or IP"),
+                        "port": {"type": "integer", "default": 443}},
+         "required": ["host"]},
+        lambda host="", port=443:
+            tool_osint_ssl_cert_scan(host, int(port or 443))))
+    REGISTRY.append(Tool(
+        "osint_http_headers",
+        "Fetch a URL and report server fingerprint + security headers "
+        "(HSTS, CSP, X-Frame-Options, cookie flags) + missing hardening.",
+        {"type": "object",
+         "properties": {"url": _str_prop("target URL or hostname")},
+         "required": ["url"]},
+        lambda url="": tool_osint_http_headers(url)))
     REGISTRY.append(Tool(
         "remote_control",
         "Remote Control Hub: HTTP-based system control (token-auth). "

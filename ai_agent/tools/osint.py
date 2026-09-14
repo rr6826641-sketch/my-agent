@@ -830,3 +830,299 @@ def tool_osint_github_lookup(query, kind="users"):
                             it.get("forks_count"),
                             it.get("language") or "-", it.get("html_url")))
     return "\n".join(lines)
+
+# ---------------------------------------------------------------------------
+# 12. Domain RDAP WHOIS (keyless - rdap.org bootstrap, modern structured WHOIS)
+# ---------------------------------------------------------------------------
+
+def tool_osint_rdap_whois(domain):
+    """Domain registration WHOIS via the RDAP bootstrap service (keyless).
+    Returns registrar, created/updated/expiry dates, status codes,
+    nameservers and registrant contact names - the structured replacement
+    for legacy WHOIS. Great before any active engagement.
+    """
+    domain = (domain or "").strip().lower()
+    if not domain or not re.match(
+            r"^[a-z0-9]([a-z0-9\-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]*[a-z0-9])?)+$",
+            domain):
+        return "osint_rdap_whois: provide a valid registered domain (e.g. example.com)"
+    try:
+        resp = requests.get("https://rdap.org/domain/%s" % domain,
+                            headers={"User-Agent": USER_AGENT},
+                            timeout=HTTP_TIMEOUT, allow_redirects=True)
+    except requests.exceptions.RequestException as exc:
+        return "osint_rdap_whois: RDAP request failed: %r" % exc
+    if resp.status_code != 200:
+        return "osint_rdap_whois: RDAP status %d (no RDAP for this TLD?)" \
+               % resp.status_code
+    try:
+        d = resp.json()
+    except ValueError:
+        return "osint_rdap_whois: RDAP returned invalid JSON"
+    lines = ["RDAP WHOIS for %s" % domain]
+
+    def _names(entities, role):
+        out = []
+        for ent in entities or []:
+            if role in (ent.get("roles") or []):
+                for item in ((ent.get("vcardArray") or [None, []])[1] or []):
+                    if item and len(item) > 3 and item[0] == "fn":
+                        out.append(str(item[3]))
+        return out
+
+    if d.get("ldhName"):
+        lines.append("  domain: %s" % d["ldhName"])
+    statuses = []
+    for s in d.get("status") or []:
+        if s:
+            statuses.append(s.split()[0])
+    if statuses:
+        lines.append("  status: %s" % ", ".join(statuses))
+    regs = _names(d.get("entities"), "registrar")
+    if regs:
+        lines.append("  registrar: %s" % regs[0][:120])
+    regs = _names(d.get("entities"), "registrant")
+    if regs:
+        lines.append("  registrant: %s" % regs[0][:120])
+    for ns in (d.get("nameservers") or []):
+        if isinstance(ns, dict) and ns.get("ldhName"):
+            lines.append("  nameserver: %s" % ns["ldhName"].rstrip("."))
+    for event in d.get("events") or []:
+        action = event.get("eventAction")
+        if action in ("registration", "expiration", "last changed",
+                      "last update of RDDS database"):
+            lines.append("  %s: %s" % (action, event.get("eventDate")))
+    if d.get("secureDNS"):
+        lines.append("  dnssec: enabled")
+    for key in ("handle",):
+        if d.get(key):
+            lines.append("  %s: %s" % (key, d[key]))
+    links = d.get("links") or []
+    if links:
+        lines.append("  source: %s" % links[0].get("href"))
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# 13. Reverse DNS (PTR) via DNS-over-HTTPS (keyless - passive)
+# ---------------------------------------------------------------------------
+
+def tool_osint_reverse_dns(ip):
+    """Reverse DNS (PTR record) for an IPv4/IPv6 address via DoH (keyless).
+    Maps an IP back to its hostname - useful to confirm hosting, CDN
+    fronting, or vhosts before active testing.
+    """
+    ip = (ip or "").strip()
+    if not ip:
+        return "osint_reverse_dns: provide an IP address"
+    try:
+        import ipaddress
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return "osint_reverse_dns: invalid IP '%s'" % ip
+    if addr.version == 4:
+        ptr_name = ".".join(reversed(ip.split("."))) + ".in-addr.arpa"
+    else:
+        ptr_name = ".".join(reversed(list(addr.exploded.replace(":", "")))) \
+            + ".ip6.arpa"
+    endpoints = (
+        "https://cloudflare-dns.com/dns-query?name=%s&type=PTR" % ptr_name,
+        "https://dns.google/resolve?name=%s&type=PTR" % ptr_name,
+    )
+    last_err = None
+    for url in endpoints:
+        try:
+            resp = requests.get(url, headers={
+                "User-Agent": USER_AGENT, "Accept": "application/dns-json"},
+                timeout=HTTP_TIMEOUT)
+            if resp.status_code != 200:
+                last_err = "status %d" % resp.status_code
+                continue
+            answers = (resp.json().get("Answer") or [])
+            if not answers:
+                return "osint_reverse_dns: %s - no PTR record" % ip
+            lines = ["Reverse DNS for %s:" % ip]
+            for a in answers:
+                if a.get("type") == 12 and a.get("data"):
+                    lines.append("  %s  (TTL=%s)"
+                                 % (a["data"].rstrip("."), a.get("TTL")))
+            return "\n".join(lines)
+        except requests.exceptions.RequestException as exc:
+            last_err = repr(exc)
+        except ValueError:
+            last_err = "invalid JSON response"
+    return "osint_reverse_dns: both DoH endpoints failed: %s" % last_err
+
+
+# ---------------------------------------------------------------------------
+# 14. TLS certificate fingerprint (stdlib only - passive connection)
+# ---------------------------------------------------------------------------
+
+def tool_osint_ssl_cert_scan(host, port=443):
+    """Grab a remote host's TLS certificate and summarize subject, SANs,
+    issuer, validity window, days-until-expiry, TLS version and cipher.
+    Purely passive service connection - no exploitation. Works for public
+    and self-signed/untrusted certificates (cryptography parse fallback).
+    """
+    host = (host or "").strip()
+    if not host:
+        return "osint_ssl_cert_scan: provide a hostname or IP"
+    host = host.replace("https://", "").replace("http://", "").split("/")[0]
+    host = host.split(":")[0]
+    try:
+        port = int(port or 443)
+    except (TypeError, ValueError):
+        return "osint_ssl_cert_scan: invalid port"
+
+    def _rdn(items):
+        pairs = []
+        for ent in items or []:
+            if (isinstance(ent, (list, tuple)) and len(ent) == 2
+                    and isinstance(ent[1], str)):
+                pairs.append((ent[0], ent[1]))
+            elif isinstance(ent, (list, tuple)):
+                for sub in ent:
+                    if (isinstance(sub, (list, tuple)) and len(sub) == 2):
+                        pairs.append((sub[0], sub[1]))
+        return ", ".join("%s=%s" % (k, v) for k, v in pairs)
+
+    tls_version = cipher = None
+    cert = {}
+    der = None
+    try:
+        import socket
+        import ssl
+        ctx = ssl.create_default_context()
+        with socket.create_connection((host, port), timeout=HTTP_TIMEOUT) as raw:
+            with ctx.wrap_socket(raw, server_hostname=host) as sock:
+                cert = sock.getpeercert()
+                tls_version = sock.version()
+                cipher = sock.cipher()
+    except Exception as first_err:
+        try:
+            import socket
+            import ssl
+            ctx2 = ssl.create_default_context()
+            ctx2.check_hostname = False
+            ctx2.verify_mode = ssl.CERT_NONE
+            with socket.create_connection((host, port),
+                                          timeout=HTTP_TIMEOUT) as raw:
+                with ctx2.wrap_socket(raw, server_hostname=host) as sock:
+                    der = sock.getpeercert(binary_form=True)
+                    tls_version = sock.version()
+                    cipher = sock.cipher()
+        except Exception as exc:
+            return "osint_ssl_cert_scan: connect/TLS failed for %s:%s: %r" \
+                   % (host, port, exc)
+
+    lines = ["TLS certificate for %s:%s (TLS %s)" % (host, port, tls_version)]
+    if cipher:
+        lines.append("  cipher: %s" % cipher[0])
+
+    # ---- untrusted/self-signed: parse DER with cryptography ----------------
+    if not cert and der:
+        try:
+            from cryptography import x509
+            c = x509.load_der_x509_certificate(der)
+            cn = c.subject.rfc4514_string()
+            if cn:
+                lines.append("  subject: %s" % cn[:200])
+            iss = c.issuer.rfc4514_string()
+            if iss:
+                lines.append("  issuer: %s" % iss[:200])
+            try:
+                alt = c.extensions.get_extension_for_class(
+                    x509.SubjectAlternativeName
+                ).value.get_values_for_type(x509.DNSName)
+                if alt:
+                    lines.append("  SANs (%d): %s"
+                                 % (len(alt), ", ".join(alt[:20])))
+            except Exception:
+                pass
+            nb = c.not_valid_before_utc
+            na = c.not_valid_after_utc
+            lines.append("  valid from: %s" % nb.isoformat())
+            lines.append("  valid to:   %s" % na.isoformat())
+            days = (na - datetime.datetime.now(datetime.timezone.utc)).days
+            lines.append("  expires in: %d days" % days)
+            lines.append("  serial: %s" % c.serial_number)
+            return "\n".join(lines)
+        except Exception as parse_exc:
+            return "\n".join(lines) + \
+                "\n  (cert parse fallback failed: %r)" % parse_exc
+
+    # ---- verified path: populated getpeercert() dict -----------------------
+    subject = cert.get("subject") or []
+    issuer = cert.get("issuer") or []
+    if subject:
+        lines.append("  subject: %s" % _rdn(subject)[:200])
+    if issuer:
+        lines.append("  issuer: %s" % _rdn(issuer)[:200])
+    sans = cert.get("subjectAltName") or []
+    if sans:
+        lines.append("  SANs (%d):" % len(sans))
+        for typ, val in sans[:20]:
+            lines.append("    %s: %s" % (typ, val))
+    lines.append("  valid from: %s" % cert.get("notBefore", "?"))
+    lines.append("  valid to:   %s" % cert.get("notAfter", "?"))
+    try:
+        exp = datetime.strptime(cert.get("notAfter", ""),
+                                "%b %d %H:%M:%S %Y GMT")
+        lines.append("  expires in: %d days" % (exp - datetime.datetime.utcnow()).days)
+    except Exception:
+        pass
+    if cert.get("serialNumber"):
+        lines.append("  serial: %s" % cert["serialNumber"])
+    return "\n".join(lines)
+
+
+
+# ---------------------------------------------------------------------------
+# 15. HTTP header / security posture scan (keyless - passive GET)
+# ---------------------------------------------------------------------------
+
+def tool_osint_http_headers(url):
+    """Fetch a URL and report server fingerprint plus security headers:
+    Server, X-Powered-By, HSTS, CSP, X-Frame-Options, X-Content-Type-Options,
+    cookie security flags, and which hardening headers are missing.
+    Passive recon of a web target's hardening posture.
+    """
+    url = (url or "").strip()
+    if not url:
+        return "osint_http_headers: provide a URL or hostname"
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    try:
+        resp = requests.get(url, headers={"User-Agent": USER_AGENT},
+                            timeout=HTTP_TIMEOUT, allow_redirects=True)
+    except requests.exceptions.RequestException as exc:
+        return "osint_http_headers: request failed: %r" % exc
+    lines = ["HTTP header scan: %s -> %d %s"
+             % (url, resp.status_code, resp.reason or "")]
+    wanted = ["Server", "X-Powered-By", "Via", "Strict-Transport-Security",
+              "Content-Security-Policy", "X-Frame-Options",
+              "X-Content-Type-Options", "Referrer-Policy",
+              "Permissions-Policy", "X-XSS-Protection", "Location"]
+    for h in wanted:
+        v = resp.headers.get(h)
+        if v:
+            if h == "Set-Cookie":
+                continue
+            lines.append("  %s: %s" % (h, v[:220]))
+    cookies = resp.headers.get("Set-Cookie")
+    if cookies:
+        parts = cookies.split(";")
+        lines.append("  Set-Cookie: %s; secure=%s httponly=%s samesite=%s"
+                     % (parts[0][:80],
+                        "Y" if "secure" in cookies.lower() else "N",
+                        "Y" if "httponly" in cookies.lower() else "N",
+                        [p.strip().split("=")[1] for p in parts[1:]
+                         if p.strip().lower().startswith("samesite")] or "-"))
+    missing = [h for h in ("Strict-Transport-Security",
+                           "Content-Security-Policy", "X-Frame-Options",
+                           "X-Content-Type-Options")
+               if h.lower() not in {k.lower() for k in resp.headers}]
+    if missing:
+        lines.append("  MISSING hardening: %s" % ", ".join(missing))
+    lines.append("  total headers: %d" % len(resp.headers))
+    return "\n".join(lines)
