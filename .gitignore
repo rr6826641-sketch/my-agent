@@ -81,3 +81,13 @@ _patch_gk_tmp.py
 campaigns/
 payload_memory.json
 *.bak_*
+
+# TLS self-signed certs (private key - never commit)
+certs/
+
+# Hub / HTTPS runtime logs
+_hub.log
+_hub_error.txt
+_https_test.log
+_webui_*.log
+_chat_rt*.txt

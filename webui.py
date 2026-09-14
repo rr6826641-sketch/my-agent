@@ -3532,12 +3532,60 @@ def api_missions_control(key):
     return jsonify({"ok": True, "key": key, "control": st})
 
 
+def _ensure_self_signed_cert(cert_dir):
+    """Create/reuse a self-signed cert (cryptography) for local HTTPS front."""
+    import datetime
+    import ipaddress
+    import os as _os
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    _os.makedirs(cert_dir, exist_ok=True)
+    cert_path = _os.path.join(cert_dir, "server.crt")
+    key_path = _os.path.join(cert_dir, "server.key")
+    if _os.path.exists(cert_path) and _os.path.exists(key_path):
+        return cert_path, key_path
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "hackerai-hub")])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    builder = (x509.CertificateBuilder()
+               .subject_name(name).issuer_name(name)
+               .public_key(key.public_key())
+               .serial_number(x509.random_serial_number())
+               .not_valid_before(now - datetime.timedelta(days=1))
+               .not_valid_after(now + datetime.timedelta(days=365)))
+    builder = builder.add_extension(
+        x509.SubjectAlternativeName([
+            x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+            x509.DNSName("localhost")]), critical=False)
+    builder = builder.add_extension(
+        x509.BasicConstraints(ca=False, path_length=None), critical=True)
+    cert = builder.sign(key, hashes.SHA256())
+
+    with open(key_path, "wb") as fh:
+        fh.write(key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption()))
+    with open(cert_path, "wb") as fh:
+        fh.write(cert.public_bytes(serialization.Encoding.PEM))
+    return cert_path, key_path
+
+
 def main():
     ap = argparse.ArgumentParser(description="AI Agent Web UI")
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--mock", action="store_true",
                     help="force mock mode even if an API key is set")
+    ap.add_argument("--https", action="store_true",
+                    help="serve over HTTPS with a self-signed cert (auto-generated)")
+    ap.add_argument("--cert-dir", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs"),
+                    help="directory for the self-signed cert files")
     args = ap.parse_args()
 
     _reload_state(mock_override=True if args.mock else None)
@@ -3557,7 +3605,20 @@ def main():
     print("  url    : http://%s:%d" % (args.host, args.port))
     print("  stop   : Ctrl+C")
     print("=" * 58)
-    app.run(host=args.host, port=args.port, threaded=True, debug=False)
+    ssl_ctx = None
+    scheme = "http"
+    if args.https:
+        cert, key = _ensure_self_signed_cert(args.cert_dir)
+        ssl_ctx = (cert, key)
+        scheme = "https"
+    if args.host in ("127.0.0.1", "localhost"):
+        logo_url = "%s://%s:%d" % (scheme, args.host, args.port)
+    else:
+        logo_url = "%s://%s:%d" % (scheme, args.host, args.port)
+    print("  secure : %s" % ("ON (self-signed)" if args.https else "off"))
+    print("  url    : %s" % logo_url)
+    app.run(host=args.host, port=args.port, threaded=True, debug=False,
+            ssl_context=ssl_ctx)
 
 
 if __name__ == "__main__":
