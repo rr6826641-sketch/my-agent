@@ -713,3 +713,12 @@ Sare notable changes is project ke. Format: `[Semantic Versioning](https://semve
 - `notify_findings` - severity-filtered digest of findings.jsonl to any channel
 - Tokens always masked in outputs; no false alerts (empty store / below severity = no send)
 - Registered in tool registry; .env.example updated with notification keys
+
+## [v14-credential] 2026-09-14
+
+### NEW - Credential Attack Suite (bundle #2)
+- `hydra_brute` - brute-force ssh|ftp|http-form with password list; hydra binary when available, pure-Python fallback (paramiko/ftplib/requests), 2000-attempt cap
+- `password_spray` - one password across many users/hosts, 1 attempt per user (lockout-safe)
+- `hash_crack` - offline dict crack: md5/sha1/sha224/sha256/sha384/sha512/ntlm/bcrypt/salted-sha256/auto
+- Pure-Python MD4 (RFC1320) for NTLM - works on Python 3.14 which dropped OpenSSL md4
+- Built-in common-password + user wordlists; custom file/list support

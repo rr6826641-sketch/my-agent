@@ -64,6 +64,10 @@ from .notify import (
     tool_notify_telegram, tool_notify_discord,
     tool_notify_webhook, tool_notify_findings,
 )
+
+from .credential_attack import (
+    tool_hydra_brute, tool_password_spray, tool_hash_crack,
+)
 from .cpe_match import (
     tool_cpe_scan, tool_cpe_extract, tool_cpe_match,
     tool_cpe_nuclei_scan, tool_cpe_template_index,
@@ -3416,6 +3420,77 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                                   limit=limit, bot_token=bot_token,
                                   chat_id=chat_id, webhook_url=webhook_url,
                                   include_summary=include_summary)))
+
+    # ---- Credential Attack Suite (brute / spray / hash crack) ----
+    REGISTRY.append(Tool("hydra_brute",
+         "Brute-force a single service (ssh|ftp|http-form) with a password "
+         "list. Uses the hydra binary when installed, otherwise a built-in "
+         "pure-Python engine (paramiko/ftplib/requests). Returns matched "
+         "credentials. Run only against authorized scoped targets.",
+         {"type": "object",
+          "properties": {
+              "target": _str_prop("host/IP (required)"),
+              "port": _str_prop("service port (defaults: ssh 22, ftp 21, http-form 80)"),
+              "service": _str_prop("ssh | ftp | http-form (default ssh)"),
+              "username": _str_prop("single user to attack"),
+              "password_list": _str_prop("list, file path, or newline string (built-in default)"),
+              "threads": {"type": "integer", "default": 8,
+                          "description": "workers (cap 32)"},
+              "timeout": {"type": "integer", "default": 10,
+                          "description": "per-attempt seconds"},
+              "login_url": _str_prop("http-form: full login URL"),
+              "fail_text": _str_prop("http-form: failure marker in response body")},
+          "required": ["target", "username"]},
+         lambda target="", port="", service="ssh", username="",
+                password_list="", threads=8, timeout=10, login_url="",
+                fail_text="": tool_hydra_brute(
+                    target=target, port=port, service=service,
+                    username=username, password_list=password_list,
+                    threads=threads, timeout=timeout, login_url=login_url,
+                    fail_text=fail_text)))
+    REGISTRY.append(Tool("password_spray",
+         "Low-and-slow password spray: ONE password across MANY users/hosts "
+         "(ssh|ftp|http-form). Exactly one attempt per user per host - "
+         "account-lockout safe by design. Returns any hits.",
+         {"type": "object",
+          "properties": {
+              "service": _str_prop("ssh | ftp | http-form (default ssh)"),
+              "hosts": _str_prop("comma-separated host:port (required)"),
+              "users": _str_prop("comma-separated usernames or file path (built-in default)"),
+              "password": _str_prop("the single password to spray (required)"),
+              "port": _str_prop("optional default port"),
+              "threads": {"type": "integer", "default": 4,
+                          "description": "parallel targets (cap 16)"},
+              "timeout": {"type": "integer", "default": 8,
+                          "description": "per-attempt seconds"},
+              "login_url": _str_prop("http-form: full login URL"),
+              "fail_text": _str_prop("http-form: failure marker in response body")},
+          "required": ["hosts", "password"]},
+         lambda service="ssh", hosts="", users="", password="", port="",
+                threads=4, timeout=8, login_url="", fail_text="":
+             tool_password_spray(service=service, hosts=hosts, users=users,
+                                 password=password, port=port, threads=threads,
+                                 timeout=timeout, login_url=login_url,
+                                 fail_text=fail_text)))
+    REGISTRY.append(Tool("hash_crack",
+         "Offline dictionary crack of a captured hash: md5, sha1, sha224, "
+         "sha256, sha384, sha512, ntlm (MD4-unicode), bcrypt, salted "
+         "sha256crypt, or auto-detect. Works anywhere with pure Python - "
+         "no hashcat/john needed.",
+         {"type": "object",
+          "properties": {
+              "hash_value": _str_prop("the hash to crack (hex, or bcrypt $2... string)"),
+              "hash_type": _str_prop("md5|sha1|sha256|sha512|ntlm|bcrypt|sha256crypt|auto (default auto)"),
+              "wordlist": _str_prop("file path or newline string (built-in default)"),
+              "salt": _str_prop("optional salt for salted sha256/sha512"),
+              "max_attempts": {"type": "integer", "default": 200000,
+                               "description": "word count cap"}},
+          "required": ["hash_value"]},
+         lambda hash_value="", hash_type="auto", wordlist="", salt="",
+                max_attempts=200000: tool_hash_crack(
+                    hash_value=hash_value, hash_type=hash_type,
+                    wordlist=wordlist, salt=salt,
+                    max_attempts=max_attempts)))
 
     global _REGISTRY, _BUILTIN_NAMES
     _BUILTIN_NAMES = {t.name for t in REGISTRY}
