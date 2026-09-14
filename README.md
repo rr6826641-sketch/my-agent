@@ -294,6 +294,15 @@ copy .env.example .env
 | `show_scope` | Current scope dikhao |
 | `check_scope` | Host scope mein hai ya nahi — ALLOWED/BLOCKED verdict |
 
+### ⏰ Scheduled Campaigns (Autopilot)
+| Tool | Kya karta hai |
+|---|---|
+| `schedule_campaign` | Persistent autopilot job store: add/list/status/enable/disable/remove. Job = name + target + schedule + chain + notify. Schedules: `daily 03:00` / `every 30m` / cron-lite `0 3 * * *`. Durable store `scheduled_campaigns.json` |
+| `campaign_run_now` | Stored job turant run karo (job_id/name), ya ad-hoc one-shot chain — per-step ok/error + notify results |
+| `campaign_daemon` | Autopilot daemon control: `start` detached poller spawn, `stop`, `status` (PID + log + store) |
+
+> Autopilot runner: `python scheduled_campaign_runner.py --daemon --interval 60`. OS-level cron: `schtasks /create /sc daily /st 03:00 /tr "python E:\HackerAI\my-agent\scheduled_campaign_runner.py --once"` — "har raat 3 baje chain chalao, findings report karo" ab ek tool call.
+
 ### 🧠 RAG (Vector Search)
 | Tool | Kya karta hai |
 |---|---|

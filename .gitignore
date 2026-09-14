@@ -79,6 +79,9 @@ _patch_gk_tmp.py
 
 # AUTO-PILOT campaign state (per-target runtime data)
 campaigns/
+scheduled_campaigns.json
+.campaign_daemon.pid
+campaign_daemon.log
 payload_memory.json
 *.bak_*
 

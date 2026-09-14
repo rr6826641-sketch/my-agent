@@ -748,3 +748,13 @@ Sare notable changes is project ke. Format: `[Semantic Versioning](https://semve
 - `gcs_bucket_enum` - GCS public bucket check (storage.googleapis.com/{name} + {name}.storage.googleapis.com fallback)
 - `cloud_bucket_pack` - one-shot sweep across S3 + Azure + GCS over the same name set (clouds=s3,azure,gcs subset ok)
 - Name generation: 60+ suffix permutations (-prod -dev -backup -uploads -2024 ...) + optional wordlist file; bounded concurrency (workers), per-request delay + hard time budget; heuristic flags only - manual validation required
+
+## [v14-sched] 2026-09-14
+
+### NEW - Scheduled Campaigns (bundle #6) - AUTOPILOT LAYER
+- `schedule_campaign` - durable autopilot job store: add/list/status/enable/disable/remove. Har job = name + target + schedule + chain + notify.
+  Schedules: 'daily 03:00' | 'every 30m' (min 30s) | cron-lite '0 3 * * *' (7-day week). Chain = JSON list of tool calls ya 'auto' (http_request liveness -> port_scan -> notify_findings). Persistent store: `scheduled_campaigns.json` (gitignored, `SCHED_STORE_PATH` override).
+- `campaign_run_now` - stored job ko turant execute karo (job_id/name se), ya ad-hoc one-shot chain (persist nahi hota). Per-step ok/error + notify results report karta hai.
+- `campaign_daemon` - autopilot daemon control: start detached poller (`python scheduled_campaign_runner.py --daemon --interval N`, PID + log file), stop, status. Har tick par due jobs chalti hain, findings notify channels par jati hain.
+- `scheduled_campaign_runner.py` - repo-root runner: `--interval` foreground loop, `--once` single pass (Windows Task Scheduler / schtasks OS-level cron mode), `--daemon` detached, `--run-all` force pass.
+- Scheduler + Notifications (bundle #1): 'har raat 3 baje is target par full chain chalao, findings report karo' - ab ek tool call.

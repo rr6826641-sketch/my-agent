@@ -80,6 +80,9 @@ from .cloud_bucket import (
     tool_s3_bucket_enum, tool_azure_blob_enum, tool_gcs_bucket_enum,
     tool_cloud_bucket_pack,
 )
+from .schedule_campaign import (
+    tool_schedule_campaign, tool_campaign_run_now, tool_campaign_daemon,
+)
 from .cpe_match import (
     tool_cpe_scan, tool_cpe_extract, tool_cpe_match,
     tool_cpe_nuclei_scan, tool_cpe_template_index,
@@ -3716,6 +3719,59 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                                        clouds=clouds, max_names=max_names,
                                        timeout=timeout, workers=workers,
                                        budget_sec=budget_sec)))
+
+    REGISTRY.append(Tool("schedule_campaign",
+         "Autonomous campaign job manager (bundle #6): persistent autopilot "
+         "store. add job (name+target+schedule+chain+notify), list, status, "
+         "enable/disable, remove. Schedules: 'daily 03:00', 'every 30m', "
+         "cron-lite '0 3 * * *'. Chain = JSON list of tool calls. Durable "
+         "store: scheduled_campaigns.json.",
+         {"type": "object",
+          "properties": {
+              "action": _str_prop("list|status|add|remove|enable|disable", "list"),
+              "name": _str_prop("job name (add/remove/enable/disable)"),
+              "target": _str_prop("target host/URL (add)"),
+              "schedule": _str_prop("'daily 03:00' | 'every 30m' | cron-lite", "daily 03:00"),
+              "chain": _str_prop("JSON list of tool calls or 'auto'"),
+              "notify": _str_prop("comma list telegram,discord,webhook"),
+              "enabled": {"type": "boolean", "default": True},
+              "job_id": _str_prop("job id like CAMP-001 (targeted ops)")},
+          "required": []},
+         lambda action="list", name="", target="", schedule="daily 03:00",
+                chain="", notify="", enabled=True, job_id="":
+                tool_schedule_campaign(action=action, name=name, target=target,
+                                       schedule=schedule, chain=chain,
+                                       notify=notify, enabled=enabled,
+                                       job_id=job_id)))
+    REGISTRY.append(Tool("campaign_run_now",
+         "Run a stored campaign job immediately (by job_id or name), or an "
+         "ad-hoc one-shot from given target/chain (not persisted). Reports "
+         "per-step ok/error + notify results.",
+         {"type": "object",
+          "properties": {
+              "job_id": _str_prop("stored job id"),
+              "name": _str_prop("stored job name (fallback match)"),
+              "target": _str_prop("ad-hoc target when no stored job"),
+              "schedule": _str_prop("ignored for ad-hoc runs"),
+              "chain": _str_prop("ad-hoc chain JSON or 'auto'"),
+              "notify": _str_prop("comma list telegram,discord,webhook")},
+          "required": []},
+         lambda job_id="", name="", target="", schedule="", chain="", notify="":
+                tool_campaign_run_now(job_id=job_id, name=name, target=target,
+                                      schedule=schedule, chain=chain,
+                                      notify=notify)))
+    REGISTRY.append(Tool("campaign_daemon",
+         "Autopilot daemon control: start spawns detached poller "
+         "(scheduled_campaign_runner.py), stop terminates it, status shows "
+         "pid/log/store. Poll interval_sec (min 30). For OS-level cron add "
+         "the runner '--once' to Windows Task Scheduler.",
+         {"type": "object",
+          "properties": {
+              "action": _str_prop("start|stop|status", "status"),
+              "interval_sec": {"type": "integer", "default": 30}},
+          "required": []},
+         lambda action="status", interval_sec=30:
+                tool_campaign_daemon(action=action, interval_sec=interval_sec)))
 
 
     global _REGISTRY, _BUILTIN_NAMES
