@@ -546,6 +546,23 @@
     .mc-host-pivot{color:#4ade80;font-size:10px;font-weight:700;}
     .mc-host-chain{color:#f87171;font-size:10px;font-weight:700;}
     .mc-host-mut{font-size:10px;color:#5b6b8c;font-family:ui-monospace,Consolas,monospace;word-break:break-all;}
+    /* Feature E (v10.7) — voice input/output: mic + TTS reply console */
+    .mc-voice-btn{position:relative;display:inline-flex;align-items:center;gap:6px;}
+    .mc-voice-btn.v-listening{color:#fff;border-color:#f5c542;box-shadow:0 0 10px rgba(245,197,66,.45);}
+    .mc-voice-btn.v-listening::after{content:"";position:absolute;inset:-4px;border-radius:10px;border:2px solid rgba(245,197,66,.5);animation:vpulse 1.2s ease-out infinite;}
+    .mc-voice-btn[disabled]{opacity:.55;cursor:not-allowed;}
+    @keyframes vpulse{0%{transform:scale(1);opacity:.9;}100%{transform:scale(1.35);opacity:0;}}
+    .mc-voice-console{margin-top:10px;background:#0b0f1e;border:1px solid #2a3550;border-radius:10px;padding:12px 14px;}
+    .mc-voice-log{display:flex;flex-direction:column;gap:5px;max-height:170px;overflow:auto;font-size:11.5px;}
+    .voice-line{display:flex;gap:8px;align-items:baseline;}
+    .voice-line .who{font-weight:800;font-size:10px;letter-spacing:.06em;min-width:34px;}
+    .voice-line.user .who{color:#7ee0a3;}
+    .voice-line.agent .who{color:#f5c542;}
+    .voice-line .txt{color:#cdd8f0;word-break:break-word;}
+    .voice-line.user .txt{color:#e8edf5;}
+    .mc-voice-help{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+    .mc-voice-help span{font-size:10px;color:#93a3c4;background:#0c1020;border:1px solid #22304a;border-radius:20px;padding:2px 9px;}
+    .mc-voice-meta{font-size:10.5px;color:#5b6b8c;margin-top:6px;}
 
   </style>
   <header class="chat-header">
@@ -562,6 +579,8 @@
       <button class="mc-ctl" id="mc-pause" title="Pause campaign - runner blocks between phases">⏸ Pause</button>
       <button class="mc-ctl" id="mc-kill" title="Kill campaign - aborts remaining phases">⏹ Kill</button>
       <button class="mc-refresh" id="mc-refresh" title="Refresh mission list">⟳ Refresh</button>
+      <button class="mc-ctl mc-voice-btn" id="mc-voice" title="Voice input — 'mission cpe_test start karo', 'pause', 'kill karo', 'report banao', 'status batao' (mic + browser TTS)">🎙 Voice</button>
+      <button class="mc-ctl" id="mc-voice-mute" title="Toggle agent voice replies">🔊</button>
     </div>
   </header>
   <div class="mc-wrap">
@@ -622,6 +641,17 @@
             <h5>Graph links · click a host to jump</h5>
             <div id="mch-links">—</div>
           </div>
+        </div>
+      </div>
+      <div class="mc-card" style="grid-column:1/-1">
+        <h3>🎙 Voice Input / Output <em id="voice-st"></em></h3>
+        <div class="mc-voice-console" id="voice-console">
+          <div class="mc-voice-log" id="voice-log"></div>
+          <div class="mc-voice-help">
+            <span>“mission cpe_test start karo”</span><span>“pause”</span><span>“kill karo”</span>
+            <span>“report banao”</span><span>“status batao”</span><span>“refresh”</span><span>“help”</span>
+          </div>
+          <div class="mc-voice-meta" id="voice-meta">🎙 Voice Command — mic button dabao aur bolo; agent jawab bolega (Chrome/Edge me Web Speech API).</div>
         </div>
       </div>
     </div>
@@ -1011,6 +1041,157 @@
     pollC(); setInterval(pollC,6000);
   }catch(e){}
 })();
-</script><script src="/gatekeeper/lockscreen.js?v=0.8.8" defer></script>
+</script>
+<script>
+/* VOICE INPUT/OUTPUT (v10.7, Feature E) — "bol ke command do, agent jawab bole".
+   Mic = Web Speech API (webkitSpeechRecognition), replies = speechSynthesis; zero deps.
+   Grammar: mission <key> start|pause|kill karo · report banao · status batao · refresh · help */
+(function(){
+  try{
+    var MIC=document.querySelector("#mc-voice"); if(!MIC) return;
+    var MUTE_BTN=document.querySelector("#mc-voice-mute");
+    var LOG=document.querySelector("#voice-log"), ST=document.querySelector("#voice-st"), META=document.querySelector("#voice-meta");
+    var SR=window.SpeechRecognition||window.webkitSpeechRecognition||null;
+    var SYN=window.speechSynthesis||null;
+    var rec=null, listening=false, muted=false, starts=0;
+
+    function e(id){return document.querySelector("#"+id);}
+    function currentKey(){var s=e("mc-select"); return s?s.value:"";}
+    function knownKeys(){var s=e("mc-select"); var out=[]; if(s&&s.options){for(var i=0;i<s.options.length;i++){if(s.options[i].value)out.push(s.options[i].value);}} return out;}
+    function stripEmoji(t){return String(t||"").replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu,"").replace(/\s+/g," ").trim();}
+    function setListening(on){
+      listening=on;
+      MIC.classList.toggle("v-listening",on);
+      MIC.textContent=on?"⏹ Listening…":"🎙 Voice";
+      if(ST) ST.textContent=on?"listening…":"";
+    }
+    function logLine(kind,txt){
+      if(!LOG) return;
+      var div=document.createElement("div"); div.className="voice-line "+kind;
+      var w=document.createElement("span"); w.className="who"; w.textContent=kind==="user"?"YOU":"AGENT";
+      var t=document.createElement("span"); t.className="txt"; t.textContent=txt;
+      div.appendChild(w); div.appendChild(t); LOG.appendChild(div);
+      while(LOG.childNodes.length>50) LOG.removeChild(LOG.firstChild);
+      LOG.scrollTop=LOG.scrollHeight;
+    }
+    function speak(txt){
+      if(muted||!SYN||!txt) return;
+      try{
+        SYN.cancel();
+        var u=new SpeechSynthesisUtterance(stripEmoji(txt));
+        u.lang="en-IN"; u.rate=1.05; u.pitch=1;
+        var vs=SYN.getVoices&&SYN.getVoices();
+        if(vs&&vs.length){for(var i=0;i<vs.length;i++){if(/^(hi|en-IN|en-GB)/i.test(vs[i].lang)){u.voice=vs[i];break;}}}
+        SYN.speak(u);
+      }catch(err){}
+      /* keep the "mic unsupported" hint visible instead of clobbering it */
+      if(META && !/^mic:/.test(META.textContent)) META.textContent="last reply: "+txt.slice(0,80);
+    }
+    function selectKey(k){
+      var s=e("mc-select"); if(!s||!k) return;
+      var opt=null;
+      if(s.options){for(var i=0;i<s.options.length;i++){if(s.options[i].value===k){opt=s.options[i];break;}}}
+      if(!opt){opt=document.createElement("option"); opt.value=k; opt.textContent=k; s.appendChild(opt);}
+      s.value=k;
+      try{ if(typeof s.onchange==="function") s.onchange(); }catch(err){}
+    }
+    function cmdMission(key,action){
+      var k=key||currentKey();
+      if(!k){speak("Koi mission select nahi hai. Bolo: mission <naam> start karo."); return false;}
+      if(k!==currentKey()) selectKey(k);
+      if(action==="kill"){
+        if(window.confirm&&!window.confirm("KILL campaign '"+k+"' via voice? Remaining phases will abort.")){speak("Kill cancel kar diya."); return false;}
+      }
+      var btn=e("mc-"+({start:"start",pause:"pause",kill:"kill"}[action]||"start"));
+      if(btn) btn.click();
+      speak("Mission "+k+" "+action+" ho gayi.");
+      return true;
+    }
+    function cmdReport(key){
+      var k=key||currentKey();
+      if(!k){speak("Koi mission select nahi hai."); return;}
+      window.open("/api/missions/"+encodeURIComponent(k)+"/report","_blank");
+      speak("Mission "+k+" ka report khol raha hoon.");
+    }
+    function cmdStatus(key){
+      var k=key||currentKey();
+      if(!k){speak("Koi mission select nahi hai."); return;}
+      fetch("/api/missions/"+encodeURIComponent(k),{cache:"no-store"}).then(function(r){return r.json();}).then(function(d){
+        if(d.error){speak("Status nahi mila: "+d.error); return;}
+        var ph=d.phases||{}; var order=["recon","scan","vuln","report"]; var parts=[];
+        order.forEach(function(p){var q=ph[p]; if(q) parts.push(p+" "+(q.status||"pending"));});
+        speak("Mission "+k+": "+(parts.join(", ")||"no phases")+". Findings logged: "+(d.findings_logged||0)+".");
+      }).catch(function(){speak("Status API fail ho gaya.");});
+    }
+    function cmdHelp(){
+      speak("Bolo: mission <naam> start karo, pause, kill karo, report banao, status batao, refresh, ya help.");
+    }
+    /* grammar: normalized text -> {action, key|null}
+       key extraction runs on the RAW (pre-punctuation-strip) text so IP
+       mission keys like 127.0.0.1 survive the sanitizer */
+    function parseCommand(raw){
+      var src=String(raw||"").toLowerCase().replace(/\s+/g," ").trim();
+      var t=src.replace(/[.,!?'"]/g," ").replace(/\s+/g," ").trim();
+      if(!t) return null;
+      var key=null;
+      var mk=src.match(/mission\s+([a-z0-9_.\-]+)/);
+      if(mk){ key=mk[1]; }
+      else{
+        var hk=src.match(/\b((?:[0-9]{1,3}\.){3}[0-9]{1,3})\b/);
+        if(hk) key=hk[1];
+      }
+      var act=null;
+      if(/(start|shuru|begin|chalau|run)/.test(t)&&!/restart/.test(t)) act="start";
+      else if(/(pause|thairo|ruk|roko|tham)/.test(t)) act="pause";
+      else if(/(kill|band|maar|stop|khatam)/.test(t)) act="kill";
+      else if(/(report|raport)/.test(t)) act="report";
+      else if(/(status|haal|batao)/.test(t)) act="status";
+      else if(/(refresh|reload|update)/.test(t)) act="refresh";
+      else if(/(help|madad|kaise|commands|list)/.test(t)) act="help";
+      return {action:act, key:key, text:t};
+    }
+    function handleText(raw){
+      var c=parseCommand(raw);
+      var shown=String(raw||"").replace(/\s+/g," ").trim();
+      if(shown) logLine("user",shown);
+      if(!c||!c.action){
+        logLine("agent","Samajh nahi aaya. 'help' bolo — commands suna doonga."); speak("Samajh nahi aaya. Help bolo."); return "unknown";
+      }
+      switch(c.action){
+        case "start": case "pause": case "kill": cmdMission(c.key,c.action); break;
+        case "report": cmdReport(c.key); break;
+        case "status": cmdStatus(c.key); break;
+        case "refresh": var r=e("mc-refresh"); if(r) r.click(); speak("Mission list refresh ho gayi."); break;
+        case "help": cmdHelp(); break;
+      }
+      return c.action;
+    }
+    function start(){
+      if(!SR){speak("Voice input is browser mein supported nahi. Chrome ya Edge use karo."); return;}
+      if(listening){ stop(); return; }
+      try{
+        rec=new SR(); rec.lang="en-IN"; rec.continuous=false; rec.interimResults=false; rec.maxAlternatives=1;
+        rec.onresult=function(ev){ var t=ev.results&&ev.results[0]&&ev.results[0][0]?ev.results[0][0].transcript:""; if(t) handleText(t); };
+        rec.onerror=function(){ setListening(false); speak("Sun nahi paya, dobara bolo."); };
+        rec.onend=function(){ setListening(false); };
+        rec.start(); setListening(true);
+        starts++; if(starts===1) logLine("agent","Voice active! Bolo — mission start, pause, kill, report, status…");
+      }catch(err){ setListening(false); speak("Mic shuru nahi hua."); }
+    }
+    function stop(){ try{ if(rec) rec.abort(); }catch(e){} setListening(false); }
+    function toggleMute(){
+      muted=!muted;
+      if(MUTE_BTN) MUTE_BTN.textContent=muted?"🔇":"🔊";
+      if(muted&&SYN) try{SYN.cancel();}catch(e){}
+      if(!muted) speak("Voice reply on.");
+    }
+    MIC.onclick=function(){ start(); };
+    if(MUTE_BTN) MUTE_BTN.onclick=function(){ toggleMute(); };
+    if(!SR&&META) META.textContent="mic: Web Speech API is browser mein supported nahi — Chrome/Edge try karo (TTS replies still work).";
+    window.VoiceAssistant={supported:!!SR,start:start,stop:stop,handleText:handleText,parse:parseCommand,speak:speak,toggleMute:toggleMute,muted:function(){return muted;}};
+  }catch(e){}
+})();
+</script>
+<script src="/gatekeeper/lockscreen.js?v=0.8.8" defer></script>
 </body>
 </html>

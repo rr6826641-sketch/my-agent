@@ -1,3 +1,29 @@
+## [2026-09-14] v10.7 - VOICE INPUT/OUTPUT (Feature E COMPLETE)
+
+- feat(voice): Mission Console mein bolo aur agent jawab bolega. Voice input =
+  browser Web Speech API SpeechRecognition (STT), voice output = speechSynthesis
+  (TTS, English/hi-IN/en-IN voices). Controls: “🎙 Voice” mic button (toggle
+  listening, “listening…” status, voice log — capped 50 lines), “🔊/🔇”
+  mute toggle (replies band karo), “? Voice” help hint (unsupported browser =
+  Chrome/Edge mic note).
+- feat(voice_grammar): Roman-Urdu/Hindi/English commands - “mission <key> start
+  karo” (“shuru karo”), “pause”, “kill karo” / “stop” / “band karo”
+  (confirm ke saath), “report banao” (report khulta hai), “status batao”
+  (phases + findings sunata hai), “refresh”, “help” / “madad”; unknown key
+  par mission select mein option auto-append, bare IP key “mission 127.0.0.1
+  start” full dot-form parse hota hai; punctuation/case/empty-transcript
+  normalized. API: window.VoiceAssistant.parse/handleText/speak/toggleMute.
+- fix(voice): IP key parsing - punctuation sanitizer dots strip kar deta tha
+  (mission 127.0.0.1 -> key “127”). Key extraction + bare-IP regex ab raw
+  lowercase text par chalti hai.
+- fix(voice): speak() #voice-meta par “last reply: …” overwrite karta tha
+  aur Chrome/Edge unsupported hint mita deta tha - ab sirf tab jab meta
+  “mic:” hint nahi hai.
+- test: Node DOM-shim smoke test (_fe_harness.js) 57/57 PASS - grammar parse,
+  start/pause/kill/report/status/refresh/help dispatch, kill cancel, unknown-key
+  append, no-mission hint, mute/unmute, recognition error, no-SR fallback, meta
+  hint preservation, log cap 50, IP + punctuation edge cases.
+
 ## [2026-09-14] v10.6 - CHAIN VIZ DRILL-DOWN (Feature D COMPLETE)
 
 - feat(chain_viz): Mission Console chain graph (templates/index.html inline SVG)
