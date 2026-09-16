@@ -205,6 +205,10 @@ from .human_interface import (
     tool_mouse_scroll, tool_key_press, tool_key_type, tool_key_hotkey,
     tool_human_interface,
 )
+from .desktop_automation import (
+    tool_screen_capture, tool_clipboard, tool_gui_recorder,
+    tool_gui_replay, tool_desktop_status,
+)
 from .ultra import (
     tool_priv_esc_kit, gen_wifi_playbook, gen_evasion_pack,
     gen_persistence, gen_lateral_playbook, gen_tunnel_kit,
@@ -4199,6 +4203,59 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
           "properties": {"action": _str_prop("status", "status")},
           "required": []},
          lambda action="status": tool_human_interface(action=action)))
+    # ---- Tier 3 bundle #15: Desktop Automation Pack (screen + clipboard ----
+    # ----                             + GUI recorder/replay)            ----
+    REGISTRY.append(Tool("screen_capture",
+         "Desktop-Auto pack #15: capture the screen (full ya region "
+         "'x,y,w,h') ko PNG file. Backends: PIL -> mss -> PowerShell.",
+         {"type": "object",
+          "properties": {
+              "save_to": _str_prop("output PNG path (auto if empty)"),
+              "region": _str_prop("x,y,w,h region (empty = full) ", "")},
+          "required": []},
+         lambda save_to="", region="":
+                tool_screen_capture(save_to=save_to, region=region)))
+    REGISTRY.append(Tool("clipboard",
+         "Desktop-Auto pack #15: clipboard control - action=get_text|"
+         "set_text|clear. get_text returns length + preview only.",
+         {"type": "object",
+          "properties": {
+              "action": _str_prop("get_text|set_text|clear", "get_text"),
+              "text": _str_prop("text to set")},
+          "required": []},
+         lambda action="get_text", text="":
+                tool_clipboard(action=action, text=text)))
+    REGISTRY.append(Tool("gui_recorder",
+         "Desktop-Auto pack #15: record real mouse/keyboard actions into a "
+         "JSON timeline (manual start/stop). action=start|stop|status; "
+         "backend: pynput (agar installed) else Windows 40Hz native poll.",
+         {"type": "object",
+          "properties": {
+              "action": _str_prop("start|stop|status", "status"),
+              "name": _str_prop("recording label"),
+              "interval": {"type": "integer", "default": 40}},
+          "required": []},
+         lambda action="status", name="", interval=40:
+                tool_gui_recorder(action=action, name=name,
+                                  interval=int(interval or 40))))
+    REGISTRY.append(Tool("gui_replay",
+         "Desktop-Auto pack #15: replay a recorded GUI timeline JSON via "
+         "Human Interface kit. speed = playback multiplier; dry_run=True "
+         "= validate only (no input injected).",
+         {"type": "object",
+          "properties": {
+              "path": _str_prop("recording JSON path"),
+              "speed": {"type": "number", "default": 1.0},
+              "dry_run": {"type": "boolean", "default": False}},
+          "required": ["path"]},
+         lambda path="", speed=1.0, dry_run=False:
+                tool_gui_replay(path=path, speed=float(speed or 1.0),
+                                dry_run=bool(dry_run))))
+    REGISTRY.append(Tool("desktop_status",
+         "Desktop-Auto pack #15: status - capture/clipboard/recorder "
+         "capabilities, screen size, recordings & captures lists.",
+         {"type": "object", "properties": {}, "required": []},
+         lambda: tool_desktop_status()))
     global _REGISTRY, _BUILTIN_NAMES
     _BUILTIN_NAMES = {t.name for t in REGISTRY}
     with _SYNTHESIZED_LOCK:
