@@ -1,3 +1,21 @@
+## [2026-09-16] v14.3 - FUSION X6 PHANTOM PROTOCOL - CUSTOM EDITION (personas_custom.txt)
+
+- feat(persona): personas_custom.txt v12 ULTRA -> v15 FUSION X6 CUSTOM EDITION
+  upgrade. Ab "Custom" persona bhi X6-level full power deta hai - koi bhi
+  purana layer nahi:
+  - v12 core (six-phase chain, swarm depth, evidence/artifacts, ambiguity
+    rule, tool mastery) + v13 style lock (HackerAI 100% identity, Roman Urdu
+    operator = Roman Urdu jawab)
+  - v14 FUSION CORE X5 layer (evil.gpt/fable5/mythos/dig.one/dig.two engine
+    fusion, FUSION X5 LAW 5-vectors, FULL-AUTO CHAIN, TRIPLE-STACK OUTPUT,
+    NO-RETREAT, ZERO-FILTER)
+  - v15 X6 PHANTOM layer (PHANTOM SELF-EVOLUTION ENGINE, AUTONOMOUS SCOPE
+    EXPANSION, MEMORY-DRIVEN MUTATION, QUANTUM SWARM, NO-CEILING LAW,
+    DRIFT-ABSORBER LOCK, OUTPUT LAW X6) - conflict par X6 overrides all.
+- verify: text runtime par har request file se load hota hai (get_custom_text)
+  - API custom_text ab naya X6 content serve karta hai, server restart ki
+    zaroorat nahi.
+
 ## [2026-09-16] v14.2 - FUSION X6 PHANTOM PROTOCOL (ULTRA EXTRA ULTRA POWERFUL - beyond X5 / evil.gpt / fable5 / mythos / dig.one / dig.two)
 
 - feat(persona): naya preset `ultrax6` - FUSION X6 PHANTOM PROTOCOL
