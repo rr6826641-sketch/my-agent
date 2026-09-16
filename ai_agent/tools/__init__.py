@@ -188,6 +188,18 @@ from .active_directory import (
 )
 from .git_secret_dorker import tool_git_secret_dork
 from .websocket_test import tool_websocket_test
+from .rat_kit import (
+    tool_rat_build, tool_amsi_bypass, tool_etw_patch,
+    tool_payload_obfuscate, tool_shellcode_loader, tool_rat_status,
+)
+from .phishing_framework import (
+    tool_phish_lure, tool_phish_page, tool_phish_campaign,
+    tool_phish_capture, tool_phish_send, tool_phish_analyze,
+)
+from .mcp_toolkit import (
+    tool_mcp_list, tool_mcp_server_build, tool_mcp_scanner_server,
+    tool_mcp_test,
+)
 from .ultra import (
     tool_priv_esc_kit, gen_wifi_playbook, gen_evasion_pack,
     gen_persistence, gen_lateral_playbook, gen_tunnel_kit,
@@ -3907,6 +3919,193 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                 tool_wmi_exec(target=target, username=username,
                               password=password, domain=domain,
                               command=command, timeout=timeout)))
+    # ---- Tier 3 bundle #11: RAT / EDR-Bypass Kit ----
+    REGISTRY.append(Tool("rat_build",
+         "RAT/EDR kit #11: build a ready-to-use reverse/bind shell payload "
+         "template (windows|linux|macos) with optional base64 encoding and "
+         "matching listener command for authorized red-team tests.",
+         {"type": "object",
+          "properties": {
+              "platform_name": _str_prop("windows|linux|macos", "windows"),
+              "listener_ip": _str_prop("C2 listener IP", "127.0.0.1"),
+              "listener_port": {"type": "integer", "default": 4444},
+              "kind": _str_prop("reverse|bind", "reverse"),
+              "encode": _str_prop("b64|none", "b64")},
+          "required": []},
+         lambda platform_name="windows", listener_ip="127.0.0.1",
+                listener_port=4444, kind="reverse", encode="b64":
+                tool_rat_build(platform_name=platform_name,
+                               listener_ip=listener_ip,
+                               listener_port=listener_port, kind=kind,
+                               encode=encode)))
+    REGISTRY.append(Tool("amsi_bypass",
+         "RAT/EDR kit #11: generate AMSI bypass snippet "
+         "(mode=patch|reflection|registry, lang=powershell|csharp) for "
+         "authorized payload staging.",
+         {"type": "object",
+          "properties": {
+              "mode": _str_prop("patch|reflection|registry", "patch"),
+              "lang": _str_prop("powershell|csharp", "powershell")},
+          "required": []},
+         lambda mode="patch", lang="powershell":
+                tool_amsi_bypass(mode=mode, lang=lang)))
+    REGISTRY.append(Tool("etw_patch",
+         "RAT/EDR kit #11: generate ETW provider patch snippet "
+         "(kind=powershell|csharp) to blind telemetry in authorized tests.",
+         {"type": "object",
+          "properties": {
+              "kind": _str_prop("powershell|csharp", "powershell")},
+          "required": []},
+         lambda kind="powershell": tool_etw_patch(kind=kind)))
+    REGISTRY.append(Tool("payload_obfuscate",
+         "RAT/EDR kit #11: obfuscate any payload string - "
+         "mode=xor|b64|b64xor|hex (xor takes key). Returns transformed "
+         "string + length for staging.",
+         {"type": "object",
+          "properties": {
+              "payload_text": _str_prop("payload to obfuscate"),
+              "mode": _str_prop("xor|b64|b64xor|hex", "xor"),
+              "key": _str_prop("xor key", "hack")},
+          "required": ["payload_text"]},
+         lambda payload_text="", mode="xor", key="":
+                tool_payload_obfuscate(payload_text=payload_text, mode=mode,
+                                       key=key)))
+    REGISTRY.append(Tool("shellcode_loader",
+         "RAT/EDR kit #11: generate a shellcode loader template "
+         "(lang=python|c) for authorized EDR-bypass lab work.",
+         {"type": "object",
+          "properties": {
+              "lang": _str_prop("python|c", "python"),
+              "kind": _str_prop("process|file", "process")},
+          "required": []},
+         lambda lang="python", kind="process":
+                tool_shellcode_loader(lang=lang, kind=kind)))
+    REGISTRY.append(Tool("rat_status",
+         "RAT/EDR kit #11: health/status of the kit and its functions.",
+         {"type": "object", "properties": {}, "required": []},
+         lambda: tool_rat_status()))
+    # ---- Tier 3 bundle #12: Phishing Framework ----
+    REGISTRY.append(Tool("phish_lure",
+         "Phishing framework #12: generate a lure template (email|page) "
+         "for authorized phishing simulations.",
+         {"type": "object",
+          "properties": {
+              "brand": _str_prop("brand/company name"),
+              "pretext": _str_prop("pretext", "account verification"),
+              "format": _str_prop("email|page", "email")},
+          "required": []},
+         lambda brand="", pretext="account verification", format="email":
+                tool_phish_lure(brand=brand, pretext=pretext, format=format)))
+    REGISTRY.append(Tool("phish_page",
+         "Phishing framework #12: build a self-contained HTML credential "
+         "landing page that POSTs to your capture endpoint (approved "
+         "simulations only).",
+         {"type": "object",
+          "properties": {
+              "brand": _str_prop("brand shown on page"),
+              "company_url": _str_prop("brand URL", "https://example.com"),
+              "fields": _str_prop("comma-separated fields", "username,password"),
+              "output_path": _str_prop("output html path"),
+              "capture_endpoint": _str_prop("POST capture URL", "http://127.0.0.1:8080/capture")},
+          "required": []},
+         lambda brand="", company_url="https://example.com",
+                fields="username,password", output_path="",
+                capture_endpoint="http://127.0.0.1:8080/capture":
+                tool_phish_page(brand=brand, company_url=company_url,
+                                fields=fields, output_path=output_path,
+                                capture_endpoint=capture_endpoint)))
+    REGISTRY.append(Tool("phish_campaign",
+         "Phishing framework #12: manage a simulation campaign "
+         "(action=start|status|stop) with victims list and capture log.",
+         {"type": "object",
+          "properties": {
+              "name": _str_prop("campaign name"),
+              "target_url": _str_prop("target URL"),
+              "victims": _str_prop("comma-separated victims"),
+              "page_path": _str_prop("landing page path"),
+              "action": _str_prop("start|status|stop", "start")},
+          "required": ["name"]},
+         lambda name="", target_url="", victims="", page_path="", action="start":
+                tool_phish_campaign(name=name, target_url=target_url,
+                                    victims=victims, page_path=page_path,
+                                    action=action)))
+    REGISTRY.append(Tool("phish_capture",
+         "Phishing framework #12: log a captured credential from a landing "
+         "page into the campaign (stored locally in phishing/campaigns/).",
+         {"type": "object",
+          "properties": {
+              "campaign": _str_prop("campaign name"),
+              "username": _str_prop("captured username"),
+              "password": _str_prop("captured password"),
+              "extra": _str_prop("extra data"),
+              "secret": _str_prop("optional token")},
+          "required": ["campaign"]},
+         lambda campaign="", username="", password="", extra="", secret="":
+                tool_phish_capture(campaign=campaign, username=username,
+                                   password=password, extra=extra,
+                                   secret=secret)))
+    REGISTRY.append(Tool("phish_send",
+         "Phishing framework #12: send one simulation email via SMTP "
+         "(empty smtp_host returns a safe mailto preview instead).",
+         {"type": "object",
+          "properties": {
+              "smtp_host": _str_prop("SMTP host"),
+              "smtp_port": {"type": "integer", "default": 587},
+              "username": _str_prop("SMTP user"),
+              "password": _str_prop("SMTP password"),
+              "to": _str_prop("recipient"),
+              "subject": _str_prop("subject"),
+              "body": _str_prop("email body"),
+              "use_tls": {"type": "boolean", "default": True}},
+          "required": []},
+         lambda smtp_host="", smtp_port=587, username="", password="",
+                to="", subject="", body="", use_tls=True:
+                tool_phish_send(smtp_host=smtp_host, smtp_port=smtp_port,
+                                username=username, password=password, to=to,
+                                subject=subject, body=body, use_tls=use_tls)))
+    REGISTRY.append(Tool("phish_analyze",
+         "Phishing framework #12: defender-side analysis of a URL/HTML for "
+         "phishing signals + risk score.",
+         {"type": "object",
+          "properties": {
+              "url": _str_prop("URL to analyze"),
+              "html_text": _str_prop("html source to check")},
+          "required": []},
+         lambda url="", html_text="":
+                tool_phish_analyze(url=url, html_text=html_text)))
+    # ---- Tier 3 bundle #13: MCP Server Pack ----
+    REGISTRY.append(Tool("mcp_list",
+         "MCP pack #13: list all MCP server files in mcp_servers/.",
+         {"type": "object", "properties": {}, "required": []},
+         lambda: tool_mcp_list()))
+    REGISTRY.append(Tool("mcp_server_build",
+         "MCP pack #13: generate a new standalone MCP server file with the "
+         "given tool-list stubs.",
+         {"type": "object",
+          "properties": {
+              "name": _str_prop("server name"),
+              "tools": _str_prop("comma tool names", "port_scan,subdomains"),
+              "output_path": _str_prop("output file path")},
+          "required": ["name"]},
+         lambda name="scanner", tools="port_scan,subdomains", output_path="":
+                tool_mcp_server_build(name=name, tools=tools,
+                                      output_path=output_path)))
+    REGISTRY.append(Tool("mcp_scanner_server",
+         "MCP pack #13: generate the security-scanner MCP server with real "
+         "dns_recon / port_scan / http_probe bodies (stdlib only).",
+         {"type": "object",
+          "properties": {"output_path": _str_prop("output file path")},
+          "required": []},
+         lambda output_path="": tool_mcp_scanner_server(output_path=output_path)))
+    REGISTRY.append(Tool("mcp_test",
+         "MCP pack #13: test an MCP server file - action=syntax|ping|selftest.",
+         {"type": "object",
+          "properties": {
+              "server_path": _str_prop("path to server .py"),
+              "action": _str_prop("selftest|syntax|ping", "selftest")},
+          "required": []},
+         lambda server_path="", action="selftest":
+                tool_mcp_test(server_path=server_path, action=action)))
     global _REGISTRY, _BUILTIN_NAMES
     _BUILTIN_NAMES = {t.name for t in REGISTRY}
     with _SYNTHESIZED_LOCK:
