@@ -200,6 +200,11 @@ from .mcp_toolkit import (
     tool_mcp_list, tool_mcp_server_build, tool_mcp_scanner_server,
     tool_mcp_test,
 )
+from .human_interface import (
+    tool_mouse_pos, tool_mouse_move, tool_mouse_click, tool_mouse_drag,
+    tool_mouse_scroll, tool_key_press, tool_key_type, tool_key_hotkey,
+    tool_human_interface,
+)
 from .ultra import (
     tool_priv_esc_kit, gen_wifi_playbook, gen_evasion_pack,
     gen_persistence, gen_lateral_playbook, gen_tunnel_kit,
@@ -4106,6 +4111,94 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
           "required": []},
          lambda server_path="", action="selftest":
                 tool_mcp_test(server_path=server_path, action=action)))
+    # ---- Tier 3 bundle #14: Mouse + Keyboard access (Human Interface Kit) ----
+    REGISTRY.append(Tool("mouse_pos",
+         "Human-Interface kit #14: current cursor position (x,y) of the "
+         "active desktop session.",
+         {"type": "object", "properties": {}, "required": []},
+         lambda: tool_mouse_pos()))
+    REGISTRY.append(Tool("mouse_move",
+         "Human-Interface kit #14: move the mouse cursor. absolute=True: "
+         "screen coords (x,y); absolute=False: relative delta.",
+         {"type": "object",
+          "properties": {
+              "x": {"type": "integer", "default": 0},
+              "y": {"type": "integer", "default": 0},
+              "absolute": {"type": "boolean", "default": True}},
+          "required": []},
+         lambda x=0, y=0, absolute=True:
+                tool_mouse_move(x=int(x or 0), y=int(y or 0),
+                                absolute=bool(absolute))))
+    REGISTRY.append(Tool("mouse_click",
+         "Human-Interface kit #14: click at current (or given x,y) cursor. "
+         "button=left|right|middle, clicks=1|2 (double-click).",
+         {"type": "object",
+          "properties": {
+              "button": _str_prop("left|right|middle", "left"),
+              "clicks": {"type": "integer", "default": 1},
+              "x": {"type": ["integer", "null"], "default": None},
+              "y": {"type": ["integer", "null"], "default": None}},
+          "required": []},
+         lambda button="left", clicks=1, x=None, y=None:
+                tool_mouse_click(button=button, clicks=clicks, x=x, y=y)))
+    REGISTRY.append(Tool("mouse_drag",
+         "Human-Interface kit #14: press-and-hold drag from (x1,y1) to "
+         "(x2,y2) with button (left|right).",
+         {"type": "object",
+          "properties": {
+              "x1": {"type": "integer", "default": 0},
+              "y1": {"type": "integer", "default": 0},
+              "x2": {"type": "integer", "default": 100},
+              "y2": {"type": "integer", "default": 100},
+              "button": _str_prop("left|right", "left"),
+              "duration": {"type": "number", "default": 0.3}},
+          "required": []},
+         lambda x1=0, y1=0, x2=100, y2=100, button="left", duration=0.3:
+                tool_mouse_drag(x1=int(x1 or 0), y1=int(y1 or 0),
+                                x2=int(x2 or 0), y2=int(y2 or 0),
+                                button=button, duration=float(duration or 0.3))))
+    REGISTRY.append(Tool("mouse_scroll",
+         "Human-Interface kit #14: scroll wheel - amount = notches, "
+         "direction=up|down.",
+         {"type": "object",
+          "properties": {
+              "amount": {"type": "integer", "default": 3},
+              "direction": _str_prop("up|down", "down")},
+          "required": []},
+         lambda amount=3, direction="down":
+                tool_mouse_scroll(amount=int(amount or 3),
+                                  direction=direction or "down")))
+    REGISTRY.append(Tool("key_press",
+         "Human-Interface kit #14: press and release a single key "
+         "(enter, tab, esc, f5, a, 1, ...).",
+         {"type": "object",
+          "properties": {"key": _str_prop("key name", "enter")},
+          "required": ["key"]},
+         lambda key="enter": tool_key_press(key=key)))
+    REGISTRY.append(Tool("key_type",
+         "Human-Interface kit #14: type a full string like a human "
+         "(unicode-safe). interval = seconds between keystrokes.",
+         {"type": "object",
+          "properties": {
+              "text": _str_prop("text to type"),
+              "interval": {"type": "number", "default": 0.02}},
+          "required": ["text"]},
+         lambda text="", interval=0.02:
+                tool_key_type(text=text, interval=float(interval or 0.02))))
+    REGISTRY.append(Tool("key_hotkey",
+         "Human-Interface kit #14: press a hotkey combo like 'ctrl+c', "
+         "'alt+tab', 'win+r', 'ctrl+shift+esc'.",
+         {"type": "object",
+          "properties": {"keys": _str_prop("combo e.g. ctrl+c", "ctrl+c")},
+          "required": ["keys"]},
+         lambda keys="ctrl+c": tool_key_hotkey(keys=keys)))
+    REGISTRY.append(Tool("human_interface",
+         "Human-Interface kit #14: status - backend (sendinput|pyautogui|"
+         "pynput), screen size, cursor position, available tools.",
+         {"type": "object",
+          "properties": {"action": _str_prop("status", "status")},
+          "required": []},
+         lambda action="status": tool_human_interface(action=action)))
     global _REGISTRY, _BUILTIN_NAMES
     _BUILTIN_NAMES = {t.name for t in REGISTRY}
     with _SYNTHESIZED_LOCK:
