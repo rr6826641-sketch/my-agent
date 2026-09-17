@@ -3574,6 +3574,132 @@ def _ensure_self_signed_cert(cert_dir):
     with open(cert_path, "wb") as fh:
         fh.write(cert.public_bytes(serialization.Encoding.PEM))
     return cert_path, key_path
+# ---------------------------------------------------------------------------
+# Desktop Input Control API - Mouse & Keyboard Access (Human Interface Kit
+# #14 + Desktop Automation Pack #15). Browser UI: Settings > Input tab.
+# ---------------------------------------------------------------------------
+def _hi_norm(r):
+    if isinstance(r, dict):
+        return r
+    if isinstance(r, str):
+        try:
+            return json.loads(r)
+        except Exception:
+            return {"raw": r}
+    return {"raw": str(r)}
+
+
+@app.route("/api/desktop/status")
+def api_desktop_status():
+    try:
+        from ai_agent.tools.human_interface import (tool_human_interface,
+                                                    tool_mouse_pos)
+        from ai_agent.tools.desktop_automation import tool_desktop_status
+        return jsonify({"ok": True,
+                        "human_interface": _hi_norm(tool_human_interface(action="status")),
+                        "desktop": _hi_norm(tool_desktop_status()),
+                        "cursor": _hi_norm(tool_mouse_pos())})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": repr(exc)}), 500
+
+
+@app.route("/api/desktop/mouse", methods=["POST"])
+def api_desktop_mouse():
+    d = request.get_json(force=True, silent=True) or {}
+    action = (d.get("action") or "move").strip()
+    try:
+        from ai_agent.tools.human_interface import (tool_mouse_move,
+                                                    tool_mouse_click,
+                                                    tool_mouse_drag,
+                                                    tool_mouse_scroll,
+                                                    tool_mouse_pos)
+        if action == "move":
+            r = tool_mouse_move(x=int(d.get("x", 0)), y=int(d.get("y", 0)),
+                                absolute=bool(d.get("absolute", True)))
+        elif action == "click":
+            x, y = d.get("x"), d.get("y")
+            kw = {}
+            if x is not None and y is not None:
+                kw["x"] = int(x)
+                kw["y"] = int(y)
+            r = tool_mouse_click(button=d.get("button", "left"),
+                                 clicks=int(d.get("clicks", 1) or 1), **kw)
+        elif action == "drag":
+            r = tool_mouse_drag(x1=int(d.get("x1", 0)), y1=int(d.get("y1", 0)),
+                                x2=int(d.get("x2", 100)), y2=int(d.get("y2", 100)),
+                                button=d.get("button", "left"))
+        elif action == "scroll":
+            r = tool_mouse_scroll(amount=int(d.get("amount", 3) or 3),
+                                  direction=d.get("direction", "down"))
+        elif action == "pos":
+            r = tool_mouse_pos()
+        else:
+            return jsonify({"ok": False, "error": "unknown mouse action: " + action}), 400
+        return jsonify({"ok": True, "result": _hi_norm(r)})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": repr(exc)}), 500
+
+
+@app.route("/api/desktop/key", methods=["POST"])
+def api_desktop_key():
+    d = request.get_json(force=True, silent=True) or {}
+    action = (d.get("action") or "press").strip()
+    try:
+        from ai_agent.tools.human_interface import (tool_key_press,
+                                                    tool_key_type,
+                                                    tool_key_hotkey)
+        if action == "press":
+            r = tool_key_press(key=d.get("key", "enter"))
+        elif action == "type":
+            r = tool_key_type(text=d.get("text", ""),
+                              interval=float(d.get("interval", 0.02) or 0.02))
+        elif action == "hotkey":
+            r = tool_key_hotkey(keys=d.get("keys", "ctrl+c"))
+        else:
+            return jsonify({"ok": False, "error": "unknown key action: " + action}), 400
+        return jsonify({"ok": True, "result": _hi_norm(r)})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": repr(exc)}), 500
+
+
+@app.route("/api/desktop/screen", methods=["POST"])
+def api_desktop_screen():
+    try:
+        from ai_agent.tools.desktop_automation import tool_screen_capture
+        r = _hi_norm(tool_screen_capture(save_to="", region=""))
+        if r.get("ok"):
+            name = os.path.basename(r.get("saved", ""))
+            r["url"] = "/api/desktop/captures/" + name
+        return jsonify({"ok": True, "result": r})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": repr(exc)}), 500
+
+
+@app.route("/api/desktop/captures/<path:name>")
+def api_desktop_captures(name):
+    try:
+        from ai_agent.tools.desktop_automation import _CAP_DIR
+        name = os.path.basename(name or "")
+        p = os.path.join(_CAP_DIR, name)
+        if os.path.isfile(p):
+            return send_file(p, mimetype="image/png")
+        return jsonify({"ok": False, "error": "capture not found"}), 404
+    except Exception as exc:
+        return jsonify({"ok": False, "error": repr(exc)}), 500
+
+
+@app.route("/api/desktop/clipboard", methods=["POST"])
+def api_desktop_clipboard():
+    d = request.get_json(force=True, silent=True) or {}
+    try:
+        from ai_agent.tools.desktop_automation import tool_clipboard
+        r = _hi_norm(tool_clipboard(action=d.get("action", "get_text"),
+                                    text=d.get("text", "")))
+        return jsonify({"ok": True, "result": r})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": repr(exc)}), 500
+
+
 
 
 def main():

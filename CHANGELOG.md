@@ -823,3 +823,15 @@ Sare notable changes is project ke. Format: `[Semantic Versioning](https://semve
 - `campaign_daemon` - autopilot daemon control: start detached poller (`python scheduled_campaign_runner.py --daemon --interval N`, PID + log file), stop, status. Har tick par due jobs chalti hain, findings notify channels par jati hain.
 - `scheduled_campaign_runner.py` - repo-root runner: `--interval` foreground loop, `--once` single pass (Windows Task Scheduler / schtasks OS-level cron mode), `--daemon` detached, `--run-all` force pass.
 - Scheduler + Notifications (bundle #1): 'har raat 3 baje is target par full chain chalao, findings report karo' - ab ek tool call.
+## [2026-09-17] v14.4 - Mouse & Keyboard LIVE Console + Registry Cleanup
+
+- feat(webui): Settings mein naya visible tab "🖱 Mouse & Keyboard" (view-input) - live input console:
+  - /api/desktop/status, /api/desktop/mouse (move/click/drag/scroll/pos), /api/desktop/key (press/type/hotkey),
+    /api/desktop/screen (capture + live preview click-to-move), /api/desktop/clipboard (get/set/clear)
+  - Panel: mousepad (click=move), X/Y inputs, left/right/double click, scroll, drag, key press, hotkey,
+    live typing, clipboard UI - sab manual live control ke liye (bundle #14 + #15 UI layer).
+- fix(webui): Settings button ab reliably kaam karta hai - activity view mein stray + closing </div> hata kar
+  view tree balanced kiya, settings button click ab hamesha settings pane kholta hai.
+- fix(registry): 3 duplicate tool names clean kiye - current_time duplicate removed, mission_status ->
+  mission_checkpoint rename (avoid clash), shellcode_loader -> shellcode_loader_x64 rename (avoid clash).
+  Registry ab 100% unique names, 310/x310 clean.

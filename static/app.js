@@ -218,6 +218,7 @@ function openSettingsPane(name) {
   if (name === "rpg") loadRPGView();
   if (name === "general") { loadSettings(); loadPersona(); }
   if (name === "system") loadSystem();
+  if (name === "input") loadDesktopPanel();
 }
 
 function goToSettingsPane(name) {
@@ -231,7 +232,7 @@ function goToSettingsPane(name) {
 }
 
 function switchView(name) {
-  if (name !== "settings" && ["tools", "memory", "reports", "rpg", "system", "general"].indexOf(name) !== -1) {
+  if (name !== "settings" && ["tools", "memory", "reports", "rpg", "system", "input", "general"].indexOf(name) !== -1) {
     goToSettingsPane(name);
     return;
   }
@@ -2130,6 +2131,174 @@ $("#set-save").addEventListener("click", async () => {
     msg.textContent = "❌ failed to save";
   }
 });
+
+/* ---------------- Mouse & Keyboard Access (live input console) ---------------- */
+async function deskCall(url, payload) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
+  let data = null;
+  try { data = await res.json(); } catch (e) {}
+  return { res, data };
+}
+
+function deskMsg(txt, isErr) {
+  const m = $("#desk-msg");
+  if (m) { m.textContent = String(txt); m.classList.toggle("err", !!isErr); }
+}
+
+function deskXY() {
+  return {
+    x: parseInt(($("#desk-x") || {}).value, 10) || 0,
+    y: parseInt(($("#desk-y") || {}).value, 10) || 0,
+  };
+}
+
+function setDeskXY(x, y, move) {
+  const ix = $("#desk-x"), iy = $("#desk-y");
+  if (ix && x != null) ix.value = Math.round(x);
+  if (iy && y != null) iy.value = Math.round(y);
+  const cur = $("#desk-cursor"), pad = $("#desk-mousepad");
+  if (cur && pad && x != null && y != null) {
+    const sw = window.screen.width || 1920, sh = window.screen.height || 1080;
+    cur.style.left = Math.min(100, Math.max(0, (x / sw) * 100)) + "%";
+    cur.style.top = Math.min(100, Math.max(0, (y / sh) * 100)) + "%";
+  }
+  if (move) deskMouse("move", { x: x != null ? Math.round(x) : deskXY().x, y: y != null ? Math.round(y) : deskXY().y, absolute: true });
+}
+
+async function deskMouse(action, payload) {
+  const { res, data } = await deskCall("/api/desktop/mouse", Object.assign({ action }, payload || {}));
+  if (res.ok && data && data.ok) {
+    const pos = data.result && data.result.pos;
+    const r = data.result || {};
+    if (pos && pos.x != null) { setDeskXY(pos.x, pos.y, false); }
+    deskMsg("🖱 " + action + " ✓" + (r.msg ? " — " + r.msg : "") + (pos && pos.x != null ? " @ " + pos.x + "," + pos.y : ""));
+  } else {
+    deskMsg("❌ mouse " + action + ": " + ((data && (data.error || (data.result && data.result.error))) || res.status), true);
+  }
+}
+
+async function captureScreen(silent) {
+  const img = $("#desk-shot");
+  if (!img) return;
+  deskMsg(silent ? "Capturing…" : "Capturing screen…");
+  const { res, data } = await deskCall("/api/desktop/screen", {});
+  if (res.ok && data && data.ok && data.result && data.result.url) {
+    img.src = data.result.url + "?t=" + Date.now();
+    img.style.display = "block";
+    deskMsg("✅ Screen " + new Date().toLocaleTimeString() + " — click to move cursor");
+  } else {
+    deskMsg("❌ Capture failed: " + ((data && (data.error || (data.result && data.result.error))) || res.status), true);
+  }
+}
+
+async function loadDesktopPanel() {
+  const st = $("#desk-status");
+  if (st) st.textContent = "checking…";
+  deskMsg("Loading desktop status…");
+  try {
+    const d = await fetchJSON("/api/desktop/status");
+    if (d && d.ok) {
+      const dsk = d.desktop || {};
+      if (st) st.textContent = "✅ connected — " + (dsk.tools && dsk.tools.length ? dsk.tools.length + " tools ready" : "ready");
+      const pos = dsk.pos;
+      if (pos && pos.x != null) setDeskXY(pos.x, pos.y, false);
+      captureScreen(true);
+    } else {
+      if (st) st.textContent = "❌ " + ((d && d.error) || "not available");
+      deskMsg("❌ Desktop connection failed", true);
+    }
+  } catch (err) {
+    if (st) st.textContent = "❌ desktop API unreachable";
+    deskMsg("❌ Desktop API unreachable: " + err, true);
+  }
+}
+
+function deskClick(button, clicks) {
+  const { x, y } = deskXY();
+  deskCall("/api/desktop/mouse", { action: "click", button, clicks, x, y }).then(({ res, data }) => {
+    if (res.ok && data && data.ok) deskMsg("🖱 " + button + " click ✓");
+    else deskMsg("❌ click: " + ((data && (data.error || (data.result && data.result.error))) || res.status), true);
+  });
+}
+
+function wireDesk() {
+  const snap = $("#desk-snap"); if (snap) snap.addEventListener("click", () => captureScreen(false));
+  const mv = $("#desk-move"); if (mv) mv.addEventListener("click", () => { const { x, y } = deskXY(); setDeskXY(x, y, true); });
+  if ($("#desk-shot")) $("#desk-shot").addEventListener("click", (ev) => {
+    const img = ev.currentTarget, r = img.getBoundingClientRect();
+    if (!r.width || !img.naturalWidth) return;
+    const sx = Math.round(((ev.clientX - r.left) / r.width) * img.naturalWidth);
+    const sy = Math.round(((ev.clientY - r.top) / r.height) * img.naturalHeight);
+    setDeskXY(sx, sy, false);
+    deskMouse("move", { x: sx, y: sy, absolute: true });
+  });
+  if ($("#desk-mousepad")) $("#desk-mousepad").addEventListener("click", (ev) => {
+    const pad = ev.currentTarget, r = pad.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    const sx = Math.round(((ev.clientX - r.left) / r.width) * (window.screen.width || 1920));
+    const sy = Math.round(((ev.clientY - r.top) / r.height) * (window.screen.height || 1080));
+    setDeskXY(sx, sy, false);
+    deskMouse("move", { x: sx, y: sy, absolute: true });
+  });
+  const lc = $("#desk-lclick"); if (lc) lc.addEventListener("click", () => deskClick("left", 1));
+  const rc = $("#desk-rclick"); if (rc) rc.addEventListener("click", () => deskClick("right", 1));
+  const dc = $("#desk-dclick"); if (dc) dc.addEventListener("click", () => deskClick("left", 2));
+  const su = $("#desk-scrollup"); if (su) su.addEventListener("click", () => deskMouse("scroll", { amount: 3, direction: "up" }));
+  const sd = $("#desk-scrolldown"); if (sd) sd.addEventListener("click", () => deskMouse("scroll", { amount: 3, direction: "down" }));
+  const dr = $("#desk-drag"); if (dr) dr.addEventListener("click", () => {
+    const g = (id) => parseInt(($(id) || {}).value, 10) || 0;
+    deskMouse("drag", { x1: g("#desk-dx1"), y1: g("#desk-dy1"), x2: g("#desk-dx2"), y2: g("#desk-dy2"), button: "left" });
+  });
+  const pr = $("#desk-press"); if (pr) pr.addEventListener("click", async () => {
+    const key = ($("#desk-key") || {}).value || "enter";
+    const { res, data } = await deskCall("/api/desktop/key", { action: "press", key });
+    if (res.ok && data && data.ok) deskMsg("⌨ key " + key + " pressed ✓");
+    else deskMsg("❌ key: " + ((data && (data.error || (data.result && data.result.error))) || res.status), true);
+  });
+  const hk = $("#desk-hotkey-btn"); if (hk) hk.addEventListener("click", async () => {
+    const keys = ($("#desk-hotkey") || {}).value || "ctrl+shift+s";
+    const { res, data } = await deskCall("/api/desktop/key", { action: "hotkey", keys });
+    if (res.ok && data && data.ok) deskMsg("⚡ hotkey " + keys + " ✓");
+    else deskMsg("❌ hotkey: " + ((data && (data.error || (data.result && data.result.error))) || res.status), true);
+  });
+  const send = $("#desk-send"); if (send) send.addEventListener("click", async () => {
+    const ta = $("#desk-type");
+    if (!ta || !ta.value) { deskMsg("Type karne ke liye text likho…", true); return; }
+    const { res, data } = await deskCall("/api/desktop/key", { action: "type", text: ta.value });
+    if (res.ok && data && data.ok) { deskMsg("⌨ typed " + ta.value.length + " chars ✓"); ta.value = ""; }
+    else deskMsg("❌ type: " + ((data && (data.error || (data.result && data.result.error))) || res.status), true);
+  });
+  const cg = $("#desk-clip-get"); if (cg) cg.addEventListener("click", async () => {
+    const { res, data } = await deskCall("/api/desktop/clipboard", { action: "get_text" });
+    const out = $("#desk-clip-out");
+    const r = (data && data.result) || {};
+    if (res.ok && data && data.ok) {
+      const info = JSON.stringify(r, null, 2);
+      if (out) out.textContent = info;
+      deskMsg("📋 Clipboard: " + (r.length != null ? r.length + " chars" : "ok"));
+    } else {
+      deskMsg("❌ clipboard: " + ((data && data.error) || res.status), true);
+      if (out) out.textContent = ((data && data.error) || "error");
+    }
+  });
+  const cs = $("#desk-clip-save"); if (cs) cs.addEventListener("click", async () => {
+    const ta = $("#desk-clip-set");
+    if (!ta || !ta.value) { deskMsg("Clipboard par set karne ke liye text likho…", true); return; }
+    const { res, data } = await deskCall("/api/desktop/clipboard", { action: "set_text", text: ta.value });
+    if (res.ok && data && data.ok) { deskMsg("📋 Clipboard set ✓ (" + ta.value.length + " chars)"); ta.value = ""; }
+    else deskMsg("❌ clipboard set: " + ((data && data.error) || res.status), true);
+  });
+  const cc = $("#desk-clip-clear"); if (cc) cc.addEventListener("click", async () => {
+    const { res, data } = await deskCall("/api/desktop/clipboard", { action: "clear" });
+    if (res.ok && data && data.ok) { const o = $("#desk-clip-out"); if (o) o.textContent = "—"; deskMsg("🗑 Clipboard cleared"); }
+    else deskMsg("❌ clipboard clear: " + ((data && data.error) || res.status), true);
+  });
+}
+wireDesk();
 
 /* ---------------- persona presets ---------------- */
 async function loadPersona() {

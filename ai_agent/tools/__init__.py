@@ -1474,9 +1474,6 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
         Tool("system_info", "OS, CPU, memory, hostname, cwd, user info.",
              {"type": "object", "properties": {}, "required": []},
              lambda: tool_system_info()),
-        Tool("current_time", "Current local and UTC time with timezone.",
-             {"type": "object", "properties": {}, "required": []},
-             lambda: tool_current_time()),
         Tool("process_list", "List running processes, optionally filtered.",
              {"type": "object",
               "properties": {"name_filter": _str_prop("filter by name, or 'all'", "all")},
@@ -3016,7 +3013,7 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
                                progress=progress or "",
                                next_steps=next_steps or "")))
     REGISTRY.append(Tool(
-        "mission_status",
+        "mission_checkpoint",
         "Show whether a paused/long-running mission checkpoint exists and "
         "what it contains (objective, progress summary, resume hint).",
         {"type": "object", "properties": {}, "required": []},
@@ -3285,7 +3282,7 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
         lambda action="enum": gen_mobile_kit(action=action or "enum")))
 
     REGISTRY.append(Tool(
-        "shellcode_loader",
+        "shellcode_loader_x64",
         "Generate a minimal x64 in-memory shellcode loader (C source) to "
         "keep stage-1 payloads off disk in an authorized engagement.",
         {"type": "object",

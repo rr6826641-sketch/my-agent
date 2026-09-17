@@ -218,8 +218,6 @@
                 <span class="stop-ico">■</span>
               </button>
             </div>
-          
-            </div>
 </form>
         </footer>
 
@@ -246,6 +244,7 @@
         <button class="settings-tab" data-subview="memory" role="tab" aria-selected="false"><i class="ni">🧠</i><span>Memory</span><em class="badge" id="badge-memory">0</em></button>
         <button class="settings-tab" data-subview="reports" role="tab" aria-selected="false"><i class="ni">📋</i><span>Reports</span><em class="badge" id="badge-reports">0</em></button>
         <button class="settings-tab" data-subview="rpg" role="tab" aria-selected="false"><i class="ni">🎮</i><span>RPG</span><em class="badge" id="badge-rpg">0</em></button>
+        <button class="settings-tab" data-subview="input" role="tab" aria-selected="false"><i class="ni">🖱️</i><span>Mouse &amp; Keyboard</span></button>
         <button class="settings-tab" data-subview="system" role="tab" aria-selected="false"><i class="ni">🖥️</i><span>System</span></button>
       </div>
       <div class="settings-pane active" id="pane-general" role="tabpanel">
@@ -402,6 +401,103 @@
       </div>
     </section>
 
+    <!-- ---------- INPUT: MOUSE & KEYBOARD LIVE CONTROL ---------- -->
+    <section class="view" id="view-input" role="tabpanel">
+      <div class="settings-pane" id="pane-input" role="tabpanel" aria-label="Mouse & Keyboard Access">
+        <header class="pane-head">
+          <div class="ht">
+            <div class="ht-ico" aria-hidden="true">🖱️</div>
+            <div>
+              <h2>Mouse &amp; Keyboard Access</h2>
+              <p id="desk-status">checking…</p>
+            </div>
+          </div>
+          <button class="btn-primary" id="desk-snap">📸 Capture Screen</button>
+        </header>
+
+        <div class="desk-grid">
+          <!-- Screen capture -->
+          <div class="desk-card">
+            <h3>Live Screen</h3>
+            <div class="desk-screen" id="desk-screen">
+              <img id="desk-shot" alt="screen capture" title="click to move cursor">
+            </div>
+            <p class="hint">Screen par click karo — cursor wahin move ho jayega.</p>
+          </div>
+
+          <!-- Mouse controls -->
+          <div class="desk-card">
+            <h3>Mouse</h3>
+            <div class="desk-mpad" id="desk-mousepad">
+              <div class="desk-cursor" id="desk-cursor">🖱️</div>
+            </div>
+            <div class="desk-mrow">
+              <label>X</label><input type="number" id="desk-x" value="960" min="0">
+              <label>Y</label><input type="number" id="desk-y" value="540" min="0">
+              <button class="btn" id="desk-move">Move</button>
+            </div>
+            <div class="desk-mrow">
+              <button class="btn desk-btn" id="desk-lclick">🖱 L-Click</button>
+              <button class="btn desk-btn" id="desk-rclick">🖱 R-Click</button>
+              <button class="btn desk-btn" id="desk-dclick">🖱 Double</button>
+            </div>
+            <div class="desk-mrow">
+              <button class="btn desk-btn" id="desk-scrollup">▲ Scroll Up</button>
+              <button class="btn desk-btn" id="desk-scrolldown">▼ Scroll Down</button>
+            </div>
+            <div class="desk-mrow desk-drag">
+              <label>Drag</label>
+              <input type="number" id="desk-dx1" value="0" placeholder="x1">
+              <input type="number" id="desk-dy1" value="0" placeholder="y1">
+              <span>→</span>
+              <input type="number" id="desk-dx2" value="0" placeholder="x2">
+              <input type="number" id="desk-dy2" value="0" placeholder="y2">
+              <button class="btn desk-btn" id="desk-drag">Drag</button>
+            </div>
+          </div>
+
+          <!-- Keyboard controls -->
+          <div class="desk-card">
+            <h3>Keyboard</h3>
+            <div class="desk-mrow">
+              <input type="text" id="desk-key" placeholder="key: a, enter, ctrl, F5…" list="desk-keys">
+              <button class="btn desk-btn" id="desk-press">Press</button>
+            </div>
+            <datalist id="desk-keys">
+              <option value="enter"><option value="tab"><option value="space"><option value="backspace">
+              <option value="escape"><option value="ctrl"><option value="shift"><option value="alt">
+              <option value="up"><option value="down"><option value="left"><option value="right">
+            </datalist>
+            <div class="desk-mrow desk-type">
+              <textarea id="desk-type" rows="3" placeholder="Yahan type karo… text live bheja jayega"></textarea>
+              <button class="btn desk-btn" id="desk-send">Type &amp; Send</button>
+            </div>
+            <div class="desk-mrow">
+              <input type="text" id="desk-hotkey" placeholder="hotkey: ctrl+shift+s">
+              <button class="btn desk-btn" id="desk-hotkey-btn">⚡ Hotkey</button>
+            </div>
+            <p class="hint">Single keys bhi chalte hain (a, F5, enter). Type field special chars ke liye bhi use karo.</p>
+          </div>
+
+          <!-- Clipboard controls -->
+          <div class="desk-card">
+            <h3>Clipboard</h3>
+            <div class="desk-mrow">
+              <button class="btn desk-btn" id="desk-clip-get">📋 Get</button>
+              <button class="btn desk-btn" id="desk-clip-clear">🗑 Clear</button>
+            </div>
+            <div class="desk-mrow desk-type">
+              <textarea id="desk-clip-set" rows="2" placeholder="Clipboard par set karne ke liye text likho…"></textarea>
+              <button class="btn desk-btn" id="desk-clip-save">Set</button>
+            </div>
+            <pre class="sys-box" id="desk-clip-out" style="max-height:90px">—</pre>
+          </div>
+        </div>
+
+        <p class="desk-msg" id="desk-msg">Ready.</p>
+      </div>
+    </section>
+
     <!-- ---------- LIVE AGENT ACTIVITY VIEW ---------- -->
     <section class="view" id="view-activity">
       <header class="chat-header">
@@ -455,6 +551,7 @@
             <pre class="activity-log-pre" id="activity-log"></pre>
           </div>
         </div>
+      </div>
     </section>
 
 </main>
