@@ -204,7 +204,7 @@ def run_tray(server, no_browser, mock):
                      [sys.executable, os.path.abspath(__file__)] + sys.argv)
 
     def on_update(icon, item):
-        """v16 auto-updater - checks GitHub latest release & applies it."""
+        """v17 auto-updater - checks GitHub latest release & applies it."""
         log("update check requested")
         try:
             import auto_updater
@@ -229,7 +229,7 @@ def run_tray(server, no_browser, mock):
         menu = Menu(
             MenuItem("Open Agent (Browser)", on_open, default=True),
             MenuItem("Open Data Folder", on_data),
-            MenuItem("Check for Updates (v16)", on_update),
+            MenuItem("Check for Updates (v17)", on_update),
             MenuItem("Restart", on_restart),
             *([sep] if sep is not None else []),
             MenuItem("Quit", on_quit),

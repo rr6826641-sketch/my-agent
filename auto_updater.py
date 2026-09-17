@@ -19,7 +19,7 @@ import json
 import shutil
 import urllib.request
 
-CURRENT_VERSION = "v16"
+CURRENT_VERSION = "v17"
 GITHUB_REPO = "rr6826641-sketch/my-agent"
 RELEASE_API = "https://api.github.com/repos/%s/releases/latest" % GITHUB_REPO
 ASSET_NAME = "MyAgentUltra.exe"
