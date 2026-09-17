@@ -1,0 +1,23 @@
+name: Upload Release Asset v16
+
+on:
+  push:
+    branches: [release-bin]
+
+permissions:
+  contents: write
+
+jobs:
+  upload-asset:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Upload MyAgentUltra.exe to release v16
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ls -la dist/MyAgentUltra.exe
+          gh release upload v16 dist/MyAgentUltra.exe --clobber --repo rr6826641-sketch/my-agent
+          echo "ASSET_UPLOADED_OK"
