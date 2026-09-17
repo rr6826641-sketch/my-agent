@@ -18,6 +18,7 @@ import json
 import os
 import re
 import queue
+import sys
 import threading
 import time
 import uuid
@@ -71,7 +72,14 @@ _active_runs = {}  # run_id -> threading.Event
 _rpg_lock = threading.Lock()
 _rpg_runs = {}  # game_id -> (run_id, threading.Event)
 
-app = Flask(__name__)
+_FROZEN_ = getattr(sys, "frozen", False)
+if _FROZEN_:
+    _MEI = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(sys.executable)))
+    app = Flask(__name__,
+                template_folder=os.path.join(_MEI, "templates"),
+                static_folder=os.path.join(_MEI, "static"))
+else:
+    app = Flask(__name__)
 
 # STEP 1: serve the gatekeeper lock-screen overlay templates/static from
 # ai_agent/webui/ so {% include 'gatekeeper_lockscreen.html' %} resolves.

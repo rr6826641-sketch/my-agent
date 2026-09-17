@@ -12,13 +12,24 @@ Security policy (v2 - API key isolation):
 
 import json
 import os
+import sys
 
 try:
     from dotenv import load_dotenv  # python-dotenv (optional, preferred)
 except ImportError:
     load_dotenv = None
 
-PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Desktop App (frozen) support:
+# - writable project data (env, chats, memory, artifacts) lives NEXT TO the EXE
+# - bundled read-only assets (personas_custom.txt, data/) are seeded on first run
+if getattr(sys, "frozen", False):  # PyInstaller onefile/onedir
+    PROJECT_DIR = os.path.dirname(os.path.abspath(sys.executable))
+    CODE_DIR = getattr(sys, "_MEIPASS", PROJECT_DIR)
+else:
+    CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    PROJECT_DIR = CODE_DIR
+
 ENV_PATH = os.path.join(PROJECT_DIR, ".env")
 CONFIG_PATH = os.path.join(PROJECT_DIR, "config.json")
 

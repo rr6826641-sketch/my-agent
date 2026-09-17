@@ -94,3 +94,9 @@ _hub_error.txt
 _https_test.log
 _webui_*.log
 _chat_rt*.txt
+
+# Desktop App build artifacts
+build/
+dist/
+*.spec
+app_icon.ico

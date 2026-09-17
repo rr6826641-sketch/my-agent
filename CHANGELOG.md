@@ -835,3 +835,19 @@ Sare notable changes is project ke. Format: `[Semantic Versioning](https://semve
 - fix(registry): 3 duplicate tool names clean kiye - current_time duplicate removed, mission_status ->
   mission_checkpoint rename (avoid clash), shellcode_loader -> shellcode_loader_x64 rename (avoid clash).
   Registry ab 100% unique names, 310/x310 clean.
+
+## [2026-09-17] v14.5 - MyAgentUltra DESKTOP APP (standalone EXE, tray launcher)
+
+- feat(app): myagent_app.py - desktop app entry jaisa HackerAI desktop app:
+  - Flask webui in-process thread par free port (prefer 8080) par chalata hai
+  - System tray icon (pystray): Open Agent (Browser) / Open Data Folder / Restart / Quit
+  - Single-instance mutex - second launch sirf browser kholta hai
+  - Auto browser open + .myagent_port file (URL persistence)
+  - app.log logging next to EXE, tray failure par headless keep-alive fallback
+- feat(build): PyInstaller onefile windowed build -> dist/MyAgentUltra.exe (91MB, icon ke sath)
+  - Bundles: templates, static, ai_agent/webui (gatekeeper), data/, rpg/, mcp_servers/, personas_custom.txt
+  - --collect-submodules ai_agent.tools (315 tools), hidden-imports pystray/PIL/ddgs/flask
+- feat(frozen): ai_agent/config.py + webui.py frozen-aware paths:
+  - PROJECT_DIR = EXE ke sath wala folder (env/chats/memory/artifacts wahan)
+  - Flask templates/static _MEIPASS bundle se; first-run seed: personas_custom.txt + data/ EXE ke pas
+- test: EXE live verified - HTTP 200, tray running, seeding OK, process Responding
