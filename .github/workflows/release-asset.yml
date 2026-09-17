@@ -1,4 +1,4 @@
-name: Upload Release Asset v17
+name: Upload Release Asset v18
 
 on:
   push:
@@ -14,10 +14,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Upload MyAgentUltra.exe to release v17
+      - name: Upload MyAgentUltra.exe to release v18
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ls -la dist/MyAgentUltra.exe
-          gh release upload v17 dist/MyAgentUltra.exe --clobber --repo rr6826641-sketch/my-agent
+          gh release upload v18 dist/MyAgentUltra.exe --clobber --repo rr6826641-sketch/my-agent
           echo "ASSET_UPLOADED_OK"
