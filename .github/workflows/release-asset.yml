@@ -14,6 +14,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Ensure release v18 exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view v18 --repo rr6826641-sketch/my-agent \
+            || gh release create v18 \
+                 --repo rr6826641-sketch/my-agent \
+                 --title "MyAgentUltra v18 - ULTRA EXTRA ULTRA POWERFUL EDITION (FUSION X7 NEXUS DELTA / JDX)" \
+                 --notes "JDX EDITION: FUSION X7 NEXUS DELTA PROTOCOL persona, JDX branding, desktop EXE rebuilt with jdx_app_icon.ico."
+
       - name: Upload MyAgentUltra.exe to release v18
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
