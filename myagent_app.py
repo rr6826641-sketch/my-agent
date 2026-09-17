@@ -203,6 +203,22 @@ def run_tray(server, no_browser, mock):
             os.execv(sys.executable,
                      [sys.executable, os.path.abspath(__file__)] + sys.argv)
 
+    def on_update(icon, item):
+        """v16 auto-updater - checks GitHub latest release & applies it."""
+        log("update check requested")
+        try:
+            import auto_updater
+            info = auto_updater.check_for_update()
+            if info.get("update_available") and info.get("asset_url"):
+                log("applying update %s" % info.get("latest"))
+                ok = auto_updater.apply_update(info["asset_url"])
+                log("update applied=%s" % ok)
+            else:
+                log("update check: current (%s) is latest (%s)"
+                    % (info.get("current"), info.get("latest") or "same"))
+        except Exception as exc:
+            log("update check failed: %r" % exc)
+
     def on_quit(icon, item):
         log("quit via tray")
         icon.stop()
@@ -213,6 +229,7 @@ def run_tray(server, no_browser, mock):
         menu = Menu(
             MenuItem("Open Agent (Browser)", on_open, default=True),
             MenuItem("Open Data Folder", on_data),
+            MenuItem("Check for Updates (v16)", on_update),
             MenuItem("Restart", on_restart),
             *([sep] if sep is not None else []),
             MenuItem("Quit", on_quit),
