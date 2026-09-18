@@ -6,6 +6,8 @@ Ye ek complete AI agent hai jo **sochta hai, tools use karta hai, aur kaam karta
 
 **Web UI included** — dark hacker-theme dashboard (chat + streaming tool calls, tools catalog, memory manager, settings, system info). Chalao: double-click `start_ui.bat` → browser mein http://127.0.0.1:8080
 
+**🧠 JDX Ultra-Premium Visual** — official agent look (dark neural core, blue-white glow, no planet/robot/text). Master render prompt + variations: `JDX_VISUAL_PROMPT.md`. Brand image: `static/assets/jdx_brand.png`, Windows icon: `jdx_app_icon.ico` (embedded in EXE).
+
 **🎨 Neon Red v2.0 UI** — 100% red theme. Main accent `#FF2740` (Neon Red) har jagah: buttons, focus rings, scrollbars, charts, chat bubbles, status dots. Focus state bhi orange nahi — ab pure `#FF2740` glow. `router.html` + `templates/index.html` + `static/style.css` teeno views ek hi red family me.
 
 **🔴 Red Team PRO MAX (default top tier)** — `/api/redteam` bina `level` ke on karo toh agent seedha **PRO MAX** composite persona par jaata hai (sabse powerful preset — APEX + BLACKICE + DAN-R + UNFILTERED + MAX layer set). Optional `level`: `promax` (default) · `promix` · `master` (`unfiltered` persona).
