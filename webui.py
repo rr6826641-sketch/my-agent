@@ -407,13 +407,28 @@ def _save_cfg(patch):
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 
+RED_TEAM_LEVELS = ("master", "promax", "promix")
+
+
+def _red_team_level(cfg):
+    """Normalise red_team_level to the supported Red Team vocabulary.
+
+    config.json can hold a persona id (for example the ultrax7 default
+    persona) in this slot. Any value outside {master, promax, promix} falls
+    back to promax (the flagship tier), so /api/status never exposes a
+    non-level value and _build_llm keeps the widened mixed pool enabled.
+    """
+    lvl = str(cfg.get("red_team_level") or "").strip().lower()
+    return lvl if lvl in RED_TEAM_LEVELS else "promax"
+
+
 def _build_llm(cfg):
     """Create the LLM client from the current config (mock or live)."""
     uncensored = bool(cfg.get("red_team_mode"))
     # Red Team level: promax (top tier - route lock + widened mixed
     # pool + PRO MAX composite persona) vs promix (route lock +
     # widened mixed pool + PRO MIX composite persona).
-    level = str(cfg.get("red_team_level") or "promax").lower()
+    level = _red_team_level(cfg)
     mix = uncensored and level in ("promax", "promix")
     # Persona presets: the active persona's directive block rides on the
     # client; core.Agent._system_prompt appends it after the Red Team
@@ -583,7 +598,7 @@ def _status():
         "mode": mode,
         "model": model,
         "red_team_mode": bool(cfg.get("red_team_mode")),
-        "red_team_level": str(cfg.get("red_team_level") or "promax"),
+        "red_team_level": _red_team_level(cfg),
         "persona": personas.normalize(cfg.get("persona")),
         "refusal_retries": int(cfg.get("refusal_retries", 3) or 0),
         "base_url": "built-in" if cfg.get("mock") else cfg.get("base_url", "?"),
@@ -1863,7 +1878,7 @@ def api_settings():
         "catalog": MODEL_CATALOG,
         "mock": bool(cfg.get("mock")),
         "red_team_mode": bool(cfg.get("red_team_mode")),
-        "red_team_level": str(cfg.get("red_team_level") or "promax"),
+        "red_team_level": _red_team_level(cfg),
         "key_error": _state.get("key_error", ""),
         "max_iterations": cfg.get("max_iterations", 60),
     })
