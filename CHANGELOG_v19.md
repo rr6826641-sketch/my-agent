@@ -103,3 +103,27 @@ fixed.
 - Note: 3 failures in `tests/test_mcp_runtime_wiring.py` are pre-existing and
   unrelated (an ambient `local-fs` server spec leaks in from the environment;
   identical failures on the unmodified tree).
+
+## Follow-up fix — terminal interactive-session teardown (resolved)
+
+The last subsystem flagged after the capture_tools / mcp_client fixes
+(`ai_agent/tools/terminal.py`) is now fixed.
+
+- Root cause: `_InteractiveSession.start_threads()` and
+  `_PtySession.start_threads()` spawned the stdout/stderr (or pty) pump thread(s)
+  **plus** the monitor thread but kept **no reference** to them, and nothing tore
+  sessions down at process exit. A session left running when the interpreter
+  finalised meant a daemon pump thread could still be inside a blocking native
+  pipe/pty read while CPython freed its thread state -> `Windows fatal exception:
+  access violation` (`<freed thread state>`), the same class as the capture_tools
+  and mcp_client crashes.
+- Fix in `ai_agent/tools/terminal.py`:
+  1. `_InteractiveSession` / `_PtySession` now retain `self._threads` (pump + monitor).
+  2. New `_shutdown_all_sessions()` kills every live session's process tree first
+     (which unblocks the pump reads with EOF), then joins each worker thread
+     (bounded 2 s, never self-joins).
+  3. `_arm_session_atexit()` registers exactly one atexit hook, called from both
+     `_start_pty_session()` and `tool_start_session()`.
+- Verified: `poc_terminal_session_shutdown.py` starts a long interactive session
+  (`ping -n 120 127.0.0.1`) and exits WITHOUT `kill_session()`; the process
+  terminates with zero access-violation dumps and no orphaned child.

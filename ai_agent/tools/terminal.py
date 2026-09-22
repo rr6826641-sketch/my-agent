@@ -1,5 +1,6 @@
 """Terminal & local file tools."""
 
+import atexit
 import itertools
 import json
 import locale
@@ -119,6 +120,44 @@ _SESSIONS = {}                      # session_id -> _InteractiveSession
 _SESSIONS_LOCK = threading.RLock()
 _SESSION_COUNTER = itertools.count(1)
 _LEDGER_HISTORY = []                # finished/killed records (capped)
+_ATEXIT_ARMED = False
+
+
+def _shutdown_all_sessions():
+    """atexit hook: tear down every live interactive session.
+
+    Session pump/monitor threads are daemons that block on subprocess pipe
+    (or pty) reads. If the interpreter finalises while one is still inside
+    such a read, Windows reports a 'Windows fatal exception: access
+    violation' (<freed thread state>) - the same class of crash fixed in
+    capture_tools and mcp_client. Kill the children first (which unblocks
+    the pipe reads with EOF), then join the workers before teardown.
+    """
+    with _SESSIONS_LOCK:
+        sessions = list(_SESSIONS.values())
+    cur = threading.current_thread()
+    for sess in sessions:
+        try:
+            kill_proc_tree(sess.proc)
+        except Exception:
+            pass
+    for sess in sessions:
+        for t in list(getattr(sess, "_threads", [])):
+            if t is cur:
+                continue
+            try:
+                if t.is_alive():
+                    t.join(timeout=2.0)
+            except Exception:
+                pass
+
+
+def _arm_session_atexit():
+    """Register the process-exit session teardown hook exactly once."""
+    global _ATEXIT_ARMED
+    if not _ATEXIT_ARMED:
+        _ATEXIT_ARMED = True
+        atexit.register(_shutdown_all_sessions)
 
 _CTRL_BYTES = {
     "ctrl_c": b"\x03",
@@ -272,6 +311,7 @@ class _InteractiveSession:
         self.out = _ByteBuffer()
         self.err = _ByteBuffer()
         self._stdin_lock = threading.Lock()
+        self._threads = []
 
     @property
     def pid(self):
@@ -281,14 +321,22 @@ class _InteractiveSession:
         kill_proc_tree(self.proc)
 
     def start_threads(self):
-        threading.Thread(target=_pump_stream,
-                         args=(self.proc.stdout, self.out),
-                         daemon=True, name="sess-out-%s" % self.session_id).start()
-        threading.Thread(target=_pump_stream,
-                         args=(self.proc.stderr, self.err),
-                         daemon=True, name="sess-err-%s" % self.session_id).start()
-        threading.Thread(target=_monitor_proc, args=(self,),
-                         daemon=True, name="sess-mon-%s" % self.session_id).start()
+        threads = [
+            threading.Thread(target=_pump_stream,
+                             args=(self.proc.stdout, self.out),
+                             daemon=True,
+                             name="sess-out-%s" % self.session_id),
+            threading.Thread(target=_pump_stream,
+                             args=(self.proc.stderr, self.err),
+                             daemon=True,
+                             name="sess-err-%s" % self.session_id),
+            threading.Thread(target=_monitor_proc, args=(self,),
+                             daemon=True,
+                             name="sess-mon-%s" % self.session_id),
+        ]
+        self._threads = threads
+        for t in threads:
+            t.start()
 
     def write_stdin(self, raw):
         with self._stdin_lock:
@@ -418,17 +466,19 @@ class _PtySession(_InteractiveSession):
         self.backend = backend          # "conpty" | "posix-pty"
 
     def start_threads(self):
-        if self.master_fd is not None:
-            threading.Thread(target=_pump_pty_fd, args=(self,),
+        pty_target = (_pump_pty_fd if self.master_fd is not None
+                      else _pump_winpty)
+        threads = [
+            threading.Thread(target=pty_target, args=(self,),
                              daemon=True,
-                             name="sess-pty-%s" % self.session_id).start()
-        else:
-            threading.Thread(target=_pump_winpty, args=(self,),
+                             name="sess-pty-%s" % self.session_id),
+            threading.Thread(target=_monitor_proc, args=(self,),
                              daemon=True,
-                             name="sess-pty-%s" % self.session_id).start()
-        threading.Thread(target=_monitor_proc, args=(self,),
-                         daemon=True,
-                         name="sess-mon-%s" % self.session_id).start()
+                             name="sess-mon-%s" % self.session_id),
+        ]
+        self._threads = threads
+        for t in threads:
+            t.start()
 
     def write_stdin(self, raw):
         with self._stdin_lock:
@@ -590,6 +640,7 @@ def _start_pty_session(command, cwd=None, name=None, env=None, shell=True):
         with _SESSIONS_LOCK:
             _SESSIONS[sid] = session
         register_proc(proc)
+        _arm_session_atexit()
         session.start_threads()
         _persist_ledger()
         return ("[session %s started] pid=%s cwd=%s pty=%s\n"
@@ -652,6 +703,7 @@ def tool_start_session(command, cwd=None, name=None, env=None, shell=True,
         with _SESSIONS_LOCK:
             _SESSIONS[sid] = session
         register_proc(proc)
+        _arm_session_atexit()
         session.start_threads()
         _persist_ledger()
         return ("[session %s started] pid=%s cwd=%s\n"
