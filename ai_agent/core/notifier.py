@@ -78,6 +78,27 @@ def _detect_backend():
     return "notify-send" if _shutil.which("notify-send") else "console"
 
 
+def _hidden_window_kwargs():
+    """Return spawn kwargs that hide the helper console window on Windows.
+
+    Without this, spawning ``powershell.exe`` flashes a console window
+    open/closed on every login notification (the "CMD flashes by itself"
+    symptom).  No-op on non-Windows platforms.
+    """
+    if not _platform.system().lower().startswith("win"):
+        return {}
+    kwargs = {}
+    try:
+        si = _subprocess.STARTUPINFO()
+        si.dwFlags |= _subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+        kwargs["startupinfo"] = si
+    except Exception:
+        pass
+    kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+    return kwargs
+
+
 def _run_backend(backend, title, body):
     """Invoke one native backend; returns True on success, never raises."""
     if backend == "notify-send":
@@ -96,7 +117,9 @@ def _run_backend(backend, title, body):
         return False
     try:
         _subprocess.run(cmd, timeout=4,
-                        stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
+                        stdout=_subprocess.DEVNULL,
+                        stderr=_subprocess.DEVNULL,
+                        **_hidden_window_kwargs())
     except Exception:
         return False
     return True
