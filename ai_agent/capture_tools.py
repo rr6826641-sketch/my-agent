@@ -80,6 +80,31 @@ class _Base:
         os.makedirs(self.out, exist_ok=True)
         self._stop = threading.Event()
         self._threads = []
+        self._atexit_armed = False
+
+    def _arm_atexit(self):
+        """Register exactly one atexit stopper per instance.
+
+        Capture modules run on daemon threads.  If nothing stops them, they
+        are still alive while the interpreter finalises and frees their
+        thread state.  A Win32/GDI/ctypes call in flight at that moment
+        re-enters the freed state and Windows reports
+        'Windows fatal exception: access violation' ("<freed thread state>").
+        Arming an atexit stopper tears the threads down *before* teardown.
+        """
+        if not self._atexit_armed:
+            self._atexit_armed = True
+            atexit.register(self.stop)
+
+    def _join_threads(self, timeout=2.0):
+        """Join this module's worker threads (a thread cannot join itself)."""
+        cur = threading.current_thread()
+        for t in list(self._threads):
+            if t is not cur and t.is_alive():
+                try:
+                    t.join(timeout=timeout)
+                except Exception:
+                    pass
 
     def _write(self, name, obj):
         try:
@@ -102,6 +127,7 @@ class ScreenLogger(_Base):
         t = threading.Thread(target=self._loop, name="screencap", daemon=True)
         t.start()
         self._threads.append(t)
+        self._arm_atexit()
         return self
 
     def _loop(self):
@@ -159,6 +185,7 @@ class ScreenLogger(_Base):
 
     def stop(self):
         self._stop.set()
+        self._join_threads()
 
 
 class ClipboardWatch(_Base):
@@ -173,6 +200,7 @@ class ClipboardWatch(_Base):
         t = threading.Thread(target=self._loop, name="clipwatch", daemon=True)
         t.start()
         self._threads.append(t)
+        self._arm_atexit()
         return self
 
     def _loop(self):
@@ -215,6 +243,7 @@ class ClipboardWatch(_Base):
 
     def stop(self):
         self._stop.set()
+        self._join_threads()
 
 
 class WindowTracker(_Base):
@@ -228,6 +257,7 @@ class WindowTracker(_Base):
         t = threading.Thread(target=self._loop, name="wintrack", daemon=True)
         t.start()
         self._threads.append(t)
+        self._arm_atexit()
         return self
 
     def _loop(self):
@@ -250,6 +280,7 @@ class WindowTracker(_Base):
 
     def stop(self):
         self._stop.set()
+        self._join_threads()
 
 
 # --------------------------------------------------------------------------
@@ -307,7 +338,7 @@ class KeylogHook(_Base):
         # Guarantee the hook is released even if the process exits without an
         # explicit stop().  atexit runs on the main thread, so stop() posts
         # WM_QUIT to the hook thread's queue to break its pump first.
-        atexit.register(self.stop)
+        self._arm_atexit()
         deadline = time.time() + 2.0
         while ((self._hook is None) and t.is_alive()
                and time.time() < deadline):
@@ -454,11 +485,7 @@ class KeylogHook(_Base):
         # itself); this makes shutdown deterministic instead of racing the
         # interpreter teardown.
         if tid and kernel32.GetCurrentThreadId() != tid:
-            for t in list(self._threads):
-                try:
-                    t.join(timeout=2.0)
-                except Exception:
-                    pass
+            self._join_threads()
 
 
 # --------------------------------------------------------------------------

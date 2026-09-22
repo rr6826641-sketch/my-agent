@@ -50,3 +50,27 @@ Green: `test_network_resilience.py` (8), `test_redteam_mode.py` (14),
 clipwatch / wintrack) can fault with a Windows access violation during
 interpreter shutdown when a real `Agent()` is built in-process. Unrelated to
 this upgrade; flagged for a follow-up.
+
+## Follow-up fix — capture_tools shutdown access violation (resolved)
+
+The pre-existing issue above (native capture threads faulting at interpreter
+shutdown) is now fixed properly.
+
+- Root cause was NOT only the HHOOK truncation. `ScreenLogger`,
+  `ClipboardWatch` and `WindowTracker` spawned **daemon** threads that never
+  registered an exit handler, so they were still alive while CPython freed
+  their thread state. A Win32/GDI/ctypes call in flight at that moment
+  re-entered the freed state and Windows reported
+  `Windows fatal exception: access violation` (`<freed thread state>`).
+- Fix: `_Base._arm_atexit()` registers exactly one `atexit` stopper per
+  module and `_Base._join_threads()` joins the worker threads (a thread
+  cannot join itself). Every `start()` arms it; every `stop()` sets the
+  stop event and joins. `KeylogHook` now uses the same helper.
+- Verified: a standalone repro that starts the whole `ObservationSuite` and
+  exits **without** calling `stop()` now terminates with zero
+  `access violation` dumps (previously N dump blocks).
+
+Remaining (separate subsystem, not capture_tools): `ai_agent/core/mcp_client.py`
+daemon threads (`_drain_stderr`, `recv`) are still live at interpreter
+teardown and produce the same class of dump in long in-process runs
+(e.g. the full pytest session). Flagged for a follow-up.
