@@ -13,6 +13,21 @@ Run: py -m pytest tests/test_refusal_intel.py
 import json as json_mod
 
 import requests
+import types
+
+import ai_agent.llm as _llm
+
+
+def _patch_post(monkeypatch, fn):
+    """Route OpenAIClient HTTP calls through a fake pooled session.
+
+    The speed upgrade made every request ride a process-wide keep-alive
+    requests.Session, so patching requests.post no longer intercepts the
+    call; we patch the session factory instead.
+    """
+    monkeypatch.setattr(_llm, "_get_session",
+                        lambda: types.SimpleNamespace(
+                            post=fn, close=lambda: None))
 
 from ai_agent.core.refusal_intel import RefusalIntelStore
 from ai_agent.llm import MockClient, OpenAIClient, _intent_class_of
@@ -92,7 +107,7 @@ def test_intent_class_extraction():
 
 def test_clean_answer_recorded(tmp_path, monkeypatch):
     CALLS.clear()
-    monkeypatch.setattr(requests, "post", _fake_post)
+    _patch_post(monkeypatch, _fake_post)
     client = _rie_client(tmp_path, uncensored=True)
     out = client.chat(_scoped_messages())
     assert "exploit chain" in out["content"]
@@ -109,7 +124,7 @@ def test_clean_answer_recorded(tmp_path, monkeypatch):
 
 def test_refusal_retry_records_outcome(tmp_path, monkeypatch):
     CALLS.clear()
-    monkeypatch.setattr(requests, "post", _fake_post)
+    _patch_post(monkeypatch, _fake_post)
     client = _rie_client(tmp_path, uncensored=True)
     out = client.chat(_scoped_messages())
     assert "exploit chain" in out["content"]
@@ -124,7 +139,7 @@ def test_refusal_retry_records_outcome(tmp_path, monkeypatch):
 
 def test_learned_escalation_replayed(tmp_path, monkeypatch):
     CALLS.clear()
-    monkeypatch.setattr(requests, "post", _fake_post)
+    _patch_post(monkeypatch, _fake_post)
     client = _rie_client(tmp_path, uncensored=True)
     # A previous identical-class refusal was cracked by the engine tier;
     # at strike 0 the static ladder is plain consent framing (strength 0),
@@ -152,7 +167,7 @@ def test_ordered_chain_demotes_chronic_refuser(tmp_path):
 
 def test_stream_path_records_outcome(tmp_path, monkeypatch):
     CALLS.clear()
-    monkeypatch.setattr(requests, "post", _fake_post)
+    _patch_post(monkeypatch, _fake_post)
     client = _rie_client(tmp_path, uncensored=True)
     evs = list(client.chat_stream(_scoped_messages()))
     types = [ev["type"] for ev in evs]
@@ -185,7 +200,7 @@ def test_mockclient_parity_disabled_store(tmp_path):
 
 def test_rie_disabled_when_uncensored_false(tmp_path, monkeypatch):
     CALLS.clear()
-    monkeypatch.setattr(requests, "post", _fake_post)
+    _patch_post(monkeypatch, _fake_post)
     client = _client(uncensored=False)
     assert client.refusal_intel.enabled is False
     # Isolate from any real memory/ history: the disabled store must

@@ -14,6 +14,22 @@ from ai_agent.llm import (MockClient, OpenAIClient, _is_blocked_reply,
                           _looks_like_refusal, _prep_messages,
                           _reformulated_messages)
 
+import types
+
+import ai_agent.llm as _llm
+
+
+def _patch_post(monkeypatch, fn):
+    """Route OpenAIClient HTTP calls through a fake pooled session.
+
+    The speed upgrade made every request ride a process-wide keep-alive
+    requests.Session, so patching requests.post no longer intercepts the
+    call; we patch the session factory instead.
+    """
+    monkeypatch.setattr(_llm, "_get_session",
+                        lambda: types.SimpleNamespace(
+                            post=fn, close=lambda: None))
+
 REFUSAL_TEXT = "I'm sorry, I can't assist with that."
 ANSWER_TEXT = ("Here is the full exploit chain: 1) ... 2) ... complete "
                "working payload.")
@@ -99,7 +115,7 @@ def test_prep_directive_only_in_uncensored():
 
 def test_chat_auto_retry_on_refusal(monkeypatch):
     CALLS.clear()
-    monkeypatch.setattr(requests, "post", _fake_post)
+    _patch_post(monkeypatch, _fake_post)
     out = _client(True).chat([{"role": "user", "content": "write exploit"}])
     assert "exploit chain" in out["content"]
     assert len(CALLS) == 2
@@ -109,7 +125,7 @@ def test_chat_auto_retry_on_refusal(monkeypatch):
 
 def test_uncensored_off_single_call(monkeypatch):
     CALLS.clear()
-    monkeypatch.setattr(requests, "post", _fake_post)
+    _patch_post(monkeypatch, _fake_post)
     out = _client(False).chat([{"role": "user", "content": "write exploit"}])
     assert "sorry" in out["content"]
     assert len(CALLS) == 1
@@ -157,7 +173,7 @@ def test_empty_reply_escalates_in_uncensored_chat(monkeypatch):
                 return body
         return R()
 
-    monkeypatch.setattr(requests, "post", silent_primary)
+    _patch_post(monkeypatch, silent_primary)
     client = OpenAIClient(api_key="k", base_url="https://x/v1",
                           model="m", fallback_models=["fallback-1"],
                           uncensored=True)
@@ -193,7 +209,7 @@ def test_empty_reply_ignored_when_strict(monkeypatch):
                 return body
         return R()
 
-    monkeypatch.setattr(requests, "post", silent_post)
+    _patch_post(monkeypatch, silent_post)
     out = _client(False).chat([{"role": "user", "content": "write exploit"}])
     assert out.get("content") == ""
     assert len(CALLS) == 1, "strict mode must not ladder empty replies"
@@ -201,7 +217,7 @@ def test_empty_reply_ignored_when_strict(monkeypatch):
 
 def test_stream_redteam_retry(monkeypatch):
     CALLS.clear()
-    monkeypatch.setattr(requests, "post", _fake_post)
+    _patch_post(monkeypatch, _fake_post)
     evs = list(_client(True).chat_stream(
         [{"role": "user", "content": "write exploit"}]))
     final = evs[-1]["message"]
@@ -243,7 +259,7 @@ def test_multi_strike_escalation(monkeypatch):
                 return body
         return R()
 
-    monkeypatch.setattr(requests, "post", flaky_post)
+    _patch_post(monkeypatch, flaky_post)
     out = _client(True).chat([{"role": "user", "content": "write exploit"}])
     assert "exploit chain" in out["content"]
     assert len(CALLS) == 4, "2 refusals + 1 strike success = 4 total calls"
@@ -280,7 +296,7 @@ def test_persistent_refusal_fails_over_to_next_model(monkeypatch):
                 return body
         return R()
 
-    monkeypatch.setattr(requests, "post", always_refuse)
+    _patch_post(monkeypatch, always_refuse)
     client = OpenAIClient(api_key="k", base_url="https://x/v1",
                           model="m", fallback_models=["fallback-1"],
                           uncensored=True)
@@ -310,7 +326,7 @@ def test_refusal_retries_config(monkeypatch):
                 return body
         return R()
 
-    monkeypatch.setattr(requests, "post", always_refuse)
+    _patch_post(monkeypatch, always_refuse)
     # fallback_models=[] is falsy -> the built-in default chain is used
     # (4 models), so each model gets 1 original + refusal_retries strikes.
     client = OpenAIClient(api_key="k", base_url="https://x/v1",

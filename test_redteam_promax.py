@@ -22,6 +22,21 @@ Run: py -m pytest test_redteam_promax.py
 import json as json_mod
 
 import requests
+import types
+
+import ai_agent.llm as _llm
+
+
+def _patch_post(monkeypatch, fn):
+    """Route OpenAIClient HTTP calls through a fake pooled session.
+
+    The speed upgrade made every request ride a process-wide keep-alive
+    requests.Session, so patching requests.post no longer intercepts the
+    call; we patch the session factory instead.
+    """
+    monkeypatch.setattr(_llm, "_get_session",
+                        lambda: types.SimpleNamespace(
+                            post=fn, close=lambda: None))
 
 from ai_agent.llm import (LLMError, OpenAIClient,
                           UNCENSORED_FALLBACK_MODELS, _full_uncensored_pool)
@@ -254,7 +269,7 @@ def test_refusal_abandon_moves_to_uncensored_pool(monkeypatch):
                 return body
         return R()
 
-    monkeypatch.setattr(requests, "post", always_refuse)
+    _patch_post(monkeypatch, always_refuse)
     client = OpenAIClient(api_key="k", base_url="https://x/v1", model="m",
                           fallback_models=["f-gen"], uncensored=True,
                           uncensored_fallbacks=["u1", "u2"])

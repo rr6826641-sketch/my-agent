@@ -43,6 +43,17 @@ def _ok_response():
     )
 
 
+def _patch_session(monkeypatch, post_fn):
+    """Route _post_with_retry through a fake pooled session.
+
+    The speed upgrade made every request ride a process-wide keep-alive
+    Session, so patching requests.post no longer intercepts the call; we
+    patch the session factory instead.
+    """
+    fake = types.SimpleNamespace(post=post_fn, close=lambda: None)
+    monkeypatch.setattr(llm, "_get_session", lambda: fake)
+
+
 def test_fallback_message_is_exact_ui_sentence():
     assert NETWORK_FALLBACK_MSG == (
         "Internet connection interrupted while reaching "
@@ -66,7 +77,7 @@ def test_transient_timeout_then_success_retries_with_backoff(monkeypatch):
     def fake_sleep(secs):
         sleeps.append(secs)
 
-    monkeypatch.setattr(requests, "post", fake_post)
+    _patch_session(monkeypatch, fake_post)
     monkeypatch.setattr(llm.time, "sleep", fake_sleep)
 
     resp = _post_with_retry("model-x", "http://u", {}, {}, timeout=120,
@@ -75,7 +86,10 @@ def test_transient_timeout_then_success_retries_with_backoff(monkeypatch):
     assert len(calls) == 3                      # 2 fails + 1 success
     assert calls[0] == 120                     # first attempt: full timeout
     assert all(t == 30 for t in calls[1:])     # later attempts: capped at 30s
-    assert sleeps == pytest.approx([0.1, 0.2])  # exponential backoff
+    # jittered exponential backoff: base 0.1 then 0.2, each with up
+    # to +25% random jitter to avoid a synchronized retry stampede
+    assert 0.1 <= sleeps[0] <= 0.125
+    assert 0.2 <= sleeps[1] <= 0.25
 
 
 def test_transient_exhaustion_raises_network_error_fallback(monkeypatch):
@@ -86,23 +100,47 @@ def test_transient_exhaustion_raises_network_error_fallback(monkeypatch):
 
     def fake_post(*a, **k):
         calls.append(1)
-        raise requests.exceptions.ConnectionError(
-            "Failed to resolve host")  # requests wraps DNS failures here
+        raise requests.exceptions.Timeout("read timed out")
 
     def fake_sleep(secs):
         sleeps.append(secs)
 
-    monkeypatch.setattr(requests, "post", fake_post)
+    _patch_session(monkeypatch, fake_post)
     monkeypatch.setattr(llm.time, "sleep", fake_sleep)
 
     with pytest.raises(NetworkError) as ei:
         _post_with_retry("model-x", "http://u", {}, {}, timeout=120,
                          retries=3, backoff=0.1)
     assert len(calls) == 3                      # bounded: no infinite retry loop
-    assert sleeps == pytest.approx([0.1, 0.2])
+    assert 0.1 <= sleeps[0] <= 0.125
+    assert 0.2 <= sleeps[1] <= 0.25
     msg = str(ei.value)
     assert NETWORK_FALLBACK_MSG in msg
     assert "after 3 attempt(s)" in msg
+
+
+def test_permanent_net_error_fails_fast(monkeypatch):
+    """A DNS failure / connection-refused can never succeed on retry, so the
+    speed upgrade fails it immediately instead of burning the backoff budget
+    (~3 s) before the failover chain moves on."""
+    calls = []
+    sleeps = []
+
+    def fake_post(*a, **k):
+        calls.append(1)
+        # requests wraps DNS-resolution failures in ConnectionError
+        raise requests.exceptions.ConnectionError("Failed to resolve host")
+
+    _patch_session(monkeypatch, fake_post)
+    monkeypatch.setattr(llm.time, "sleep", lambda s_: sleeps.append(s_))
+
+    with pytest.raises(NetworkError) as ei:
+        _post_with_retry("model-x", "http://u", {}, {}, timeout=120,
+                         retries=3, backoff=0.1)
+    assert len(calls) == 1                       # no retries for a dead host
+    assert sleeps == []                          # no backoff burned
+    assert NETWORK_FALLBACK_MSG in str(ei.value)
+    assert "after 3 attempt(s)" not in str(ei.value)
 
 
 def test_non_transient_request_error_fails_fast(monkeypatch):
@@ -113,7 +151,7 @@ def test_non_transient_request_error_fails_fast(monkeypatch):
         calls.append(1)
         raise requests.exceptions.InvalidURL("bad url")
 
-    monkeypatch.setattr(requests, "post", fake_post)
+    _patch_session(monkeypatch, fake_post)
 
     with pytest.raises(LLMError) as ei:
         _post_with_retry("model-x", "http://u", {}, {}, timeout=120,

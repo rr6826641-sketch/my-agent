@@ -3,13 +3,17 @@
 MockClient simulates an LLM for offline testing of the agent loop.
 """
 
+import atexit
 import json
 import os
+import random
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
+from requests.adapters import HTTPAdapter
 
 from .core.refusal_intel import RefusalIntelStore
 
@@ -56,16 +60,133 @@ _TRANSIENT_NET_ERRORS = (requests.exceptions.Timeout,
                          requests.exceptions.ChunkedEncodingError)
 
 
+# --------------------------------------------------------------------------- #
+# SPEED UPGRADE: process-wide keep-alive connection pool
+# --------------------------------------------------------------------------- #
+# Every chat call used to be a bare requests.post(), which opens a fresh
+# TCP + TLS handshake on every request. In a failover chain (or a multi-turn
+# engagement) that handshake tax - often 100-400 ms per hop - is paid again
+# and again. One process-wide Session keeps warm keep-alive connections per
+# host, so after the first call to a provider every later call to the same
+# host skips the handshake entirely.
+#
+# max_retries=0 on the adapter: retry policy belongs to _post_with_retry,
+# which distinguishes transient vs. permanent failures and raises the
+# UI-facing NetworkError. Layering urllib3 retries on top would silently
+# multiply the wait.
+_SESSION_LOCK = threading.Lock()
+_SESSION = None
+
+# SPEED UPGRADE: background pool prewarm bookkeeping.
+#
+# Prewarm opens one throwaway keep-alive socket per *unique* host so the very
+# first user turn skips the handshake. It must stay one-shot per host and be
+# joined at exit: spawning a fresh daemon thread per client (tests build many
+# clients) left several threads touching the network stack while the
+# interpreter tore it down, which faulted with a Windows access violation on
+# shutdown. One shot per host + a bounded join closes that race.
+_PREWARM_LOCK = threading.Lock()
+_PREWARMED = set()
+_PREWARM_THREADS = []
+
+
+@atexit.register
+def _join_prewarm_threads():
+    for t in list(_PREWARM_THREADS):
+        try:
+            t.join(0.5)
+        except Exception:
+            pass
+
+# A pooled socket that the OS/upstream already tore down can poison the next
+# request (urllib3 reuses it, the write fails, the request errors). These are
+# the "the socket itself is dead, not the request" signatures - Timeout is
+# deliberately excluded so a slow model is never retried twice per attempt.
+_SOCKET_DEAD_ERRORS = (requests.exceptions.ConnectionError,
+                       requests.exceptions.ChunkedEncodingError)
+
+
+def _get_session():
+    """Return the process-wide keep-alive Session (created on first use)."""
+    global _SESSION
+    if _SESSION is None:
+        with _SESSION_LOCK:
+            if _SESSION is None:
+                session = requests.Session()
+                adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64,
+                                      max_retries=0)
+                session.mount("http://", adapter)
+                session.mount("https://", adapter)
+                _SESSION = session
+    return _SESSION
+
+
+def _reset_session():
+    """Drop and rebuild the pooled session after a hard socket failure.
+
+    Discards every stale socket at once; cheap and safe because a fresh
+    Session simply opens new connections on demand.
+    """
+    global _SESSION
+    with _SESSION_LOCK:
+        old, _SESSION = _SESSION, None
+    if old is not None:
+        try:
+            old.close()
+        except Exception:
+            pass
+
+
+def _session_post(url, headers, payload, timeout, stream):
+    """POST via the pooled session, self-healing once on a dead socket.
+
+    Timeouts propagate untouched (the caller owns backoff). A dead kept-alive
+    socket triggers a one-shot pool rebuild + retry; a DNS failure or
+    connection-refused re-raises at once because a rebuilt pool would only
+    hit the identical permanent error.
+    """
+    session = _get_session()
+    try:
+        return session.post(url, headers=headers, json=payload,
+                            timeout=timeout, stream=stream)
+    except _SOCKET_DEAD_ERRORS as exc:
+        if _is_permanent_net_error(exc):
+            raise
+        _reset_session()
+        return _get_session().post(url, headers=headers, json=payload,
+                                   timeout=timeout, stream=stream)
+
+
+# A DNS-resolution or connection-refused failure means the endpoint itself is
+# unreachable; retrying the identical request cannot succeed, so those raise
+# immediately instead of burning the backoff budget (a dead host in a long
+# failover chain used to cost ~3 s before the next candidate was tried).
+_PERMANENT_NET_MARKERS = (
+    "nameresolutionerror", "name or service not known",
+    "nodename nor servname", "temporary failure in name resolution",
+    "getaddrinfo failed", "failed to resolve", "connection refused",
+    "actively refused",
+)
+
+
+def _is_permanent_net_error(exc):
+    return any(m in str(exc).lower() for m in _PERMANENT_NET_MARKERS)
+
+
 def _post_with_retry(model, url, headers, payload, timeout, stream=False,
-                     retries=3, backoff=1.0):
+                     retries=3, backoff=0.5):
     """POST /chat/completions with bounded exponential-backoff retries.
 
-    Only transient network errors (DNS failure, refused/reset connection,
-    connect or read timeout) are retried, up to `retries` attempts with
-    backoff delays of backoff, backoff*2, ... (default 1s then 2s). When the
-    retries are exhausted a NetworkError is raised carrying the friendly
-    UI fallback message, so the caller never hangs silently and never lets
-    the agent stay stuck in a working state on a dead network.
+    Requests ride the process-wide keep-alive pool (_get_session), so repeat
+    calls to the same provider skip the TCP+TLS handshake. Only *transient*
+    network errors (connect/read timeout, dropped/reset connection) are
+    retried, up to `retries` attempts with jittered delays of backoff,
+    backoff*2, ... (default 0.5 s then 1 s). A DNS failure or
+    connection-refused - which can never succeed on retry - fails fast
+    instead of waiting out the backoff. When the retries are exhausted a
+    NetworkError is raised carrying the friendly UI fallback message, so the
+    caller never hangs silently and never lets the agent stay stuck in a
+    working state on a dead network.
 
     Non-transient request failures (bad URL, etc.) raise LLMError at once.
     """
@@ -76,15 +197,20 @@ def _post_with_retry(model, url, headers, payload, timeout, stream=False,
         # abandoned fast instead of burning minutes per attempt.
         effective = timeout if attempt == 0 else min(float(timeout), 30.0)
         try:
-            return requests.post(url, headers=headers, json=payload,
-                                 timeout=effective, stream=stream)
+            return _session_post(url, headers, payload, effective, stream)
         except _TRANSIENT_NET_ERRORS as exc:
+            if _is_permanent_net_error(exc):
+                raise NetworkError("%s (model '%s'; %s: %s)"
+                                   % (NETWORK_FALLBACK_MSG, model,
+                                      type(exc).__name__, exc))
             attempt += 1
             if attempt >= retries:
                 raise NetworkError("%s (model '%s'; %s after %d attempt(s): "
                                    "%s)" % (NETWORK_FALLBACK_MSG, model,
                                             type(exc).__name__, attempt, exc))
-            time.sleep(delay)
+            # jittered backoff: spreads retries when many candidates walk the
+            # chain at once, avoiding a synchronized retry stampede.
+            time.sleep(delay + random.uniform(0, delay * 0.25))
             delay *= 2
         except requests.exceptions.RequestException as exc:
             raise LLMError("API request failed: %s" % exc)
@@ -362,7 +488,7 @@ def _probe_local_endpoint(spec):
         ak = str(spec.get("api_key") or "").strip()
         if ak:
             headers["Authorization"] = "Bearer " + ak
-        resp = requests.get(
+        resp = _get_session().get(
             url, timeout=float(spec.get("timeout") or 3.0),
             headers=headers)
         if resp.status_code != 200:
@@ -793,6 +919,41 @@ class OpenAIClient:
         # learns per-intent model reliability + winning escalation text and
         # replays them across restarts (memory/refusal_intel.json).
         self.refusal_intel = RefusalIntelStore(enabled=bool(self.uncensored))
+        # SPEED UPGRADE: warm the keep-alive pool for the primary host in the
+        # background so the very first user turn skips the DNS + TCP + TLS
+        # handshake. Best-effort and non-blocking: a failure here is silently
+        # ignored and the normal path still opens the connection on demand.
+        self._prewarm_pool()
+
+    def _prewarm_pool(self):
+        """Best-effort background warm-up of the pooled session.
+
+        Opens (and keeps alive) a connection to the primary base_url on a
+        daemon thread so the first real request reuses an already-negotiated
+        socket. Never raises, never blocks the constructor.
+        """
+        base = (self.base_url or "").rstrip("/")
+        if not base:
+            return
+        # One shot per unique host per process: a second client pointed at the
+        # same base already has a warm socket and must not spawn another thread.
+        with _PREWARM_LOCK:
+            if base in _PREWARMED:
+                return
+            _PREWARMED.add(base)
+
+        def _warm():
+            try:
+                _get_session().get(base + "/models", timeout=5.0)
+            except Exception:
+                pass
+
+        try:
+            t = threading.Thread(target=_warm, daemon=True, name="llm-prewarm")
+            _PREWARM_THREADS.append(t)
+            t.start()
+        except Exception:
+            pass
 
     def _effective_fallbacks(self):
         """Fallback chain for this call: uncensored pool first (opt-in),
@@ -883,11 +1044,27 @@ class OpenAIClient:
             self._local_probe_at = now + self.local_probe_ttl
             route = {}
             cloud_base = (self.base_url or "").rstrip("/")
+            targets = []
             for spec in self._local_endpoints:
                 base = (spec.get("base_url") or "").rstrip("/")
                 if not base or base == cloud_base:
                     continue
-                for mid in _probe_local_endpoint(spec):
+                targets.append((base, spec))
+            # SPEED UPGRADE: probe every local endpoint concurrently. Each
+            # probe can burn its own timeout on a machine that simply does
+            # not run Ollama/LM Studio; doing them one-by-one made a cold
+            # start wait the SUM of every dead endpoint's timeout. Racing
+            # them means the whole refresh costs the slowest single probe.
+            if len(targets) > 1:
+                with ThreadPoolExecutor(max_workers=min(8, len(targets))) as ex:
+                    probed = list(ex.map(
+                        lambda t: (t[0], t[1], _probe_local_endpoint(t[1])),
+                        targets))
+            else:
+                probed = [(b, s, _probe_local_endpoint(s))
+                          for b, s in targets]
+            for base, spec, models in probed:
+                for mid in models:
                     if mid and mid not in route:
                         route[mid] = (base, str(spec.get("api_key") or ""))
             self._local_route = route
