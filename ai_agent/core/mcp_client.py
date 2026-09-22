@@ -36,6 +36,7 @@ as another Channel subclass without touching any other layer.
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import os
@@ -43,9 +44,43 @@ import re
 import subprocess
 import threading
 import time
+import weakref
 from typing import Any, Callable, Dict, List, Optional
 
 log = logging.getLogger("ai_agent.mcp")
+
+# ---------------------------------------------------------------------------
+# Process-exit teardown registry
+# ---------------------------------------------------------------------------
+#
+# An MCP stdio channel spawns a child process plus a stderr-draining daemon
+# thread.  If nothing closes the client before the interpreter finalises,
+# that daemon thread can still be inside a native pipe read while Python
+# frees its thread state, which Windows reports as
+# 'Windows fatal exception: access violation' ("<freed thread state>").
+# We keep a weak registry of live clients and close them all via atexit,
+# mirroring the capture_tools teardown approach.
+_LIVE_CLIENTS: "weakref.WeakSet[McpClient]" = weakref.WeakSet()
+_ATEXIT_ARMED = False
+_ATEXIT_LOCK = threading.Lock()
+
+
+def _close_all_clients() -> None:
+    """atexit hook: close every still-live MCP client (child + drain thread)."""
+    for client in list(_LIVE_CLIENTS):
+        try:
+            client.close()
+        except Exception:
+            pass
+
+
+def _arm_atexit() -> None:
+    """Register the process-exit teardown hook exactly once."""
+    global _ATEXIT_ARMED
+    with _ATEXIT_LOCK:
+        if not _ATEXIT_ARMED:
+            _ATEXIT_ARMED = True
+            atexit.register(_close_all_clients)
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -169,6 +204,7 @@ class StdioChannel(JsonRpcChannel):
         self._proc: Optional[subprocess.Popen] = None
         self._lock = threading.RLock()
         self._read_lock = threading.Lock()
+        self._stderr_thread: Optional[threading.Thread] = None
         self._eof = False
 
     # -- lifecycle ---------------------------------------------------------
@@ -195,7 +231,9 @@ class StdioChannel(JsonRpcChannel):
                 "failed to spawn mcp server %r: %s" % (self._command, exc)
             ) from exc
         if self._proc.stderr is not None:
-            threading.Thread(target=self._drain_stderr, daemon=True).start()
+            self._stderr_thread = threading.Thread(
+                target=self._drain_stderr, name="mcp-stderr-drain", daemon=True)
+            self._stderr_thread.start()
         log.debug("mcp stdio channel up: %s %s", self._command, self._args)
         return self
 
@@ -259,22 +297,35 @@ class StdioChannel(JsonRpcChannel):
 
     def close(self) -> None:
         proc, self._proc = self._proc, None
-        if proc is None:
-            return
-        try:
-            if proc.stdin is not None:
-                proc.stdin.close()
-        except Exception:
-            pass
-        try:
-            proc.terminate()
-        except Exception:
-            pass
-        try:
-            proc.wait(timeout=5)
-        except Exception:
+        thread, self._stderr_thread = self._stderr_thread, None
+        if proc is not None:
             try:
-                proc.kill()
+                if proc.stdin is not None:
+                    proc.stdin.close()
+            except Exception:
+                pass
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                try:
+                    proc.wait(timeout=2)
+                except Exception:
+                    pass
+        # Join the stderr-drain daemon thread so it is not still executing a
+        # native pipe read when the interpreter frees its thread state (the
+        # '<freed thread state>' access violation on Windows). A thread can
+        # never join itself.
+        if thread is not None and thread is not threading.current_thread():
+            try:
+                thread.join(timeout=2)
             except Exception:
                 pass
 
@@ -524,6 +575,10 @@ class McpClient:
         self._tools_at: float = 0.0
         self._tools_ttl: float = 5.0  # seconds; refresh after expiry
         self.live_tool_map: Optional[Dict[str, Any]] = None
+        # Track this client so the atexit hook can tear its transport down
+        # before interpreter finalisation (see _close_all_clients).
+        _LIVE_CLIENTS.add(self)
+        _arm_atexit()
 
     # ------------------------------------------------------------------
     # Connection lifecycle
@@ -821,6 +876,10 @@ class McpClient:
         except Exception:
             pass
         self._connected = False
+        try:
+            _LIVE_CLIENTS.discard(self)
+        except Exception:
+            pass
 
     def __enter__(self) -> "McpClient":
         return self.connect()

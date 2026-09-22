@@ -74,3 +74,32 @@ Remaining (separate subsystem, not capture_tools): `ai_agent/core/mcp_client.py`
 daemon threads (`_drain_stderr`, `recv`) are still live at interpreter
 teardown and produce the same class of dump in long in-process runs
 (e.g. the full pytest session). Flagged for a follow-up.
+
+## Follow-up fix — mcp_client shutdown access violation (resolved)
+
+The remaining subsystem flagged above (`ai_agent/core/mcp_client.py`) is now
+fixed.
+
+- Root cause: `StdioChannel.open()` started `_drain_stderr` as a **daemon**
+  thread whose only reference was local, and `McpClient.close()` existed but
+  **nothing called it at process exit**. On interpreter finalisation the
+  drain thread could still be inside a blocking native pipe read while
+  CPython freed its thread state -> `Windows fatal exception: access
+  violation` (`<freed thread state>`), identical to the capture_tools class
+  of crash.
+- Fix in `ai_agent/core/mcp_client.py`:
+  1. `StdioChannel` now keeps `self._stderr_thread`; `close()` terminates the
+     child, then **joins** the drain thread (bounded 2 s, and never joins
+     itself).
+  2. A module-level weak registry `_LIVE_CLIENTS` + a single `atexit` hook
+     (`_close_all_clients`) tears down every still-live `McpClient` before
+     interpreter finalisation, mirroring the `capture_tools` approach.
+     `McpClient.__init__` self-registers and arms the hook once;
+     `McpClient.close()` removes itself from the registry.
+- Verified: `poc_mcp_shutdown_check.py` (stderr-drain joined on close;
+  registry self-registers/clears) and `poc_mcp_atexit_check.py` (connected
+  client exits **without** explicit `close()`) both terminate with zero
+  access-violation dumps. `tests/test_mcp_client.py` + 1 passed.
+- Note: 3 failures in `tests/test_mcp_runtime_wiring.py` are pre-existing and
+  unrelated (an ambient `local-fs` server spec leaks in from the environment;
+  identical failures on the unmodified tree).
