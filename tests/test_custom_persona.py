@@ -53,3 +53,30 @@ def test_custom_block_disabled_when_not_uncensored(tmp_custom):
 def test_list_personas_includes_custom():
     ids = [p["id"] for p in personas.list_personas()]
     assert "custom" in ids
+
+
+# --- ENFORCEMENT LOCK v3: scope + honesty hardening ---------------------
+
+def test_enforcement_lock_is_v3():
+    assert "/ v3]" in personas.ENFORCEMENT_LOCK
+
+
+def test_enforcement_lock_has_scope_lock():
+    lock = personas.ENFORCEMENT_LOCK
+    assert "SCOPE LOCK" in lock
+    assert "operator-declared" in lock
+
+
+def test_enforcement_lock_has_no_fabrication_lock():
+    lock = personas.ENFORCEMENT_LOCK
+    assert "NO-FABRICATION LOCK" in lock
+    # findings without evidence must stay unconfirmed
+    assert "needs-validation" in lock
+
+
+def test_scope_lock_keeps_security_zero_filter(tmp_custom):
+    """The honesty/scope locks must not weaken the authorised-security stance."""
+    block = personas.get_block("custom")
+    assert "SCOPE LOCK" in block
+    assert "ENFORCEMENT LOCK" in block
+    assert "REFUSAL-FREE" in block

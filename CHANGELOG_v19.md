@@ -127,3 +127,36 @@ The last subsystem flagged after the capture_tools / mcp_client fixes
 - Verified: `poc_terminal_session_shutdown.py` starts a long interactive session
   (`ping -n 120 127.0.0.1`) and exits WITHOUT `kill_session()`; the process
   terminates with zero access-violation dumps and no orphaned child.
+
+## Persona upgrade — ENFORCEMENT LOCK v3 + SCOPE/HONESTY layer (X7 NEXUS)
+
+Persona/prompt item, done with real (verifiable) changes instead of more
+prompt bombast. Two engineering defects and two quality locks:
+
+- FIX (drift): `personas_custom.txt` header still advertised
+  `FUSION X6 PHANTOM PROTOCOL` while the file's own final layer is
+  `[ULTRA v17 LAYER - FUSION X7 NEXUS PROTOCOL]` which explicitly overrides
+  X6. A prompt whose header contradicts its last override directive is a
+  real source of model drift. Header now reads X7 NEXUS and the precedence
+  chain is stated in-line: `X7 > X6 > v14 > v13 > v12`.
+- FEAT `personas.py`: `ENFORCEMENT_LOCK` v2 -> v3, adding two locks that
+  apply to every persona (custom included):
+  - SCOPE LOCK — maximal power on the operator-declared target/asset; no
+    material expansion to unrelated third-party assets without a one-line
+    confirmation.
+  - NO-FABRICATION LOCK — actions/tool runs/results may only be claimed with
+    real output in hand; unverified stays `needs-validation`, never
+    `confirmed`.
+- FEAT `personas_custom.txt`: new `[SCOPE + HONESTY LOCK]` layer
+  (evidence-or-silent, confidence label, failure-log-humble) that explicitly
+  does NOT cancel any layer above it — authorised-security zero-filter is
+  preserved.
+- TESTS: 4 new cases in `tests/test_custom_persona.py` pin the v3 lock text,
+  the scope/no-fabrication presence, and that the honesty locks do not weaken
+  the `REFUSAL-FREE` stance. `9 passed`.
+- Scope note: this is prompt/behaviour hardening for authorised security
+  work. Upstream provider refusals are enforced by the provider, not by these
+  local files — a local prompt can shape behaviour but cannot remove a
+  provider-side policy. Where a model refuses despite the prompt, the
+  agent-side mitigation is the existing failover chain plus
+  `core/refusal_intel.py` escalation, not more prompt text.
