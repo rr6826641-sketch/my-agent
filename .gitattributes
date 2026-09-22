@@ -1,2 +1,4 @@
 # Force LF for shell scripts so Docker builds work from Windows checkouts
 *.sh text eol=lf
+*.exe filter=lfs diff=lfs merge=lfs -text
+*.zip filter=lfs diff=lfs merge=lfs -text
