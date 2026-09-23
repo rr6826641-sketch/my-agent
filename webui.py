@@ -817,6 +817,10 @@ def _login_notify(method):
     """STEP 3/4: fire an OS desktop notification for a successful login.
     Lazy import so webui.py still boots if the notifier is unavailable;
     never raises - auth success must not be blocked by a toast error."""
+
+    import os as _os
+    if str(_os.getenv("AGENT_LOGIN_NOTIFY", "0")).strip().lower() not in ("1", "true", "yes", "on"):
+        return
     try:
         from ai_agent.core.notifier import notify_login
         notify_login(method)
