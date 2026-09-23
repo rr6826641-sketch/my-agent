@@ -515,6 +515,28 @@ rakho aur `.env` ka `AGENT_API_KEY` usi key se replace karo.
 
 ## ✅ Naya kya hai (HackerAI-style upgrade)
 
+### 🚀 v21 — ULTRA OPS PACK · coverage + chain-quality + evidence + reliability
+
+Add-only capability upgrade (`ai_agent/tools/ultra_ops.py`) — **kuch bhi delete/replace nahi kiya**, sirf naye tools + quality layer add kiye. Registry total ab **328 tools**.
+
+- **10 naye pentest tools** (v20 me jo coverage gaps the):
+  - `subdomain_takeover` — dangling-CNAME + provider "unclaimed" fingerprinting (S3/GitHub Pages/Heroku/Azure/Fastly/Netlify/Shopify...)
+  - `cache_poison_scan` — web cache poisoning (unkeyed headers) + cache deception probe
+  - `proto_pollution_test` — client/server-side prototype pollution (`__proto__` / `constructor[prototype]`)
+  - `crlf_inject_test` — CRLF / response-header injection (X-Injected canary)
+  - `host_header_inject` — Host-header poisoning (reset/cache/routing)
+  - `rate_limit_test` — bounded throttle/lockout mapping (count hard-capped 50)
+  - `ldap_inject_test` / `xpath_inject_test` — LDAP/XPath injection with baseline diffing
+  - `http2_support_check` — ALPN `h2` recon for Rapid Reset (CVE-2023-44487) scoping (DoS primitive khud nahi karta)
+  - `param_mine` — hidden-parameter discovery via response diffing
+- **Chain quality** — `chain_quality_score`: exploit chain ko stage-coverage, per-hop evidence, prerequisite realism, PoC verification aur impact par score karta hai (0-100 + grade A-F + suggestions)
+- **Evidence discipline** — `evidence_capture` (bounded, redacted baseline+exploit pair + behavioural diff), `evidence_ledger` (index), `evidence_redact` (secrets scrub)
+- **Reliability** — `retry_probe` (jittered backoff, sirf transient par retry) + `self_healthcheck` (registry integrity audit: duplicate names / empty desc / bad schema)
+- **Tests** — nayi `test_ultra_ops.py` suite (27 pure-logic tests, sab pass); registry schema sab valid
+- **Version bump** — `__version__` → `21.0.0`
+
+---
+
 ### 🚀 v20 — OMEGA SINGULARITY X8 · ULTRA EXTRA ULTRA POWERFUL (default tier)
 
 - **New peak persona `ultrax8` — OMEGA SINGULARITY (default)**, X7 NEXUS DELTA ko bhi supersede karta hai aur evil.gpt / fable5 / mythos / dig.one / dig.two / dig.three / dig.four sab ko cross karta hai

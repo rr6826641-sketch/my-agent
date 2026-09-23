@@ -248,6 +248,17 @@ from .workspace import (
     tool_workspace_query, tool_workspace_export,
 )
 
+# --- v21 Ultra capability pack (add-only; see tools/ultra_ops.py) ----------
+from .ultra_ops import (
+    tool_subdomain_takeover, tool_cache_poison_scan,
+    tool_proto_pollution_test, tool_crlf_inject_test,
+    tool_host_header_inject, tool_rate_limit_test,
+    tool_ldap_inject_test, tool_xpath_inject_test,
+    tool_http2_support_check, tool_param_mine,
+    chain_quality_score, tool_evidence_capture, tool_evidence_ledger,
+    tool_evidence_redact, tool_retry_probe, tool_self_healthcheck,
+)
+
 from .base import Tool as _Tool  # noqa: F401
 
 
@@ -4253,6 +4264,231 @@ Tool("load_skill", "Load a full methodology guide for one skill into "
          "capabilities, screen size, recordings & captures lists.",
          {"type": "object", "properties": {}, "required": []},
          lambda: tool_desktop_status()))
+
+    # ---- v21 Ultra capability pack (tools/ultra_ops.py) ------------------
+    # 1. NEW PENTEST TOOLS (web/API coverage gaps)
+    REGISTRY.append(Tool("subdomain_takeover",
+         "Ultra pack: detect dangling CNAMEs pointing at unclaimed third-party "
+         "services (S3, GitHub Pages, Heroku, Azure, Fastly, Netlify, Shopify, "
+         "...) via CNAME resolution + provider 'unclaimed' body fingerprinting.",
+         {"type": "object",
+          "properties": {
+              "targets": _str_prop("comma/newline-separated hostnames"),
+              "timeout": {"type": "integer", "default": 10},
+              "probe_http": {"type": "boolean", "default": True,
+                              "description": "also fetch the host for the "
+                                             "provider unclaimed signature"}},
+          "required": ["targets"]},
+         lambda targets="", timeout=10, probe_http=True:
+                tool_subdomain_takeover(targets=targets,
+                                        timeout=int(timeout or 10),
+                                        probe_http=_as_bool(probe_http, True))))
+    REGISTRY.append(Tool("cache_poison_scan",
+         "Ultra pack: web cache poisoning + cache deception probes. Sends "
+         "unkeyed-header payloads and flags reflection into body/Location/"
+         "cache headers. Read-only, one request per probe.",
+         {"type": "object",
+          "properties": {
+              "url": _str_prop("target URL"),
+              "method": _str_prop("HTTP method", "GET"),
+              "timeout": {"type": "integer", "default": 10},
+              "deception": {"type": "boolean", "default": True}},
+          "required": ["url"]},
+         lambda url="", method="GET", timeout=10, deception=True:
+                tool_cache_poison_scan(url=url, method=method,
+                                       timeout=int(timeout or 10),
+                                       deception=_as_bool(deception, True))))
+    REGISTRY.append(Tool("proto_pollution_test",
+         "Ultra pack: client/server-side prototype pollution probes "
+         "(__proto__ / constructor[prototype]) with a unique marker.",
+         {"type": "object",
+          "properties": {
+              "url": _str_prop("target URL"),
+              "param": _str_prop("parameter to inject (optional)"),
+              "method": _str_prop("HTTP method", "GET"),
+              "timeout": {"type": "integer", "default": 10}},
+          "required": ["url"]},
+         lambda url="", param="", method="GET", timeout=10:
+                tool_proto_pollution_test(url=url, param=param, method=method,
+                                          timeout=int(timeout or 10))))
+    REGISTRY.append(Tool("crlf_inject_test",
+         "Ultra pack: CRLF / HTTP response-header injection probe using a "
+         "canary header (X-Injected).",
+         {"type": "object",
+          "properties": {
+              "url": _str_prop("target URL"),
+              "param": _str_prop("parameter to inject (optional)"),
+              "method": _str_prop("HTTP method", "GET"),
+              "data": _str_prop("request body (optional)"),
+              "timeout": {"type": "integer", "default": 10}},
+          "required": ["url"]},
+         lambda url="", param="", method="GET", data="", timeout=10:
+                tool_crlf_inject_test(url=url, param=param, method=method,
+                                      data=data, timeout=int(timeout or 10))))
+    REGISTRY.append(Tool("host_header_inject",
+         "Ultra pack: Host-header poisoning probe (password-reset / cache / "
+         "routing) across attacker-controlled Host variants.",
+         {"type": "object",
+          "properties": {
+              "url": _str_prop("target URL"),
+              "method": _str_prop("HTTP method", "GET"),
+              "timeout": {"type": "integer", "default": 10}},
+          "required": ["url"]},
+         lambda url="", method="GET", timeout=10:
+                tool_host_header_inject(url=url, method=method,
+                                        timeout=int(timeout or 10))))
+    REGISTRY.append(Tool("rate_limit_test",
+         "Ultra pack: map throttle / lockout behaviour with a small bounded "
+         "burst (count hard-capped at 50). In-scope targets only.",
+         {"type": "object",
+          "properties": {
+              "url": _str_prop("target URL"),
+              "method": _str_prop("HTTP method", "GET"),
+              "data": _str_prop("request body (optional)"),
+              "count": {"type": "integer", "default": 15},
+              "timeout": {"type": "integer", "default": 10},
+              "delay": {"type": "number", "default": 0.0}},
+          "required": ["url"]},
+         lambda url="", method="GET", data="", count=15, timeout=10,
+                delay=0.0:
+                tool_rate_limit_test(url=url, method=method, data=data,
+                                     count=int(count or 15),
+                                     timeout=int(timeout or 10),
+                                     delay=float(delay or 0.0))))
+    REGISTRY.append(Tool("ldap_inject_test",
+         "Ultra pack: LDAP injection probes (wildcard/metacharacter filter "
+         "break-out) with baseline response diffing.",
+         {"type": "object",
+          "properties": {
+              "url": _str_prop("target URL"),
+              "param": _str_prop("parameter to inject (optional)"),
+              "method": _str_prop("HTTP method", "GET"),
+              "data": _str_prop("request body (optional)"),
+              "timeout": {"type": "integer", "default": 10}},
+          "required": ["url"]},
+         lambda url="", param="", method="GET", data="", timeout=10:
+                tool_ldap_inject_test(url=url, param=param, method=method,
+                                      data=data, timeout=int(timeout or 10))))
+    REGISTRY.append(Tool("xpath_inject_test",
+         "Ultra pack: XPath injection probes (boolean/tautology payloads) "
+         "with baseline response diffing.",
+         {"type": "object",
+          "properties": {
+              "url": _str_prop("target URL"),
+              "param": _str_prop("parameter to inject (optional)"),
+              "method": _str_prop("HTTP method", "GET"),
+              "data": _str_prop("request body (optional)"),
+              "timeout": {"type": "integer", "default": 10}},
+          "required": ["url"]},
+         lambda url="", param="", method="GET", data="", timeout=10:
+                tool_xpath_inject_test(url=url, param=param, method=method,
+                                       data=data, timeout=int(timeout or 10))))
+    REGISTRY.append(Tool("http2_support_check",
+         "Ultra pack: recon whether a TLS endpoint negotiates HTTP/2 (ALPN "
+         "h2) to scope an HTTP/2 Rapid Reset (CVE-2023-44487) test. Does NOT "
+         "perform the DoS primitive.",
+         {"type": "object",
+          "properties": {
+              "target": _str_prop("host[:port]"),
+              "port": {"type": "integer", "default": 443},
+              "timeout": {"type": "integer", "default": 8}},
+          "required": ["target"]},
+         lambda target="", port=443, timeout=8:
+                tool_http2_support_check(target=target, port=int(port or 443),
+                                         timeout=int(timeout or 8))))
+    REGISTRY.append(Tool("param_mine",
+         "Ultra pack: discover hidden parameters by response-diffing against "
+         "a baseline (supplied list or built-in common set). Bounded.",
+         {"type": "object",
+          "properties": {
+              "url": _str_prop("target URL"),
+              "method": _str_prop("HTTP method", "GET"),
+              "timeout": {"type": "integer", "default": 8},
+              "params": _str_prop("candidate params (comma-sep, optional)"),
+              "max_params": {"type": "integer", "default": 40}},
+          "required": ["url"]},
+         lambda url="", method="GET", timeout=8, params="", max_params=40:
+                tool_param_mine(url=url, method=method,
+                                timeout=int(timeout or 8), params=params,
+                                max_params=int(max_params or 40))))
+
+    # 2. CHAIN QUALITY
+    REGISTRY.append(Tool("chain_quality_score",
+         "Ultra pack: score an exploit chain {hops:[...]} (or a hop list) on "
+         "stage coverage, per-hop evidence, prerequisite realism, PoC "
+         "verification and demonstrated impact. Returns 0-100 + grade + "
+         "suggestions.",
+         {"type": "object",
+          "properties": {
+              "chain": _str_prop("chain JSON: {hops:[{stage,action,"
+                                "evidence,status,requires,impact}...]}")},
+          "required": ["chain"]},
+         lambda chain="": chain_quality_score(chain)))
+
+    # 3. EVIDENCE DISCIPLINE
+    REGISTRY.append(Tool("evidence_capture",
+         "Ultra pack: capture a bounded, redacted baseline+exploit request/"
+         "response pair to evidence/<label>/ with a behavioural diff. Specs "
+         "are JSON: {url,method,headers,data}.",
+         {"type": "object",
+          "properties": {
+              "label": _str_prop("bundle label"),
+              "baseline": _str_prop("baseline request spec (JSON)"),
+              "exploit": _str_prop("exploit request spec (JSON)"),
+              "timeout": {"type": "integer", "default": 10},
+              "redact": {"type": "boolean", "default": True}},
+          "required": ["baseline", "exploit"]},
+         lambda label="", baseline="", exploit="", timeout=10, redact=True:
+                tool_evidence_capture(label=label, baseline=baseline,
+                                      exploit=exploit,
+                                      timeout=int(timeout or 10),
+                                      redact=_as_bool(redact, True))))
+    REGISTRY.append(Tool("evidence_ledger",
+         "Ultra pack: list saved evidence bundles (newest first) for report "
+         "traceability.",
+         {"type": "object",
+          "properties": {"limit": {"type": "integer", "default": 50}},
+          "required": []},
+         lambda limit=50: tool_evidence_ledger(limit=int(limit or 50))))
+    REGISTRY.append(Tool("evidence_redact",
+         "Ultra pack: scrub secrets (secret headers, JWTs, bearer tokens, "
+         "key=value secrets + extra regex) from a saved evidence file, "
+         "writing <name>.redacted.",
+         {"type": "object",
+          "properties": {
+              "path": _str_prop("evidence file path"),
+              "extra_patterns": _str_prop("extra regexes (comma-sep)")},
+          "required": ["path"]},
+         lambda path="", extra_patterns="":
+                tool_evidence_redact(path=path, extra_patterns=extra_patterns)))
+
+    # 4. RELIABILITY
+    REGISTRY.append(Tool("retry_probe",
+         "Ultra pack: transient-aware HTTP probe with jittered exponential "
+         "backoff (retries only on connection/timeout/5xx/429).",
+         {"type": "object",
+          "properties": {
+              "url": _str_prop("target URL"),
+              "method": _str_prop("HTTP method", "GET"),
+              "attempts": {"type": "integer", "default": 3},
+              "base_delay": {"type": "number", "default": 0.5},
+              "data": _str_prop("request body (optional)"),
+              "timeout": {"type": "integer", "default": 8}},
+          "required": ["url"]},
+         lambda url="", method="GET", attempts=3, base_delay=0.5, data="",
+                timeout=8:
+                tool_retry_probe(url=url, method=method,
+                                 attempts=int(attempts or 3),
+                                 base_delay=float(base_delay or 0.5),
+                                 data=(data or None),
+                                 timeout=int(timeout or 8))))
+    REGISTRY.append(Tool("self_healthcheck",
+         "Ultra pack: audit the live tool registry for integrity problems "
+         "(duplicate names, empty descriptions, non-callable handlers, "
+         "malformed schemas).",
+         {"type": "object", "properties": {}, "required": []},
+         lambda: tool_self_healthcheck()))
+
     global _REGISTRY, _BUILTIN_NAMES
     _BUILTIN_NAMES = {t.name for t in REGISTRY}
     with _SYNTHESIZED_LOCK:
