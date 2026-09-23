@@ -62,6 +62,58 @@ kernel32.GetCurrentThreadId.argtypes = []
 kernel32.GetModuleHandleW.restype = ctypes.c_void_p
 kernel32.GetModuleHandleW.argtypes = [ctypes.c_void_p]
 
+# Clipboard / GDI / foreground-window prototypes (64-bit pointer safety).
+# GetClipboardData, GlobalLock and the GDI object handles are POINTERS.  An
+# undeclared restype defaults to a 32-bit int, so the returned 64-bit handle
+# was silently truncated; dereferencing the truncated pointer (GlobalLock /
+# wstring_at, or passing the hdc/bmp to GDI) made Windows raise
+# "access violation" on the clipboard-watch thread.  Declaring the exact
+# prototypes fixes it.
+user32.OpenClipboard.restype = ctypes.c_bool
+user32.OpenClipboard.argtypes = [ctypes.c_void_p]
+user32.CloseClipboard.restype = ctypes.c_bool
+user32.CloseClipboard.argtypes = []
+user32.IsClipboardFormatAvailable.restype = ctypes.c_bool
+user32.IsClipboardFormatAvailable.argtypes = [ctypes.c_uint]
+user32.GetClipboardData.restype = ctypes.c_void_p
+user32.GetClipboardData.argtypes = [ctypes.c_uint]
+user32.GetForegroundWindow.restype = ctypes.c_void_p
+user32.GetForegroundWindow.argtypes = []
+user32.GetWindowDC.restype = ctypes.c_void_p
+user32.GetWindowDC.argtypes = [ctypes.c_void_p]
+user32.ReleaseDC.restype = ctypes.c_int
+user32.ReleaseDC.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+user32.GetWindowThreadProcessId.restype = ctypes.c_uint
+user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+user32.GetWindowTextW.restype = ctypes.c_int
+user32.GetWindowTextW.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
+user32.GetSystemMetrics.restype = ctypes.c_int
+user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+kernel32.GlobalLock.restype = ctypes.c_void_p
+kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+kernel32.GlobalUnlock.restype = ctypes.c_bool
+kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+
+_gdi32 = ctypes.windll.gdi32
+_gdi32.CreateCompatibleDC.restype = ctypes.c_void_p
+_gdi32.CreateCompatibleDC.argtypes = [ctypes.c_void_p]
+_gdi32.CreateCompatibleBitmap.restype = ctypes.c_void_p
+_gdi32.CreateCompatibleBitmap.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+_gdi32.SelectObject.restype = ctypes.c_void_p
+_gdi32.SelectObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_gdi32.BitBlt.restype = ctypes.c_bool
+_gdi32.BitBlt.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                          ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+                          ctypes.c_uint]
+_gdi32.GetDIBits.restype = ctypes.c_int
+_gdi32.GetDIBits.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint,
+                             ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p,
+                             ctypes.c_uint]
+_gdi32.DeleteDC.restype = ctypes.c_bool
+_gdi32.DeleteDC.argtypes = [ctypes.c_void_p]
+_gdi32.DeleteObject.restype = ctypes.c_bool
+_gdi32.DeleteObject.argtypes = [ctypes.c_void_p]
+
 _EV_KEYDOWN = 0x0100
 _WH_KEYBOARD_LL = 13
 _WM_QUIT = 0x0012
@@ -97,14 +149,30 @@ class _Base:
             atexit.register(self.stop)
 
     def _join_threads(self, timeout=2.0):
-        """Join this module's worker threads (a thread cannot join itself)."""
+        """Join this module's worker threads (a thread cannot join itself).
+
+        A worker can be inside a Win32/GDI/ctypes call that cannot be
+        interrupted, so a single short join() may return while that native
+        call is still in flight; the thread is freed mid-call during
+        interpreter shutdown and Windows reports an access violation.  Join
+        against a wall-clock deadline and re-poll so a thread that finishes
+        one native call still gets a chance to observe the stop flag and
+        exit cleanly before teardown.
+        """
+        import time
         cur = threading.current_thread()
+        deadline = time.monotonic() + max(0.1, float(timeout))
         for t in list(self._threads):
-            if t is not cur and t.is_alive():
+            if t is cur:
+                continue
+            while t.is_alive():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
                 try:
-                    t.join(timeout=timeout)
+                    t.join(timeout=remaining)
                 except Exception:
-                    pass
+                    break
 
     def _write(self, name, obj):
         try:
@@ -140,6 +208,8 @@ class ScreenLogger(_Base):
 
     def shot(self):
         """Capture via GDI (no PIL/win32api needed) -> BMP in out dir."""
+        if self._stop.is_set():
+            return None
         if self._count >= self.max_shots:
             self._stop.set()
             return None

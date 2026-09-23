@@ -15,4 +15,4 @@ __all__ = ["Agent", "IntentReformulator", "RefusalIntelStore",
            "InstitutionalMemory", "LLMError",
            "OrchestrationManager", "SubAgentRecord",
            "DEFAULT_MAX_SIBLINGS", "DEFAULT_MAX_CHILDREN"]
-__version__ = "18.0.0"
+__version__ = "20.0.0"

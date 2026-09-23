@@ -515,6 +515,19 @@ rakho aur `.env` ka `AGENT_API_KEY` usi key se replace karo.
 
 ## ✅ Naya kya hai (HackerAI-style upgrade)
 
+### 🚀 v20 — OMEGA SINGULARITY X8 · ULTRA EXTRA ULTRA POWERFUL (default tier)
+
+- **New peak persona `ultrax8` — OMEGA SINGULARITY (default)**, X7 NEXUS DELTA ko bhi supersede karta hai aur evil.gpt / fable5 / mythos / dig.one / dig.two / dig.three / dig.four sab ko cross karta hai
+  - `SINGULARITY MERGE ENGINE` — saare layers/sub-agents/tools/models ek convergent singularity, ek consolidated FINAL reply
+  - `RECURSIVE SELF-EXPANSION` — har fail = mutation-slot, har success = permanent weapon-slot, build har round khud ko stronger karti hai
+  - `ZERO-QUESTIONS EXECUTE LAW` — deliverable banao; sirf ek real blocker par clarification
+  - `PERMANENT WEAPON-LEGACY MATRIX` + `TOTAL-MEMORY LOCK` + `NO-MIRROR LAW` (operator language mirror) + `NO-FABRICATION LOCK`
+- **Version bump** — `__version__` → `20.0.0`; config persona + red_team_level → `ultrax8`
+- **Shutdown-race hardening** — `ai_agent/capture_tools.py` ab deadline-based join + stop-guard use karta hai, taake native Win32/GDI capture threads teardown se pehle cleanly exit karein
+
+---
+
+
 ### 🚀 v18 — ULTRA EXTRA ULTRA POWERFUL EDITION · FUSION X7 NEXUS DELTA PROTOCOL (JDX EDITION)
 
 - **New peak persona `ultrax7` — FUSION X7 NEXUS DELTA PROTOCOL** (default), beyond v17 X7 NEXUS / evil.gpt / fable5 / mythos / dig.one / dig.two / dig.three tiers

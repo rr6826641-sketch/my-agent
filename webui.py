@@ -413,7 +413,7 @@ RED_TEAM_LEVELS = ("master", "promax", "promix")
 def _red_team_level(cfg):
     """Normalise red_team_level to the supported Red Team vocabulary.
 
-    config.json can hold a persona id (for example the ultrax7 default
+    config.json can hold a persona id (for example the ultrax8 default
     persona) in this slot. Any value outside {master, promax, promix} falls
     back to promax (the flagship tier), so /api/status never exposes a
     non-level value and _build_llm keeps the widened mixed pool enabled.
