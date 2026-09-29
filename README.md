@@ -161,7 +161,7 @@ copy .env.example .env
 | `read_file` | Text file parho |
 | `write_file` | File likho (create/overwrite) |
 | `list_files` | Directory list karo |
-| `web_search` | DuckDuckGo se search (bina API key) |
+| `web_search` | Web search — **Jina AI** priority backend (`s.jina.ai`) + DuckDuckGo keyless fallback |
 | `open_url` | Webpage fetch karke parho |
 | `remember` | Memory mein fact save karo |
 | `recall` | Memory se facts nikalo |
@@ -202,6 +202,9 @@ copy .env.example .env
 | `extract_links` | Page ke links nikalo |
 | `tech_detect` | Server/CMS/framework detect karo |
 | `url_status` | Multiple URLs ke status codes |
+| `jina_search` | **Jina AI** neural web search (`s.jina.ai`) — ranked, structured results |
+| `jina_read` | **Jina Reader** (`r.jina.ai`) — kisi bhi URL ko clean LLM-ready markdown me (JS/cookie-wall/anti-bot bypass) |
+| `jina_status` | Jina provider status (key presence + endpoints) |
 
 ### Network
 | Tool | Kya karta hai |
@@ -514,6 +517,19 @@ Groq ko *primary* provider banane ke liye Settings mein
 rakho aur `.env` ka `AGENT_API_KEY` usi key se replace karo.
 
 ## ✅ Naya kya hai (HackerAI-style upgrade)
+
+### 🚀 v22 — Jina AI integration · neural web search + LLM-ready reader
+
+Add-only upgrade (`ai_agent/tools/jina.py`) — **kuch bhi delete/replace nahi kiya**.
+
+- **Neural web search** — `jina_search` (`s.jina.ai`): `web_search` ke andar backend **#0 (priority)** jab `JINA_API_KEY` set ho; DuckDuckGo keyless chain fallback bana rehta hai (har tool jo `search_web` se jaata hai auto-upgrade).
+- **Reader** — `jina_read` (`r.jina.ai`): kisi bhi URL ko clean, LLM-ready markdown me convert karta hai; `fetch_url` block (401/403/429/503) ya JS-only page par automatically Jina Reader par fallback karta hai (`"via": "jina-reader"`).
+- **Status** — `jina_status`: key presence + endpoints report karta hai.
+- **Registry** — `jina_search` / `jina_read` / `jina_status` registered (total ab **331 tools**).
+- **Config** — `.env` me `JINA_API_KEY`; `.env.example` me documented (`jina_your_key_here`).
+- Jina call fail hone par non-fatal: structured `{error, results: []}` return hota hai aur DuckDuckGo chain continue karti hai (agent loop crash nahi hota).
+
+---
 
 ### 🚀 v21 — ULTRA OPS PACK · coverage + chain-quality + evidence + reliability
 

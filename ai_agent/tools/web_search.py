@@ -21,6 +21,15 @@ from urllib.parse import parse_qs, quote_plus, urlparse
 
 import requests
 
+try:  # Jina AI neural search (keyed, highest quality) — optional add-on
+    from .jina import jina_available, jina_search  # type: ignore
+except Exception:  # pragma: no cover - jina module is optional
+    def jina_available() -> bool:  # type: ignore
+        return False
+
+    def jina_search(query, max_results=8):  # type: ignore
+        return {"error": "jina module unavailable", "results": []}
+
 try:  # preferred: current `ddgs` package (multi-engine backends)
     from ddgs import DDGS  # type: ignore
 except ImportError:
@@ -232,6 +241,19 @@ def search_web(query: str, max_results: int = 5) -> dict:
         return out
 
     errors = []
+    # 0) Jina AI neural search (used first when JINA_API_KEY is configured)
+    if jina_available():
+        try:
+            jres = jina_search(query, max_results)
+            if jres.get("results"):
+                out = {"query": query, "backend": "jina",
+                       "count": jres.get("count", len(jres["results"])),
+                       "results": jres["results"]}
+                _cache_put(cache_key, out)
+                return dict(out)
+            errors.append("jina: %s" % jres.get("error", "no results"))
+        except Exception as exc:
+            errors.append("jina: %s" % exc)
     # 1) library backend
     try:
         results = _ddgs_search(query, max_results)

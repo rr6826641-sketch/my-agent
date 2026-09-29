@@ -88,6 +88,10 @@ from .cpe_match import (
     tool_cpe_nuclei_scan, tool_cpe_template_index,
 )
 from .web_fetch import fetch_url
+from .jina import (
+    tool_jina_search, tool_jina_read, tool_jina_status,
+    jina_search, jina_read, jina_available,
+)
 from .reasoning import tool_plan_task, tool_reason, tool_reflect
 from .search import (
     tool_generate_queries, tool_web_search_v2, tool_research,
@@ -864,6 +868,36 @@ def create_tools(memory, knowledge=None, institutional=None,
                              "max_results": {"type": "integer", "default": 6}},
               "required": ["query"]},
              lambda query="", max_results=6: tool_web_search(query, int(max_results or 6))),
+        Tool("jina_search",
+             "Neural web search via Jina AI (s.jina.ai). Returns ranked, "
+             "structured results (title, url, snippet) with higher quality "
+             "and fewer blocks than keyless engines. Requires JINA_API_KEY "
+             "in .env. This is the priority backend used automatically by "
+             "web_search/research when the key is present.",
+             {"type": "object",
+              "properties": {"query": _str_prop("search query"),
+                             "max_results": {"type": "integer", "default": 8,
+                                             "description": "results to return (1-20)"}},
+              "required": ["query"]},
+             lambda query="", max_results=8: tool_jina_search(query, int(max_results or 8))),
+        Tool("jina_read",
+             "Read any web page as clean LLM-ready markdown via Jina AI "
+             "Reader (r.jina.ai). Handles JS-rendered pages, cookie walls "
+             "and anti-bot blocks that break plain HTTP fetches. Works with "
+             "or without JINA_API_KEY (keyless: 20 RPM). Use when fetch_url "
+             "returns an empty/JS-only shell or is blocked (403/429).",
+             {"type": "object",
+              "properties": {"url": _str_prop("URL to read (https://...)"),
+                             "max_length": {"type": "integer", "default": 8000,
+                                             "description": "max characters of "
+                                             "markdown to return"}},
+              "required": ["url"]},
+             lambda url="", max_length=8000: tool_jina_read(url, int(max_length or 8000))),
+        Tool("jina_status",
+             "Report Jina AI integration status: whether JINA_API_KEY is "
+             "configured, endpoints in use, and availability.",
+             {"type": "object", "properties": {}, "required": []},
+             lambda: tool_jina_status()),
         Tool("fetch_url",
              "Fetch a web page and extract its main readable text as clean "
              "plain text (scripts, CSS, navigation and ad junk removed, "

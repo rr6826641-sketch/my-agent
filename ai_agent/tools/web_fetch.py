@@ -29,6 +29,15 @@ from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
 
+try:  # Jina AI Reader fallback for JS-rendered / anti-bot pages
+    from .jina import jina_available, jina_read  # type: ignore
+except Exception:  # pragma: no cover
+    def jina_available() -> bool:  # type: ignore
+        return False
+
+    def jina_read(url, max_length=8000):  # type: ignore
+        return {"status": "error", "error": "jina unavailable", "text": ""}
+
 REQUEST_TIMEOUT = 20          # seconds per HTTP request
 MAX_DOWNLOAD_BYTES = 3_000_000  # hard cap on response body (3 MB)
 DEFAULT_MAX_LENGTH = 4000     # default text cap (keeps tool output token-safe)
@@ -184,6 +193,31 @@ def _clean_text(raw: str) -> str:
 # Public tool API
 # --------------------------------------------------------------------------
 
+def _jina_page(url: str, max_length: int, http_status=None,
+               content_type=None) -> dict | None:
+    """Fetch via Jina Reader (r.jina.ai) when the direct fetch failed or
+    returned a JS-only shell. Returns a fetch_url-shaped dict or None."""
+    try:
+        jr = jina_read(url, max_length=max_length)
+    except Exception:
+        return None
+    if jr.get("status") != "ok" or not (jr.get("text") or "").strip():
+        return None
+    return {
+        "url": url,
+        "final_url": url,
+        "status": "ok",
+        "http_status": jr.get("http_status", http_status),
+        "content_type": content_type or "text/markdown;source=jina-reader",
+        "title": jr.get("title", ""),
+        "text": jr["text"],
+        "truncated": jr.get("truncated", False),
+        "original_length": jr.get("original_length"),
+        "elapsed_ms": jr.get("elapsed_ms", 0),
+        "via": "jina-reader",
+    }
+
+
 def fetch_url(url: str, max_length: int = DEFAULT_MAX_LENGTH) -> dict:
     """Fetch a web page and extract readable main text.
 
@@ -243,6 +277,10 @@ def fetch_url(url: str, max_length: int = DEFAULT_MAX_LENGTH) -> dict:
                 429: "rate limited (429)",
                 500: "server error (500)", 502: "bad gateway (502)",
                 503: "service unavailable (503)"}
+        if status in (401, 403, 429, 503) and jina_available():
+            fb = _jina_page(url, max_length, status, ctype)
+            if fb:
+                return fb
         return _error(url, msgs.get(status, "HTTP error %d" % status),
                       http_status=status,
                       content_type=ctype)
@@ -276,6 +314,9 @@ def fetch_url(url: str, max_length: int = DEFAULT_MAX_LENGTH) -> dict:
                           http_status=status)
 
     if not text.strip():
+        fb = _jina_page(url, max_length, status, ctype)
+        if fb:
+            return fb
         return _error(url, "no readable text extracted (page may be JS-rendered)",
                       http_status=status, content_type=ctype, title=title)
 
