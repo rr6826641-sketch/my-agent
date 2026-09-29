@@ -1,3 +1,20 @@
+## [2026-09-29] v22.1 - fix: cmd/terminal flash + duplicate instance + keylog log-spam
+
+- fix(myagent_app): single-instance mutex ab ctypes.WinDLL("kernel32",
+  use_last_error=True) use karta hai. Plain windll ke saath
+  ctypes.get_last_error() hamesha 0 deta tha, is liye ERROR_ALREADY_EXISTS
+  (183) kabhi detect nahi hota tha aur har launch nayi instance banati thi
+  (app.log: 8080 -> 8081 -> 8082 -> 8083 + har baar naya browser tab/tray).
+- fix(terminal): tool_start_session() Windows par CREATE_NO_WINDOW add karta
+  hai (CREATE_NEW_PROCESS_GROUP ke saath OR), is liye shell=True (cmd.exe)
+  ab har agent command par console window flash nahi karta.
+- fix(capture_tools): KeylogHook message pump PeekMessageW ko try/except
+  (0.5s backoff) me wrap karta hai. Pehle TypeError ('NoneType' object
+  cannot be interpreted as an integer) _hub.log me 8778 baar (3.6 MB)
+  tight failure-loop ban kar repeat ho raha tha.
+- note: dist/MyAgentUltra.exe (2026-09-22) in source fixes se purana hai;
+  frozen build me asar ke liye EXE rebuild zaroori hai.
+
 ## [2026-09-16] v14.3 - FUSION X6 PHANTOM PROTOCOL - CUSTOM EDITION (personas_custom.txt)
 
 - feat(persona): personas_custom.txt v12 ULTRA -> v15 FUSION X6 CUSTOM EDITION

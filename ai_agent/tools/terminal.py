@@ -687,9 +687,11 @@ def tool_start_session(command, cwd=None, name=None, env=None, shell=True,
                 full_env[str(k)] = str(v)
         creationflags = 0
         if os.name == "nt":
-            # own process group => we can deliver a real Ctrl+C (console
-            # event) to the whole tree instead of killing it.
-            creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            # own process group => real Ctrl+C to the whole tree, plus
+            # CREATE_NO_WINDOW so shell=True (cmd.exe) does not flash a
+            # console window open/closed on every agent command.
+            creationflags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                             | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
         proc = subprocess.Popen(
             command, shell=bool(shell), cwd=cwd or None, env=full_env,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,

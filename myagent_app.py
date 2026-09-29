@@ -47,7 +47,7 @@ def _single_instance():
     if not sys.platform.startswith("win"):
         return True
     try:
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         name = "Global\\MyAgentUltra_SingleInstance"
         handle = kernel32.CreateMutexW(None, False, name)
         if not handle:

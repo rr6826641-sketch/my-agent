@@ -430,8 +430,16 @@ class KeylogHook(_Base):
             # blocking GetMessageW() (which ignored stop() until teardown).
             while not self._stop.is_set():
                 if msg is not None:
-                    if user32.PeekMessageW(ctypes.byref(msg), None, 0, 0,
-                                           _PM_REMOVE):
+                    try:
+                        got = user32.PeekMessageW(ctypes.byref(msg), None, 0, 0,
+                                                  _PM_REMOVE)
+                    except Exception:
+                        # Never let one pump hiccup spam the log in a tight
+                        # loop (8778 identical tracebacks were observed).
+                        # Slow down and retry instead of hammering.
+                        time.sleep(0.5)
+                        continue
+                    if got:
                         if msg.message == _WM_QUIT:
                             break
                         user32.TranslateMessage(ctypes.byref(msg))
