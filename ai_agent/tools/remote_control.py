@@ -85,6 +85,8 @@ def _run_cmd(command, timeout=60, cwd=None):
         proc = subprocess.run(
             command, shell=True, cwd=cwd or None, timeout=int(timeout or 60),
             capture_output=True, text=True, errors="replace",
+            creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+                           if os.name == "nt" else 0),
         )
         out = (proc.stdout or "") + (proc.stderr or "")
         rc = proc.returncode

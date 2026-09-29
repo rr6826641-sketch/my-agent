@@ -1,3 +1,16 @@
+## [2026-09-29] v22.2 - fix: global CREATE_NO_WINDOW - koi bhi tool ab cmd window flash nahi karta
+
+- fix(winproc): naya ai_agent/_winproc.py - Windows par subprocess.Popen.__init__
+  ko patch karta hai taaki har child process (cmd.exe, nslookup, tasklist,
+  docker, netstat, ...) CREATE_NO_WINDOW ke saath spawn ho. Windowed app
+  (frozen EXE / pythonw) me pehle har subprocess call par console window flash
+  hoti thi; ab koi flash nahi. Caller apna creationflags deta hai to wahi
+  respect hota hai (pty/conpty, DETACHED_PROCESS daemons unaffected).
+- fix(terminal): tool_run_terminal() ka Popen bhi CREATE_NO_WINDOW ke saath
+  (v22.1 me sirf tool_start_session() fix hua tha).
+- fix(remote_control): _run_cmd() ka subprocess.run bhi CREATE_NO_WINDOW ke saath.
+- note: ye fix v22.1 ke saath hi EXE rebuild me asar karega.
+
 ## [2026-09-29] v22.1 - fix: cmd/terminal flash + duplicate instance + keylog log-spam
 
 - fix(myagent_app): single-instance mutex ab ctypes.WinDLL("kernel32",

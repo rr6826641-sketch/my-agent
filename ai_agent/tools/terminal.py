@@ -928,6 +928,8 @@ def tool_run_terminal(command, timeout=60, max_output=20000):
         proc = subprocess.Popen(
             command, shell=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            creationflags=(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                           | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)),
         )
         register_proc(proc)
         out_parts, err_parts = [], []
