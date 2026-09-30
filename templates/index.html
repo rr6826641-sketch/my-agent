@@ -260,8 +260,17 @@
         <div class="settings-grid">
           <div class="panel">
             <h4>LLM Provider</h4>
+            <label>Provider
+              <select id="set-provider">
+                <option value="">Auto-detect (route by API key prefix)</option>
+                <option value="openai">OpenAI · sk-… → api.openai.com/v1</option>
+                <option value="groq">Groq · gsk_… → api.groq.com/openai/v1</option>
+                <option value="openrouter">OpenRouter · sk-or-… → openrouter.ai/api/v1</option>
+                <option value="ollama">Ollama / Local LLM → localhost:11434/v1</option>
+              </select>
+            </label>
             <label>Base URL<input type="text" id="set-url" placeholder="https://openrouter.ai/api/v1"></label>
-            <label>API Key<input type="password" id="set-key" placeholder="sk-…"></label>
+            <label>API Key<input type="password" id="set-key" placeholder="sk-… (gsk_… for Groq)"></label>
             <label>Model
               <select id="set-model"></select>
             </label>

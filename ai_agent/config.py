@@ -56,6 +56,93 @@ ENV_MAP = {
 _PLACEHOLDER_KEYS = {"", "sk-your-key-here", "your-key-here", "REPLACE_WITH_YOUR_KEY"}
 
 
+# ---------------------------------------------------------------------------
+# Dynamic provider routing (v2 fix: API key / base URL mismatch)
+# ---------------------------------------------------------------------------
+# A key prefix must always match its own endpoint. A Groq key (gsk_…) left on
+# https://api.openai.com/v1 returns "API 401: Incorrect API key provided" on
+# every call and the run gets trapped retrying a broken route. This table
+# keeps the key and its endpoint in sync on every config load and save.
+PROVIDER_BASE_URLS = {
+    "groq": "https://api.groq.com/openai/v1",
+    "openai": "https://api.openai.com/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "ollama": "http://localhost:11434/v1",
+}
+
+
+def detect_provider(api_key):
+    """Return the provider implied by an API key's prefix ('' if unknown)."""
+    key = (api_key or "").strip()
+    if key.startswith("gsk_"):
+        return "groq"
+    if key.startswith("sk-or-"):
+        return "openrouter"
+    if key.startswith("sk-"):
+        return "openai"
+    return ""
+
+
+def detect_url_provider(base_url):
+    """Return the provider a base_url belongs to ('' if custom/unknown)."""
+    u = (base_url or "").strip().lower()
+    if "groq.com" in u:
+        return "groq"
+    if "openai.com" in u:
+        return "openai"
+    if "openrouter.ai" in u:
+        return "openrouter"
+    if "localhost:11434" in u or "127.0.0.1:11434" in u:
+        return "ollama"
+    return ""
+
+
+def apply_provider_routing(cfg):
+    """Keep the API key and base_url in sync (config.json loader safety net).
+
+    Routing rules:
+    - key starts with 'gsk_'  -> https://api.groq.com/openai/v1
+    - key starts with 'sk-'   -> https://api.openai.com/v1
+      (sk-or-… is an OpenRouter key and stays on openrouter.ai)
+    - Ollama / local LLM URL  -> http://localhost:11434/v1
+
+    A URL that belongs to a different known provider than the key (the
+    reported 401 case) is auto-corrected to the key's own endpoint. Custom
+    proxy URLs are only replaced when they are empty. Returns cfg.
+
+    Priority: an explicit 'provider' selection saved from the Settings UI
+    (e.g. Ollama / local LLM) wins; otherwise the key prefix routes.
+    """
+    explicit = (cfg.get("provider") or "").strip().lower()
+    if explicit == "ollama":
+        # Ollama / local LLM needs no key - explicit selection wins even
+        # when an old cloud key is still present in .env.
+        cfg["base_url"] = PROVIDER_BASE_URLS["ollama"]
+        return cfg
+    if explicit in ("openai", "groq", "openrouter"):
+        # Explicit cloud selection is honoured, EXCEPT when the effective
+        # key clearly belongs to another cloud provider: the credential
+        # must be able to authenticate against the endpoint, otherwise
+        # every call 401s. gsk_… always lands on Groq.
+        det = detect_provider(cfg.get("api_key"))
+        cfg["base_url"] = PROVIDER_BASE_URLS[det or explicit]
+        return cfg
+    provider = detect_provider(cfg.get("api_key"))
+    url = (cfg.get("base_url") or "").strip()
+    if provider:
+        routed = PROVIDER_BASE_URLS[provider]
+        url_prov = detect_url_provider(url)
+        if not url or (url_prov and url_prov != provider):
+            # Empty URL, or definite mismatch (e.g. Groq key on api.openai.com)
+            # -> route to the endpoint the key actually belongs to.
+            cfg["base_url"] = routed
+        return cfg
+    # No recognised key prefix: keep Ollama/local selection canonical.
+    if detect_url_provider(url) == "ollama" and url != PROVIDER_BASE_URLS["ollama"]:
+        cfg["base_url"] = PROVIDER_BASE_URLS["ollama"]
+    return cfg
+
+
 def _parse_env_file(path):
     """Minimal .env parser (fallback when python-dotenv is not installed)."""
     out = {}
@@ -163,6 +250,11 @@ def load_config(args=None):
         val = os.environ.get(var) or env.get(var)
         if val:
             cfg[key] = val
+
+    # 2.5 Dynamic provider routing: the key prefix must match the endpoint
+    # (gsk_ -> Groq, sk- -> OpenAI, ollama -> localhost:11434). Fixes the
+    # "API 401: Incorrect API key provided" mismatch on every load.
+    cfg = apply_provider_routing(cfg)
 
     # 3. CLI arguments (highest priority, never persisted)
     if args:

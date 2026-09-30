@@ -2085,12 +2085,74 @@ function updateQuickPickActive() {
   });
 }
 
+/* ---- LLM provider routing: API key prefix <-> base URL validation ----
+   A Groq key (gsk_…) pointed at api.openai.com returns 401 on every call;
+   the server auto-routes the URL, the UI mirrors that and warns inline. */
+const PROVIDER_URLS = {
+  groq: "https://api.groq.com/openai/v1",
+  openai: "https://api.openai.com/v1",
+  openrouter: "https://openrouter.ai/api/v1",
+  ollama: "http://localhost:11434/v1",
+};
+
+function detectKeyProvider(key) {
+  const k = (key || "").trim();
+  if (k.startsWith("gsk_")) return "groq";
+  if (k.startsWith("sk-or-")) return "openrouter";
+  if (k.startsWith("sk-")) return "openai";
+  return "";
+}
+
+function detectUrlProvider(url) {
+  const u = (url || "").trim().toLowerCase();
+  if (u.includes("groq.com")) return "groq";
+  if (u.includes("openai.com")) return "openai";
+  if (u.includes("openrouter.ai")) return "openrouter";
+  if (u.includes("localhost:11434") || u.includes("127.0.0.1:11434")) return "ollama";
+  return "";
+}
+
+// live hint: as the user types a key, show which URL it will route to and
+// flag a mismatched Base URL immediately (before saving).
+$("#set-key").addEventListener("input", () => {
+  const msg = $("#set-msg");
+  const det = detectKeyProvider($("#set-key").value);
+  const providerSel = $("#set-provider").value;
+  if (providerSel === "ollama") {
+    msg.textContent = "Ollama / local LLM → URL routes to " + PROVIDER_URLS.ollama + " (no API key needed)";
+    return;
+  }
+  if (!det) { return; }
+  const urlProv = detectUrlProvider($("#set-url").value);
+  if (urlProv && urlProv !== det) {
+    msg.textContent = "⚠️ " + det + " key with a " + urlProv + " URL — will be auto-routed to " + PROVIDER_URLS[det];
+  } else if (!$("#set-url").value.trim()) {
+    $("#set-url").value = PROVIDER_URLS[det];
+    msg.textContent = "ℹ️ " + det + " key detected — Base URL set to " + PROVIDER_URLS[det];
+  } else {
+    msg.textContent = "✓ " + det + " key matches the Base URL";
+  }
+});
+
+// provider select drives the URL field (Ollama needs no key)
+$("#set-provider").addEventListener("change", () => {
+  const sel = $("#set-provider").value;
+  const msg = $("#set-msg");
+  if (sel && PROVIDER_URLS[sel]) {
+    $("#set-url").value = PROVIDER_URLS[sel];
+    msg.textContent = sel === "ollama"
+      ? "ℹ️ Ollama / local LLM → " + PROVIDER_URLS.ollama + " (API key not required)"
+      : "ℹ️ Provider " + sel + " → Base URL " + PROVIDER_URLS[sel];
+  }
+});
+
 async function loadSettings() {
   const s = await fetchJSON("/api/settings");
   // The key itself is never sent back - only whether it exists in .env.
   $("#set-key").value = "";
   $("#set-key").placeholder = s.has_key ? "✓ API key is saved in .env (leave blank to keep it)" : "sk-…  (no key set — will be saved to .env)";
   $("#set-url").value = s.base_url || "";
+  $("#set-provider").value = s.provider || "";
   fillModelSelect(s.catalog);
   renderQuickPicks(s.catalog);
   $("#set-model").value = s.auto ? "auto" : (s.model || "auto");
@@ -2109,13 +2171,30 @@ $("#set-auto").addEventListener("change", () => {
 $("#set-model").addEventListener("change", updateQuickPickActive);
 $("#set-save").addEventListener("click", async () => {
   const msg = $("#set-msg");
-  msg.textContent = "saving…";
+  // Client-side validation: catch an invalid key/URL pair immediately.
+  const key = $("#set-key").value.trim();
+  const keyProv = detectKeyProvider(key);
+  const urlProv = detectUrlProvider($("#set-url").value);
+  const providerSel = $("#set-provider").value;
+  let pre = "";
+  if (providerSel === "ollama") {
+    $("#set-url").value = PROVIDER_URLS.ollama;
+  } else if (keyProv) {
+    if (urlProv && urlProv !== keyProv) {
+      pre = "⚠️ " + keyProv + " key with a " + urlProv + " URL — auto-routed to " + PROVIDER_URLS[keyProv] + ". ";
+      $("#set-url").value = PROVIDER_URLS[keyProv];
+    } else if (!$("#set-url").value.trim()) {
+      $("#set-url").value = PROVIDER_URLS[keyProv];
+    }
+  }
+  msg.textContent = pre + "saving…";
   const res = await fetch("/api/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      api_key: $("#set-key").value.trim(),
+      api_key: key,
       base_url: $("#set-url").value.trim(),
+      provider: providerSel,
       model: $("#set-model").value.trim(),
       auto: $("#set-auto").checked,
       mock: $("#set-mock").checked,
@@ -2123,12 +2202,21 @@ $("#set-save").addEventListener("click", async () => {
       max_iterations: parseInt($("#set-iter").value, 10) || 12,
     }),
   });
+  let data = null;
+  try { data = await res.json(); } catch (e) {}
   if (res.ok) {
-    msg.textContent = "✅ saved — agent reloaded";
-    setTimeout(() => (msg.textContent = ""), 2500);
+    if (data && data.warning) {
+      // keep the warning visible so the mismatch is not missed
+      msg.textContent = "✅ saved — " + data.warning;
+      setTimeout(() => (msg.textContent = ""), 8000);
+    } else {
+      msg.textContent = "✅ saved — agent reloaded";
+      setTimeout(() => (msg.textContent = ""), 2500);
+    }
+    loadSettings().catch(() => {});
     refreshStatus();
   } else {
-    msg.textContent = "❌ failed to save";
+    msg.textContent = "❌ failed to save" + (data && data.error ? ": " + data.error : "");
   }
 });
 

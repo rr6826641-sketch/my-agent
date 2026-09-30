@@ -26,7 +26,9 @@ import uuid
 from flask import (Flask, jsonify, render_template, request, Response,
                    send_file, stream_with_context)
 
-from ai_agent.config import (PROJECT_DIR, load_config, config_status, save_env_key)
+from ai_agent.config import (PROJECT_DIR, load_config, config_status, save_env_key,
+                            apply_provider_routing, detect_provider,
+                            detect_url_provider, PROVIDER_BASE_URLS)
 from ai_agent.core import Agent, IntentReformulator, RunCancelled
 from ai_agent.core.event_stream import hub
 from ai_agent.llm import (MockClient, OpenAIClient,
@@ -486,6 +488,23 @@ def _build_agent(cfg):
                   intent_reformulator=IntentReformulator(),
                   confirm_terminal=False)  # auto mode: no stdin prompts in UI
     return agent, memory
+
+
+def _clear_active_chat_state():
+    """Stop in-flight chat runs after an API configuration update.
+
+    Without this, a run started against the old (401ing / mismatched)
+    endpoint keeps cycling its failover-retry chain against the broken
+    route and failed requests stay trapped in an execution retry loop.
+    Sets every stop event and drops the run registry (same mechanism as
+    the Stop button), so pending steps abort instead of retrying.
+    """
+    with _run_lock:
+        events = list(_active_runs.values())
+        _active_runs.clear()
+    for ev in events:
+        ev.set()
+    return len(events)
 
 
 def _reload_state(mock_override=None):
@@ -1874,8 +1893,12 @@ def api_settings():
     cfg = _current_cfg()
     auto = bool(cfg.get("auto")) or (cfg.get("model") == "auto")
     # The key itself is never sent back to the UI - only whether it exists.
+    # provider: which endpoint the saved key routes to (drives the Settings
+    # UI validation hints and the provider preselect dropdown).
     return jsonify({
         "has_key": bool(cfg.get("api_key")),
+        "provider": cfg.get("provider") or detect_provider(cfg.get("api_key")),
+        "provider_urls": PROVIDER_BASE_URLS,
         "base_url": cfg.get("base_url", ""),
         "model": "auto" if auto else cfg.get("model", ""),
         "auto": auto,
@@ -1890,22 +1913,93 @@ def api_settings():
 
 @app.route("/api/settings", methods=["POST"])
 def api_settings_save():
+    """Persist LLM provider settings with dynamic provider routing.
+
+    The API key prefix always wins the endpoint routing decision so a
+    Groq key (gsk_…) can never keep pointing at api.openai.com (401):
+    - gsk_…          -> https://api.groq.com/openai/v1
+    - sk-…           -> https://api.openai.com/v1
+    - Ollama/local   -> http://localhost:11434/v1 (no key required)
+    A mismatched key/URL pair is auto-routed AND reported back as a
+    `warning` so the Settings UI can surface it immediately.
+    """
     data = request.get_json(silent=True) or {}
     api_key = (data.get("api_key") or "").strip()
     base_url = (data.get("base_url") or "").strip()
+    provider_sel = (data.get("provider") or "").strip().lower()
     model = (data.get("model") or "").strip()
     auto = bool(data.get("auto")) or (model == "auto")
     mock = bool(data.get("mock"))
     red_team_mode = bool(data.get("red_team_mode"))
     mi = data.get("max_iterations")
 
+    if provider_sel and provider_sel not in PROVIDER_BASE_URLS:
+        return jsonify({"ok": False,
+                        "error": "unknown provider: %s" % provider_sel}), 400
+
     patch = {"mock": mock, "auto": auto,
              "red_team_mode": red_team_mode}
+    warnings = []
+
+    # ---- Dynamic provider routing: key prefix must match the endpoint ----
+    if provider_sel == "ollama":
+        # Ollama / Local LLM needs no key: force the local endpoint.
+        base_url = PROVIDER_BASE_URLS["ollama"]
+        if detect_provider(api_key):
+            warnings.append("Ollama/local LLM selected - an API key is not "
+                            "required and the URL was routed to %s."
+                            % base_url)
+    elif provider_sel in ("openai", "groq", "openrouter"):
+        # Explicit provider selection: validate the key against it.
+        det = detect_provider(api_key)
+        if api_key and det and det != provider_sel:
+            warnings.append("⚠️ %s key detected but provider '%s' selected - "
+                            "routed to the key's own endpoint %s to avoid "
+                            "401 errors."
+                            % (det, provider_sel, PROVIDER_BASE_URLS[det]))
+            provider_sel = det
+        base_url = PROVIDER_BASE_URLS[provider_sel]
+    elif api_key:
+        det = detect_provider(api_key)
+        if det:
+            routed = PROVIDER_BASE_URLS[det]
+            url_prov = detect_url_provider(base_url)
+            if base_url and url_prov and url_prov != det:
+                warnings.append("⚠️ %s API key detected with a %s base URL "
+                                "(%s) - auto-routed to %s. The old pair "
+                                "returned 401 'Incorrect API key provided'."
+                                % (det, url_prov, base_url, routed))
+            elif base_url and not url_prov and \
+                    base_url.rstrip("/") != routed.rstrip("/"):
+                warnings.append("⚠️ %s API key detected - custom base URL "
+                                "%s was replaced with %s. Clear the key "
+                                "field to keep a custom proxy URL."
+                                % (det, base_url, routed))
+            base_url = routed
+        elif base_url and detect_url_provider(base_url):
+            # Unrecognised key format against a known cloud endpoint.
+            warnings.append("⚠️ Key format '%s…' is not recognised for a %s "
+                            "endpoint - the provider may reject it with 401."
+                            % (api_key[:6], detect_url_provider(base_url)))
+    else:
+        # No new key: validate the already-saved key against the typed URL.
+        det = detect_provider(_current_cfg().get("api_key"))
+        url_prov = detect_url_provider(base_url)
+        if det and base_url and url_prov and url_prov != det:
+            routed = PROVIDER_BASE_URLS[det]
+            warnings.append("⚠️ Saved key is a %s key but the base URL is "
+                            "%s (%s) - corrected to %s to avoid 401 errors."
+                            % (det, base_url, url_prov, routed))
+            base_url = routed
+
     if api_key:
         # Security: API keys go ONLY into .env, never config.json.
         ok, msg = save_env_key(api_key)
         if not ok:
             return jsonify({"ok": False, "error": msg}), 500
+    # Remember the explicit provider selection ("" = auto-detect by key
+    # prefix) so load_config can honour e.g. Ollama/local without a key.
+    patch["provider"] = provider_sel
     if base_url:
         patch["base_url"] = base_url
     # auto mode stores "auto" as the model so it survives reloads.
@@ -1922,8 +2016,22 @@ def api_settings_save():
         patch["max_iterations"] = mi
     _save_cfg(patch)
 
-    _reload_state(mock_override=mock)
-    return jsonify(_status())
+    # Clean up active chat state: stop any run still cycling against the
+    # old endpoint so failed requests cannot stay trapped in a retry loop.
+    stopped = _clear_active_chat_state()
+
+    cfg = _reload_state(mock_override=mock)
+    # Double-guard: the loader re-applies key<->URL routing in case a
+    # stale AGENT_BASE_URL from .env survived the save.
+    apply_provider_routing(cfg)
+    resp = _status()
+    resp["ok"] = True
+    resp["warning"] = " ".join(warnings)
+    resp["stopped_runs"] = stopped
+    if stopped:
+        resp["warning"] = (resp["warning"] + " " if resp["warning"] else "") + \
+            "(%d in-flight run(s) stopped and chat state reset)" % stopped
+    return jsonify(resp)
 
 
 # --------------------------------------------------------------------------
