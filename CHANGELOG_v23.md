@@ -19,3 +19,4 @@
 ## Verified
 - Jina AI integration intact (commit 685e2b3): `ai_agent/tools/jina.py` (s.jina.ai search + r.jina.ai reader), key in `.env` (git-ignored, not leaked)
 - ULTRA-MAX persona wiring: `personas.py::get_custom_text()` reads full `personas_custom.txt` -> runtime auto-inclusion confirmed
+- Host test run (2026-09-30, Python 3.14.6, ~0.4GB free RAM): `py -m pytest test_redteam_mode.py test_ultra_ops.py -q` -> **41 passed in 4.31s** (red-team regression + ultra ops pack, zero failures)
