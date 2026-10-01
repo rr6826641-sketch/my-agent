@@ -2629,7 +2629,7 @@ body{
      in app.js); position:relative + flex-shrink:0 keeps them
      rendering above the dock inside the scroll area.
    ============================================================ */
-#view-chat{
+#view-chat.active{
   display:flex; flex-direction:column; justify-content:space-between;
 }
 #view-chat .composer,
@@ -3327,3 +3327,15 @@ input, select, textarea{
   animation:ccBlinkTxt .9s steps(2) infinite;
   text-shadow:0 0 8px rgba(255,39,64,.95);
 }
+
+
+/* ============================================================
+   v24 NAV ROUTER HARDENING — exactly one full-screen view at a time
+   (appended last so it wins the cascade).
+   - every top-level .view fills the main pane and scrolls internally
+   - a .view that is not .active can never be painted (kills the old
+     unconditional #view-chat display:flex overlap bug for good)
+   ============================================================ */
+.main > .view{flex:1 1 auto; min-height:0; min-width:0; width:100%}
+.view:not(.active){display:none !important}
+#view-chat:not(.active){display:none !important}
