@@ -3339,3 +3339,52 @@ input, select, textarea{
 .main > .view{flex:1 1 auto; min-height:0; min-width:0; width:100%}
 .view:not(.active){display:none !important}
 #view-chat:not(.active){display:none !important}
+
+/* ============================================================
+   v25 SETTINGS FULL-PAGE REDESIGN
+   - Settings = dedicated full-page panel: sticky multi-tab bar,
+     panes scroll inside the view (no page-level scroll, no
+     overlap with the chat composer or the sidebar Task Board)
+   - env warning banner: compact alert with a dismiss button
+   - LLM Providers: dedicated pane with a clean card grid
+   (appended last so it wins the cascade)
+   ============================================================ */
+
+/* ---------- settings view: full-page frame ---------- */
+#view-settings{padding-top:0; padding-bottom:0}
+
+#view-settings .settings-tabs{
+  position:sticky; top:0; z-index:6;
+  margin:0 -18px 4px;                       /* bleed over the view's horizontal padding */
+  padding:14px 18px 12px;
+  background:linear-gradient(180deg, rgba(10,13,24,.98) 60%, rgba(10,13,24,.9) 100%);
+  backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--stroke);
+  border-radius:0;
+}
+
+#view-settings .settings-pane{min-height:0}
+
+/* cards fit cleanly: never overflow their track */
+.settings-grid{gap:14px}
+.settings-grid .panel{min-width:0; overflow-wrap:break-word}
+.settings-grid .panel select,
+.settings-grid .panel input[type="text"],
+.settings-grid .panel input[type="password"]{max-width:100%}
+.quick-picks{flex-wrap:wrap; max-width:100%}
+
+/* ---------- env warning banner: compact + dismissible ---------- */
+.env-banner{
+  margin:12px 18px 6px; padding:8px 10px 8px 14px;
+  font-size:12.5px; line-height:1.45;
+}
+.env-msg{flex:1 1 auto; min-width:0}
+.env-close{
+  flex:0 0 auto; width:26px; height:26px;
+  display:inline-flex; align-items:center; justify-content:center;
+  background:rgba(244,63,94,.14); color:#ffb4b4;
+  border:1px solid rgba(244,63,94,.45); border-radius:8px;
+  font-size:13px; line-height:1; cursor:pointer;
+  transition:background .15s ease, color .15s ease, box-shadow .15s ease;
+}
+.env-close:hover{background:rgba(244,63,94,.38); color:#fff; box-shadow:0 0 12px -2px rgba(244,63,94,.7)}

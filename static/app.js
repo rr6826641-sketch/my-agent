@@ -217,6 +217,7 @@ function openSettingsPane(name) {
   if (name === "reports") loadReports();
   if (name === "rpg") loadRPGView();
   if (name === "general") { loadSettings(); loadPersona(); }
+  if (name === "llm") { loadSettings(); }
   if (name === "system") loadSystem();
   if (name === "input") loadDesktopPanel();
 }
@@ -232,7 +233,7 @@ function goToSettingsPane(name) {
 }
 
 function switchView(name) {
-  if (name !== "settings" && ["tools", "memory", "reports", "rpg", "system", "input", "general"].indexOf(name) !== -1) {
+  if (name !== "settings" && ["tools", "memory", "reports", "rpg", "system", "input", "general", "llm"].indexOf(name) !== -1) {
     goToSettingsPane(name);
     return;
   }
@@ -2169,8 +2170,7 @@ $("#set-auto").addEventListener("change", () => {
   updateQuickPickActive();
 });
 $("#set-model").addEventListener("change", updateQuickPickActive);
-$("#set-save").addEventListener("click", async () => {
-  const msg = $("#set-msg");
+async function saveAgentSettings(msg) {
   // Client-side validation: catch an invalid key/URL pair immediately.
   const key = $("#set-key").value.trim();
   const keyProv = detectKeyProvider(key);
@@ -2218,7 +2218,10 @@ $("#set-save").addEventListener("click", async () => {
   } else {
     msg.textContent = "❌ failed to save" + (data && data.error ? ": " + data.error : "");
   }
-});
+}
+$("#set-save").addEventListener("click", () => saveAgentSettings($("#set-msg")));
+const saveLlmBtn = $("#set-save-llm");
+if (saveLlmBtn) saveLlmBtn.addEventListener("click", () => saveAgentSettings($("#set-msg-llm")));
 
 /* ---------------- Mouse & Keyboard Access (live input console) ---------------- */
 async function deskCall(url, payload) {
@@ -2446,16 +2449,33 @@ async function loadSystem() {
 }
 $("#sys-refresh").addEventListener("click", loadSystem);
 
+/* ---------------- env warning banner (dismissible) ---------------- */
+let envWarnDismissed = false;
+let envWarnLastText = "";
+$("#env-warn-close").addEventListener("click", () => {
+  envWarnDismissed = true;
+  const warn = $("#env-warn");
+  if (warn) warn.classList.add("hidden");
+});
+
 /* ---------------- status ---------------- */
 async function refreshStatus() {
   try {
     const s = await fetchJSON("/api/status");
     const warn = $("#env-warn");
     if (warn) {
+      const msgEl = $("#env-warn-msg");
+      const text = s.key_error ? "⚠️ " + s.key_error : "";
       if (s.key_error) {
-        warn.textContent = "⚠️ " + s.key_error;
-        warn.classList.remove("hidden");
+        // re-arm dismissal only if the error text changed since last dismiss
+        if (envWarnLastText !== text) { envWarnDismissed = false; envWarnLastText = text; }
+        if (!envWarnDismissed) {
+          if (msgEl) msgEl.textContent = text; else warn.textContent = text;
+          warn.classList.remove("hidden");
+        }
       } else {
+        envWarnDismissed = false;
+        envWarnLastText = "";
         warn.classList.add("hidden");
       }
     }

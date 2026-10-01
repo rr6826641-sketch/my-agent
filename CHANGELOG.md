@@ -1,3 +1,14 @@
+## [2026-10-01] v25.0.0 - feat: Settings full-page redesign - LLM Providers tab + dismissible .env banner
+
+- feat(settings): "LLM Providers" dedicated tab (#pane-llm) - provider/base-url/API-key/model
+  aur quick-picks General se move; apna Save & Reload button (#set-save-llm) jo shared
+  saveAgentSettings() function use karta hai. General ab Behavior + Persona rakhta hai.
+- ui(settings): sticky full-bleed tab bar, panes view ke andar scroll (no page scroll /
+  composer / Task Board overlap), card grid hardening (min-width:0, wrap).
+- fix(banner): ".env file missing" warning ab dismissible (env-warn-close) - dismissal
+  state poll-safe hai (same error wapas nahi aata, naya error re-arm karta hai).
+- detail: CHANGELOG_v25.md
+
 ## [2026-09-29] v22.2 - fix: global CREATE_NO_WINDOW - koi bhi tool ab cmd window flash nahi karta
 
 - fix(winproc): naya ai_agent/_winproc.py - Windows par subprocess.Popen.__init__
